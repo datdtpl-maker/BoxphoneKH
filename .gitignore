@@ -1,0 +1,22 @@
+# Local Env
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary & debug files
+temp/
+debug/
+*.xml
+*.png
+*.log
+
+# Exclude result text files
+shopee_results.txt
+shopee_dump.xml
+parse_results.txt
+window_dump.xml
+window_dump_new.xml

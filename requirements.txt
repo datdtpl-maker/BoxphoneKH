@@ -1,0 +1,4 @@
+pyTelegramBotAPI==4.25.0
+python-dotenv==1.0.1
+opencv-python
+numpy
