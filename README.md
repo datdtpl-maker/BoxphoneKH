@@ -41,7 +41,7 @@ Hệ thống tự động hóa điều khiển hàng loạt điện thoại Andr
 3. **Cấu hình biến môi trường (`.env`):**
    Tạo file `.env` ở thư mục gốc của dự án với nội dung:
    ```env
-   TELEGRAM_BOT_TOKEN=8659016197:AAGExbDqWKRQUuxo-d8NvNINNMP3fWxc_eQ
+   TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
    ALLOWED_USER_IDS=
    ```
    *(Khi bạn khởi chạy bot lần đầu tiên, tài khoản Telegram nào gửi tin nhắn `/start` đầu tiên sẽ được ghi nhận làm Admin duy nhất và lưu trực tiếp vào biến `ALLOWED_USER_IDS`)*.

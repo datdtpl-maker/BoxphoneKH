@@ -171,6 +171,13 @@ class ADBController:
             for _ in range(7):
                 time.sleep(1.0)
                 check_cancelled()
+                
+            # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
+            update_status("Dạo trang chủ Shopee...")
+            for _ in range(random.randint(2, 3)):
+                check_cancelled()
+                self.swipe(device_id, 540, random.randint(1300, 1500), 540, random.randint(400, 600), duration=random.randint(600, 900))
+                time.sleep(random.uniform(2.0, 3.0))
             
             update_status("Bấm vào thanh tìm kiếm...")
             # Click vào thanh search trên trang chủ
@@ -297,6 +304,13 @@ class ADBController:
             # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
                 return False, "Bị chặn bởi Captcha (Không thể tự giải sau khi mở Shopee)"
+                
+            # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
+            update_status("Dạo trang chủ Shopee...")
+            for _ in range(random.randint(2, 3)):
+                check_cancelled()
+                self.swipe(device_id, 540, random.randint(1300, 1500), 540, random.randint(400, 600), duration=random.randint(600, 900))
+                time.sleep(random.uniform(2.0, 3.0))
             
             check_cancelled()
             update_status("Bấm ô tìm kiếm...")
