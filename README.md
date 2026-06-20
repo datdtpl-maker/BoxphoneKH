@@ -1,29 +1,41 @@
-# Box Phone Shopee Automation Bot 🤖📱
+# Box Phone Shopee Automation Bot - Khải Hoàn Edition 🤖📱
 
-Hệ thống tự động hóa điều khiển hàng loạt điện thoại Android (Box Phone) thông qua Telegram Bot để thực hiện quy trình tìm kiếm sản phẩm, giải captcha thông minh bằng OpenCV, tìm kiếm và tương tác tự nhiên với shop có địa điểm cụ thể trên ứng dụng Shopee.
+Hệ thống tự động hóa điều khiển hàng loạt điện thoại Android (Box Phone) thông qua Telegram Bot chuyên nghiệp dành cho hệ thống **BOX PHONE - SHOPEE KHẢI HOÀN**. Dự án tích hợp các kịch bản tìm kiếm sản phẩm thông minh, tự động giải Captcha bằng OpenCV, đo độ phân giải động, và đặc biệt là giả lập hành vi người dùng thật 100% để tối ưu hóa SEO sản phẩm & cửa hàng.
+
+---
 
 ## 🌟 Tính Năng Nổi Bật
 
-- **Điều khiển qua Telegram:** Hỗ trợ ra lệnh bằng ngôn ngữ tự nhiên tiếng Việt cho toàn bộ 20 máy cùng lúc hoặc chỉ định riêng lẻ từng máy.
-- **Tự động hóa thông minh (Shopee Search & Click):**
-  - Tự động tắt xoay màn hình và khóa hướng dọc thiết bị khi bắt đầu quy trình.
-  - Nhập liệu tự nhiên mô phỏng người thật (gõ từng chữ với độ trễ ngẫu nhiên 0.2s - 0.4s).
-  - Tự động phân tích XML cấu trúc giao diện (`uiautomator dump`) để tìm nhãn **"Tỉnh Lâm Đồng"** hoặc **"Lâm Đồng"** trên danh sách sản phẩm.
-  - Tự động click mở sản phẩm và cuộn lướt xem tự nhiên (mô phỏng đọc thông tin) trong thời gian ngẫu nhiên từ 10 - 20 giây.
-- **Giải quyết Captcha tự động bằng OpenCV:**
-  - Tự động chụp ảnh màn hình và xử lý lọc Canny, Gaussian Blur để tìm khoảng cách mảnh ghép của slider captcha.
-  - Giả lập thao tác vuốt trượt (`swipe`) có sai số quỹ đạo ngẫu nhiên để vượt qua hệ thống kiểm tra bot.
-  - Nếu giải thất bại 3 lần, hệ thống tự động gửi ảnh chụp màn hình bị kẹt Captcha về Telegram kèm cảnh báo để admin xử lý thủ công.
-- **Chế độ chạy tuần tự thông minh:**
-  - Hỗ trợ chạy máy-qua-máy lần lượt với thời gian nghỉ ngẫu nhiên (60 - 90 giây) để ngăn chặn việc quét trùng IP/hành vi của hệ thống Shopee.
-- **Bảo mật tuyệt đối:** Lưu trữ admin truy cập đầu tiên làm quản trị viên duy nhất, tự động chặn toàn bộ các tin nhắn từ người lạ.
+### 1. Giả Lập Hành Vi Người Dùng Thật 100% (Human Simulation)
+- **Giả lập quỹ đạo vuốt cong (`swipe_curved`):** Tránh các chuyển động thẳng tắp cơ học của bot. Đường vuốt dọc được chia nhỏ thành các đoạn vuốt ngắn nối tiếp nhau với điểm gãy ngẫu nhiên lệch sang trái hoặc phải để mô phỏng chính xác hướng vuốt cong tự nhiên của ngón tay người.
+- **Vuốt xem album ảnh (Carousel Swipe):** Khi mở sản phẩm, bot tự động vuốt ngang ảnh đại diện từ phải qua trái 1-2 lần ở vùng 30% trên cùng để chuyển xem các góc ảnh khác nhau.
+- **Tương tác ngẫu nhiên bỏ giỏ hàng (Intent Signal):** Tỷ lệ ngẫu nhiên **15%** bot sẽ nhấn nút `"Thêm vào giỏ hàng"`, chọn ngẫu nhiên phân loại (màu sắc/size) trên hộp thoại rồi bấm Back đóng lại. Hành động này tạo chỉ số tương tác và chuyển đổi giả lập mạnh mẽ trên máy chủ Shopee.
+- **Tự động vào "Xem Shop" & dạo cửa hàng:** Tự động tìm và click nút `"Xem Shop"` của Khải Hoàn trong trang chi tiết, chuyển hướng sang trang chủ Shop, lướt dạo ngẫu nhiên trong 10-15 giây để tăng traffic toàn diện trước khi quay trở lại.
+
+### 2. Tối Ưu Tương Thích & Điều Khiển Thiết Bị
+- **Đo kích thước màn hình động:** Bot tự động lấy độ phân giải thực tế bằng lệnh `wm size` trước khi thực thi để tính toán tọa độ theo tỷ lệ phần trăm (phù hợp 100% với các đời Samsung 1080p, 1440p hoặc 720p).
+- **Nhập liệu tự nhiên:** Thay vì dán văn bản ngay lập tức, bot mô phỏng gõ phím tiếng Việt từng từ thông qua IME ảo `XwIME` với độ trễ ngẫu nhiên từ 0.2s - 0.4s.
+- **Lướt xem sản phẩm sâu:** Tăng thời gian lướt ngẫu nhiên lên **15 - 30 giây**, kết hợp cuộn xuống, dừng đọc ngẫu nhiên (4-8s) ở các phần mô tả/review, thỉnh thoảng cuộn ngược lên trên.
+
+### 3. Tự Động Giải Captcha Bằng OpenCV
+- Tự động chụp màn hình, phân tích thuật toán Canny, Gaussian Blur để phát hiện khoảng cách mảnh khuyết của slider captcha.
+- Giả lập thao tác kéo trượt có thời gian kéo và độ nghiêng ngẫu nhiên.
+- Tự động chụp màn hình gửi lên Telegram cảnh báo admin nếu giải captcha thất bại quá 3 lần.
+
+### 4. Cơ Chế Dừng Khẩn Cấp Thông Minh
+- **Nút bấm Inline tiện lợi:** Gắn trực tiếp dưới tin nhắn tiến trình trên Telegram chat. Khi kết thúc hoặc bị hủy, nút sẽ tự động biến mất giúp giao diện luôn sạch sẽ.
+- **Lệnh điều khiển:** Hỗ trợ ra lệnh dừng nhanh bằng tin nhắn `/stop`, `dừng`, `stop` hoặc `dừng chạy`.
+
+---
 
 ## 🛠️ Yêu Cầu Hệ Thống
 
-- **Hệ điều hành:** Windows (khuyên dùng chạy trên máy chủ cài đặt phần mềm xiaowei).
+- **Hệ điều hành:** Windows (chạy trên máy chủ có cài đặt phần mềm xiaowei).
 - **Python:** Phiên bản 3.8 trở lên.
-- **ADB:** Cần cài đặt ADB tools (mặc định trỏ đến công cụ ADB của phần mềm xiaowei).
-- **Thiết bị:** 20 máy Android đã bật chế độ nhà phát triển (Developer Options) và kết nối qua cổng USB. Bàn phím ảo `XwIME` cần được cài đặt trên điện thoại để nhận dữ liệu gõ tiếng Việt.
+- **ADB:** Trỏ đến công cụ ADB của phần mềm xiaowei.
+- **Thiết bị:** Các điện thoại Android đã bật gỡ lỗi USB và cấu hình bàn phím ảo `XwIME` làm mặc định.
+
+---
 
 ## 📦 Hướng Dẫn Cài Đặt
 
@@ -44,46 +56,45 @@ Hệ thống tự động hóa điều khiển hàng loạt điện thoại Andr
    TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
    ALLOWED_USER_IDS=
    ```
-   *(Khi bạn khởi chạy bot lần đầu tiên, tài khoản Telegram nào gửi tin nhắn `/start` đầu tiên sẽ được ghi nhận làm Admin duy nhất và lưu trực tiếp vào biến `ALLOWED_USER_IDS`)*.
+   *(Tài khoản Telegram đầu tiên nhắn tin `/start` cho bot sẽ được đăng ký làm Admin duy nhất).*
 
 4. **Kiểm tra cấu hình đường dẫn ADB (`config.py`):**
-   Mặc định đường dẫn ADB được trỏ đến phần mềm xiaowei:
+   Mặc định đường dẫn ADB được trỏ đến thư mục cài đặt xiaowei:
    ```python
    ADB_PATH = r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
    ```
-   Bạn có thể chỉnh sửa lại đường dẫn này nếu cài đặt phần mềm ở thư mục khác.
+
+---
 
 ## 🚀 Hướng Dẫn Sử Dụng Bot Telegram
 
-Gõ lệnh `/start` hoặc `/help` trong bot Telegram để xem hướng dẫn trực tiếp.
+Gửi lệnh `/start` hoặc `/help` trong bot Telegram để lấy hướng dẫn sử dụng nhanh:
 
 ### 🎯 1. Quy Trình Quét Shop Lâm Đồng
-- **Chạy lần lượt từng máy (Nên dùng để tránh quét IP):**
-  - Lệnh: `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2, ...]` (hoặc phân cách bằng dấu `;`, `|`).
-  - *Ví dụ:* `tìm tuần tự lâm đồng deriva, son môi, kem chống nắng` (nghỉ 60-90 giây ngẫu nhiên giữa các máy, mỗi máy sẽ tự động chọn ngẫu nhiên 1 từ khóa trong danh sách để tìm).
+- **Chạy lần lượt từng máy (Nghỉ 60-90s giữa các máy - Rất khuyên dùng để an toàn IP):**
+  - Lệnh: `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2, ...]` (phân cách bằng dấu phẩy `,`, `;` hoặc `|`).
+  - *Ví dụ:* `tìm tuần tự lâm đồng deriva, son môi, kem chống nắng`.
 - **Chạy song song tất cả các máy cùng lúc:**
   - Lệnh: `tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
-  - *Ví dụ:* `tìm lâm đồng deriva, son môi` (mỗi máy sẽ chạy một từ khóa ngẫu nhiên trong danh sách).
-- **Chạy trên 1 máy cụ thể:**
-  - Lệnh: `máy [số] tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
-  - *Ví dụ:* `máy 5 tìm lâm đồng deriva, son môi`.
+- **Chạy trên 1 máy cụ thể (ví dụ máy 5):**
+  - Lệnh: `máy 5 tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
 
-⏹️ **Dừng khẩn cấp toàn bộ tác vụ:**
-Bạn nhắn tin cho bot bất kỳ câu nào sau đây: `dừng`, `stop`, `dừng tất cả`, `dừng chạy`. Bot sẽ lập tức gửi tín hiệu ngắt toàn bộ tác vụ đang chạy trên các máy và đưa bot về trạng thái sẵn sàng nhận lệnh mới sau 3 giây.
+⏹️ **Dừng khẩn cấp:**
+- Bấm trực tiếp nút `🛑 DỪNG CHẠY KHẨN CẤP` dạng Inline hiển thị dưới tin nhắn tiến trình.
+- Hoặc gõ lệnh `/stop`, hoặc nhắn tin chữ `dừng`, `stop`.
 
 ### 📸 2. Kiểm Tra & Giám Sát
-- **Chụp ảnh màn hình:**
-  - Lệnh: `chụp màn hình máy [số]` hoặc `chụp ảnh máy [số]`
-  - *Ví dụ:* `chụp màn hình máy 12`.
+- **Chụp ảnh màn hình kiểm tra máy:**
+  - Lệnh: `chụp màn hình máy [số]` (Ví dụ: `chụp màn hình máy 12`).
 - **Kiểm tra kết nối thiết bị:**
-  - Lệnh: `trạng thái` hoặc `danh sách máy` để xem danh sách các ID máy đang kết nối với hệ thống.
+  - Lệnh: `trạng thái` hoặc `danh sách máy` để liệt kê các ID máy đang kết nối.
 
 ### ⚙️ 3. Phím Điều Khiển Nhanh
 - **Quay lại:** `quay lại` (hoặc `quay lại máy 5`).
 - **Màn hình chính (Home):** `trang chủ` (hoặc `trang chủ máy 12`).
 - **Tắt xoay màn hình:** `tắt xoay` (hoặc `tắt xoay máy 5`).
-- **Shopee:** `mở shopee` / `đóng shopee` (cho tất cả hoặc cho máy cụ thể).
+- **Ứng dụng Shopee:** `mở shopee` / `đóng shopee` (cho toàn bộ hoặc máy chỉ định).
 
 ---
 
-*Dự án được xây dựng và phát triển chuyên nghiệp, phục vụ quản trị và tối ưu hóa vận hành Box Phone.*
+*Hệ thống được phát triển chuyên nghiệp, phục vụ tối ưu hóa vận hành và SEO cho gian hàng Shopee Khải Hoàn.*
