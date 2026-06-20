@@ -346,7 +346,7 @@ def send_welcome(message):
         "👉 **Chạy tuần tự (Khuyên dùng - Nghỉ 60-90s):**\n"
         "• `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2...]`\n"
         "*(Ví dụ: `tìm tuần tự lâm đồng deriva, son môi`)*\n"
-        "⏹️ Để dừng tất cả các máy lập tức: nhắn `dừng` hoặc `stop`\n\n"
+        "⏹️ Để dừng tất cả các máy lập tức: Bấm nút [🛑 DỪNG CHẠY KHẨN CẤP] ở dưới màn hình\n\n"
         "👉 **Chạy song song (Tất cả máy cùng lúc):**\n"
         "• `tìm lâm đồng [từ khóa 1, từ khóa 2...]`\n\n"
         "👉 **Chạy trên 1 máy cụ thể:**\n"
