@@ -323,37 +323,33 @@ def parse_natural_command(text):
 
     return None
 
-# Xử lý lệnh /start và /help để hiển thị hướng dẫn bằng tiếng Việt
+# Xử lý lệnh /start và /help để hiển thị hướng dẫn ngắn gọn
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if not check_auth(message):
         return
 
     instructions = (
-        "🤖 **HỆ THỐNG ĐIỀU KHIỂN BOX PHONE - SHOPEE LÂM ĐỒNG** 📱\n\n"
-        "Hệ thống đã nhận diện tài khoản của bạn là **Quản trị viên**. Dưới đây là hướng dẫn các câu lệnh điều khiển:\n\n"
-        "🔄 **1. TÌM KIẾM SẢN PHẨM SHOP LÂM ĐỒNG (TỰ ĐỘNG & TỰ NHIÊN)**\n"
-        "*(Hệ thống tự động: Khóa màn hình dọc -> Mở Shopee -> Gõ từ khóa tự nhiên -> Vuốt cuộn tìm địa điểm 'Lâm Đồng' không bấm bộ lọc -> Click xem sản phẩm ngẫu nhiên 10-20s)*\n\n"
-        "👉 **Chạy lần lượt từng máy (Khuyên dùng để tránh quét IP):**\n"
-        "Gõ: `tìm tuần tự lâm đồng [từ khóa]` hoặc `tìm lần lượt lâm đồng [từ khóa]`\n"
-        "*(Ví dụ: `tìm tuần tự lâm đồng deriva` - Sẽ nghỉ ngẫu nhiên 60-90 giây giữa mỗi máy)*\n"
-        "⏹️ Để dừng tiến trình tuần tự này, bạn gõ: `dừng` hoặc `dừng chạy`\n\n"
+        "🤖 **BOX PHONE - SHOPEE LÂM ĐỒNG** 📱\n\n"
+        "Chào mừng Admin! Danh sách lệnh nhanh:\n\n"
+        "🔄 **1. Tìm kiếm Shop Lâm Đồng (Tự động hoàn toàn)**\n"
+        "👉 **Chạy tuần tự (Khuyên dùng - Nghỉ 60-90s):**\n"
+        "• `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2...]`\n"
+        "*(Ví dụ: `tìm tuần tự lâm đồng deriva, son môi`)*\n"
+        "⏹️ Để dừng tất cả các máy lập tức: nhắn `dừng` hoặc `stop`\n\n"
+        "👉 **Chạy song song (Tất cả máy cùng lúc):**\n"
+        "• `tìm lâm đồng [từ khóa 1, từ khóa 2...]`\n\n"
         "👉 **Chạy trên 1 máy cụ thể:**\n"
-        "Gõ: `máy [số] tìm lâm đồng [từ khóa]`\n"
-        "*(Ví dụ: `máy 5 tìm lâm đồng deriva`)*\n\n"
-        "👉 **Chạy song song tất cả các máy cùng lúc:**\n"
-        "Gõ: `tìm lâm đồng [từ khóa]`\n"
-        "*(Ví dụ: `tìm lâm đồng deriva`)*\n\n"
-        "📸 **2. CHỤP MÀN HÌNH KIỂM TRA**\n"
-        "Gõ: `chụp màn hình máy [số]` hoặc `chụp ảnh máy [số]`\n"
-        "*(Ví dụ: `chụp màn hình máy 12` - Kiểm tra xem máy có bị kẹt hoặc dính Captcha không)*\n\n"
-        "📊 **3. KIỂM TRA KẾT NỐI HỆ THỐNG**\n"
-        "Gõ: `trạng thái` hoặc `danh sách máy` để xem danh sách 20 máy đang kết nối.\n\n"
-        "⚙️ **4. PHÍM ĐIỀU KHIỂN NHANH**\n"
-        "• **Quay lại:** `quay lại` (hoặc `quay lại máy 5`)\n"
-        "• **Màn hình chính:** `trang chủ` (hoặc `trang chủ máy 12`)\n"
-        "• **Tắt xoay màn hình:** `tắt xoay` (hoặc `tắt xoay máy 5`)\n"
-        "• **Shopee:** `mở shopee` / `đóng shopee` (cho tất cả hoặc cho máy cụ thể)"
+        "• `máy [số] tìm lâm đồng [từ khóa]`\n\n"
+        "📸 **2. Chụp màn hình kiểm tra**\n"
+        "• `chụp màn hình máy [số]` (Ví dụ: `chụp màn hình máy 12`)\n\n"
+        "📊 **3. Kiểm tra kết nối thiết bị**\n"
+        "• `trạng thái` hoặc `danh sách máy`\n\n"
+        "⚙️ **4. Phím điều khiển nhanh**\n"
+        "• `quay lại` | `quay lại máy [số]`\n"
+        "• `trang chủ` | `trang chủ máy [số]`\n"
+        "• `tắt xoay` | `tắt xoay máy [số]`\n"
+        "• `mở shopee` | `đóng shopee` (tất cả hoặc máy cụ thể)"
     )
     bot.reply_to(message, instructions, parse_mode="Markdown")
 
