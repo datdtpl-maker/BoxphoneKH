@@ -147,45 +147,58 @@ class ADBController:
         self.execute_adb(device_id, ["shell", "rm", remote_path])
         return True, local_path
 
-    def shopee_search_sequence(self, device_id, keyword, status_callback=None):
+    def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
         def update_status(msg):
             if status_callback:
                 status_callback(device_id, msg)
 
+        def check_cancelled():
+            if is_cancelled and is_cancelled():
+                raise Exception("Bị dừng bởi người dùng")
+
         try:
+            check_cancelled()
             # Dam bao tat xoay man hinh va khoa huong doc mac dinh
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
             
+            check_cancelled()
             update_status("Đang mở Shopee...")
             self.launch_app(device_id, SHOPEE_PACKAGE)
             
             # Đợi Shopee tải (khoảng 7 giây)
-            time.sleep(7.0)
+            for _ in range(7):
+                time.sleep(1.0)
+                check_cancelled()
             
             update_status("Bấm vào thanh tìm kiếm...")
             # Click vào thanh search trên trang chủ
             self.tap(device_id, SHOPEE_SEARCH_BOX_COORDS[0], SHOPEE_SEARCH_BOX_COORDS[1])
             time.sleep(1.5)
+            check_cancelled()
             
             # Click lại vào ô nhập liệu để chắc chắn bàn phím xuất hiện
             self.tap(device_id, SHOPEE_INPUT_BOX_COORDS[0], SHOPEE_INPUT_BOX_COORDS[1])
             time.sleep(1.0)
+            check_cancelled()
             
             update_status(f"Đang nhập từ khóa '{keyword}'...")
             self.input_text(device_id, keyword)
             time.sleep(1.5)
+            check_cancelled()
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
             time.sleep(2.0)
+            check_cancelled()
             
             update_status("Hoàn thành tìm kiếm!")
             return True, "Thành công"
         except Exception as e:
-            update_status(f"Lỗi: {str(e)}")
-            return False, str(e)
+            msg = str(e)
+            update_status(f"Lỗi: {msg}")
+            return False, msg
 
     def check_and_bypass_captcha(self, device_id, max_retries=3, status_callback=None):
         """
@@ -256,38 +269,55 @@ class ADBController:
         update_status("[Captcha] Không thể tự giải Captcha sau nhiều lần thử.")
         return False
 
-    def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None):
+    def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None):
         """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng'"""
         def update_status(msg):
             if status_callback:
                 status_callback(device_id, msg)
 
+        def check_cancelled():
+            if is_cancelled and is_cancelled():
+                raise Exception("Bị dừng bởi người dùng")
+
         try:
+            check_cancelled()
             # Dam bao tat xoay man hinh va khoa huong doc mac dinh
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
             
+            check_cancelled()
             update_status("Đang mở Shopee...")
             self.launch_app(device_id, SHOPEE_PACKAGE)
-            time.sleep(7.0)
+            
+            # Đợi Shopee tải (khoảng 7 giây)
+            for _ in range(7):
+                time.sleep(1.0)
+                check_cancelled()
             
             # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
                 return False, "Bị chặn bởi Captcha (Không thể tự giải sau khi mở Shopee)"
             
+            check_cancelled()
             update_status("Bấm ô tìm kiếm...")
             self.tap(device_id, SHOPEE_SEARCH_BOX_COORDS[0], SHOPEE_SEARCH_BOX_COORDS[1])
             time.sleep(1.5)
             self.tap(device_id, SHOPEE_INPUT_BOX_COORDS[0], SHOPEE_INPUT_BOX_COORDS[1])
             time.sleep(1.0)
+            check_cancelled()
             
             update_status(f"Nhập từ khóa '{keyword}' (gõ tự nhiên)...")
             self.input_text_naturally(device_id, keyword)
             time.sleep(1.5)
+            check_cancelled()
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
-            time.sleep(4.0) # Đợi trang kết quả tải xong
+            
+            # Đợi trang kết quả tải xong
+            for _ in range(4):
+                time.sleep(1.0)
+                check_cancelled()
             
             # Kiểm tra Captcha lần 2 sau khi bấm tìm kiếm
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
@@ -295,6 +325,7 @@ class ADBController:
             
             # Vòng lặp cuộn màn hình và quét tìm địa chỉ Lâm Đồng
             for swipe_count in range(max_swipes):
+                check_cancelled()
                 # Kiểm tra Captcha lần 3 trong lúc cuộn trang
                 if not self.check_and_bypass_captcha(device_id, max_retries=2, status_callback=status_callback):
                     return False, "Bị chặn bởi Captcha trong quá trình cuộn tìm kiếm"
@@ -305,6 +336,7 @@ class ADBController:
                 xml_file = f"/sdcard/dump_{device_id}.xml"
                 self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
                 
+                check_cancelled()
                 code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
                 if code != 0:
                     update_status("Cảnh báo: Không thể dump giao diện, thử vuốt tiếp...")
@@ -316,6 +348,7 @@ class ADBController:
                 local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_{device_id}.xml")
                 code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
                 
+                check_cancelled()
                 found_coords = None
                 if os.path.exists(local_xml):
                     try:
@@ -351,12 +384,18 @@ class ADBController:
                     update_status(f"Đã mở sản phẩm. Đang lướt xem ngẫu nhiên trong {view_duration} giây...")
                     
                     while time.time() - start_time < view_duration:
+                        check_cancelled()
                         self.swipe(device_id, 540, 1300, 540, 600, duration=random.randint(600, 900))
-                        time.sleep(random.uniform(2.5, 4.0))
+                        
+                        for _ in range(12):
+                            time.sleep(random.uniform(0.2, 0.3))
+                            check_cancelled()
                         
                         if random.random() < 0.3:
                             self.swipe(device_id, 540, 600, 540, 1200, duration=random.randint(600, 900))
-                            time.sleep(random.uniform(2.0, 3.0))
+                            for _ in range(10):
+                                time.sleep(random.uniform(0.2, 0.3))
+                                check_cancelled()
                             
                     update_status("Hoàn thành quy trình lướt xem sản phẩm!")
                     return True, "Thành công"
@@ -364,12 +403,16 @@ class ADBController:
                 # Nếu không tìm thấy, vuốt cuộn xuống dưới
                 update_status("Chưa thấy Lâm Đồng, đang vuốt xuống dưới...")
                 self.swipe(device_id, 540, 1400, 540, 500, duration=800)
-                time.sleep(2.5) # Chờ màn hình cuộn mượt và dừng lại ổn định
+                
+                for _ in range(10):
+                    time.sleep(0.25)
+                    check_cancelled()
                 
             return False, f"Đã vuốt {max_swipes} lần nhưng không tìm thấy sản phẩm nào có nhãn Tỉnh Lâm Đồng."
         except Exception as e:
-            update_status(f"Thất bại: {str(e)}")
-            return False, str(e)
+            msg = str(e)
+            update_status(f"Thất bại: {msg}")
+            return False, msg
 
 
 

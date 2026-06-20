@@ -21,9 +21,14 @@ if sys.platform.startswith('win'):
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
 adb = ADBController()
 
-# Các biến toàn cục điều khiển chạy tuần tự
+# Các biến toàn cục điều khiển chạy tuần tự và hủy bỏ tác vụ
 cancel_sequential = False
+cancel_flag = False
 sequential_thread = None
+
+def is_cancelled():
+    global cancel_flag
+    return cancel_flag
 
 def get_ordered_devices():
     raw_devices = adb.get_devices()
@@ -76,32 +81,35 @@ def get_ordered_devices():
     ordered = sorted(raw_devices, key=get_sort_key)
     return ordered
 
-def run_sequential_shopee_search(message, keyword, devices):
-    global cancel_sequential
+def run_sequential_shopee_search(message, keywords, devices):
+    global cancel_sequential, cancel_flag
     cancel_sequential = False
+    cancel_flag = False
     
+    keyword_str = ", ".join(keywords)
     bot.send_message(
         message.chat.id, 
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
-        f"Từ khóa Shopee: `{keyword}`\n"
+        f"Danh sách từ khóa: `{keyword_str}`\n"
         f"Tổng số máy: {len(devices)} máy\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**.\n\n"
-        f"*(Bạn có thể nhắn 'dừng chạy' bất kỳ lúc nào để dừng lại)*",
+        f"*(Bạn có thể nhắn 'dừng' để hủy toàn bộ)*",
         parse_mode="Markdown"
     )
     
     success_count = 0
     for idx, dev in enumerate(devices):
-        if cancel_sequential:
+        if cancel_sequential or cancel_flag:
             bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
         dev_idx = devices.index(dev) + 1
-        bot.send_message(message.chat.id, f"📱 **Máy {dev_idx}/{len(devices)}** ({dev}): Bắt đầu tìm shop Lâm Đồng...")
+        current_keyword = random.choice(keywords)
+        bot.send_message(message.chat.id, f"📱 **Máy {dev_idx}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
-        success, err = adb.shopee_find_and_click_lamdong(dev, keyword)
+        success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled)
         
-        if cancel_sequential:
+        if cancel_sequential or cancel_flag:
             bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
@@ -132,11 +140,11 @@ def run_sequential_shopee_search(message, keyword, devices):
             bot.send_message(message.chat.id, f"⏳ Đợi **{delay} giây** trước khi sang máy tiếp theo...")
             
             for _ in range(delay):
-                if cancel_sequential:
+                if cancel_sequential or cancel_flag:
                     break
                 time.sleep(1)
                 
-    if not cancel_sequential:
+    if not cancel_sequential and not cancel_flag:
         bot.send_message(
             message.chat.id, 
             f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n\n"
@@ -275,11 +283,19 @@ def parse_natural_command(text):
                 keyword_clean = re.sub(r"(?:tuần\s+tự|tuan\s+tu|lần\s+lượt|lan\s+luot)", "", keyword_clean, flags=re.IGNORECASE)
                 keyword_clean = re.sub(r"\s+", " ", keyword_clean).strip()
                 
-                if any(k in text for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
-                    return {"action": "shopee_search_lamdong_sequential", "keyword": keyword_clean, "device_idx": device_idx}
-                return {"action": "shopee_search_lamdong", "keyword": keyword_clean, "device_idx": device_idx}
+                # Tách nhiều từ khóa bằng dấu phẩy, chấm phẩy hoặc gạch đứng
+                keywords = [k.strip() for k in re.split(r'[,;|]', keyword_clean) if k.strip()]
+                if not keywords:
+                    keywords = [keyword_clean]
                 
-            return {"action": "shopee_search", "keyword": keyword, "device_idx": device_idx}
+                if any(k in text for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
+                    return {"action": "shopee_search_lamdong_sequential", "keywords": keywords, "device_idx": device_idx}
+                return {"action": "shopee_search_lamdong", "keywords": keywords, "device_idx": device_idx}
+                
+            keywords = [k.strip() for k in re.split(r'[,;|]', keyword) if k.strip()]
+            if not keywords:
+                keywords = [keyword]
+            return {"action": "shopee_search", "keywords": keywords, "device_idx": device_idx}
             
     # 8. Lệnh Click tọa độ thủ công: "click 500 600 máy 1" hoặc "click 500 600" (tất cả máy)
     m_click = re.search(r"click\s+(\d+)\s+(\d+)(?:\s+(?:máy|máy số|số|device)?\s*(\d+))?", text)
@@ -295,9 +311,9 @@ def parse_natural_command(text):
         device_idx = int(m_input.group(2)) if m_input.group(2) else None
         return {"action": "input", "text": input_text_val, "device_idx": device_idx}
 
-    # Lệnh Dừng chạy tuần tự
-    if any(k in text for k in ["dừng chạy", "hủy chạy", "dừng", "dung chay", "huy chay", "stop"]):
-        return {"action": "stop_sequential"}
+    # Lệnh Dừng tất cả các tác vụ đang chạy
+    if any(k in text for k in ["dừng chạy", "dừng tất cả", "dừng", "hủy chạy", "dung chay", "huy chay", "stop"]):
+        return {"action": "stop_all"}
 
     # 10. Tắt xoay màn hình
     if any(k in text for k in ["tắt xoay màn hình", "tắt xoay", "tắt tự động xoay", "khóa màn hình dọc"]):
@@ -411,62 +427,64 @@ def handle_all_messages(message):
             bot.edit_message_text(f"❌ Không thể chụp màn hình máy {tgt_idx}. Lỗi: {result}", message.chat.id, status_msg.message_id)
 
     elif action == "shopee_search":
-        keyword = cmd["keyword"]
+        keywords = cmd["keywords"]
         
         if len(target_devices) == 1:
             tgt_idx = devices.index(target_devices[0]) + 1
-            status_msg = bot.reply_to(message, f"🛒 **Máy {tgt_idx}**: Bắt đầu mở Shopee và tìm kiếm '{keyword}'...")
+            current_keyword = random.choice(keywords)
+            status_msg = bot.reply_to(message, f"🛒 **Máy {tgt_idx}**: Bắt đầu mở Shopee và tìm kiếm '{current_keyword}'...")
             
             def cb(dev_id, msg):
-                pass # Không cần báo cáo từng bước cho 1 máy
+                pass
                 
-            success, err = adb.shopee_search_sequence(target_devices[0], keyword, status_callback=cb)
+            success, err = adb.shopee_search_sequence(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled)
             if success:
-                bot.edit_message_text(f"✅ **Máy {tgt_idx}**: Đã hoàn thành tìm kiếm từ khóa '{keyword}' trên Shopee.", message.chat.id, status_msg.message_id)
+                bot.edit_message_text(f"✅ **Máy {tgt_idx}**: Đã hoàn thành tìm kiếm '{current_keyword}'.", message.chat.id, status_msg.message_id)
             else:
-                bot.edit_message_text(f"❌ **Máy {tgt_idx}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
+                bot.edit_message_text(f"❌ **Keep {tgt_idx}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
         else:
-            # Chạy đa luồng song song trên nhiều máy
-            status_msg = bot.reply_to(message, f"🚀 Đang khởi tạo tìm kiếm '{keyword}' trên tất cả {len(target_devices)} máy cùng lúc...")
+            keyword_str = ", ".join(keywords)
+            status_msg = bot.reply_to(message, f"🚀 Đang khởi tạo tìm kiếm ngẫu nhiên từ khóa `{keyword_str}` trên {len(target_devices)} máy cùng lúc...")
             
             def run_search_parallel(device_id):
                 dev_idx = devices.index(device_id) + 1
-                success, err = adb.shopee_search_sequence(device_id, keyword)
-                return dev_idx, success, err
+                current_keyword = random.choice(keywords)
+                bot.send_message(message.chat.id, f"🔍 **Máy {dev_idx}**: Bắt đầu tìm với từ khóa `{current_keyword}`...")
+                success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=is_cancelled)
+                return dev_idx, current_keyword, success, err
                 
-            # Dùng ThreadPoolExecutor để chạy song song
             results = []
             with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
                 futures = [executor.submit(run_search_parallel, dev) for dev in target_devices]
                 for future in futures:
                     results.append(future.result())
             
-            # Tổng hợp kết quả
-            success_count = sum(1 for r in results if r[1])
+            success_count = sum(1 for r in results if r[2])
             fail_count = len(results) - success_count
             
-            summary = f"🏁 **KẾT QUẢ TÌM KIẾM SHOPEE ('{keyword}'):**\n\n"
+            summary = f"🏁 **KẾT QUẢ TÌM KIẾM SHOPEE:**\n\n"
             summary += f"✅ Thành công: **{success_count}/{len(target_devices)} máy**\n"
             if fail_count > 0:
                 summary += f"❌ Thất bại: **{fail_count} máy**\n"
-                fails_list = [f"Máy {r[0]}" for r in results if not r[1]]
-                summary += f"⚠️ Các máy lỗi: {', '.join(fails_list)}\n"
+                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
+                summary += f"⚠️ Các máy lỗi:\n" + "\n".join(fails_list)
             
             bot.edit_message_text(summary, message.chat.id, status_msg.message_id)
 
     elif action == "shopee_search_lamdong":
-        keyword = cmd["keyword"]
+        keywords = cmd["keywords"]
         
         if len(target_devices) == 1:
             tgt_idx = devices.index(target_devices[0]) + 1
-            status_msg = bot.reply_to(message, f"🔍 **Máy {tgt_idx}**: Đang tìm kiếm '{keyword}' và quét tìm shop ở Lâm Đồng...")
+            current_keyword = random.choice(keywords)
+            status_msg = bot.reply_to(message, f"🔍 **Máy {tgt_idx}**: Đang tìm kiếm '{current_keyword}' và quét tìm shop ở Lâm Đồng...")
             
             def cb(dev_id, msg):
                 bot.edit_message_text(f"🔍 **Máy {tgt_idx}**: {msg}", message.chat.id, status_msg.message_id)
                 
-            success, err = adb.shopee_find_and_click_lamdong(target_devices[0], keyword, status_callback=cb)
+            success, err = adb.shopee_find_and_click_lamdong(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled)
             if success:
-                bot.edit_message_text(f"🎉 **Máy {tgt_idx}**: Đã tìm thấy và click vào sản phẩm từ shop ở **Tỉnh Lâm Đồng**!", message.chat.id, status_msg.message_id)
+                bot.edit_message_text(f"🎉 **Máy {tgt_idx}**: Đã tìm thấy shop ở Lâm Đồng với từ khóa '{current_keyword}'!", message.chat.id, status_msg.message_id)
             else:
                 bot.edit_message_text(f"❌ **Máy {tgt_idx}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
                 if "Captcha" in err or "bị chặn" in err.lower():
@@ -486,12 +504,15 @@ def handle_all_messages(message):
                         except Exception:
                             pass
         else:
-            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét và tìm shop Lâm Đồng với từ khóa '{keyword}' trên tất cả {len(target_devices)} máy cùng lúc...")
+            keyword_str = ", ".join(keywords)
+            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng ngẫu nhiên từ khóa `{keyword_str}` trên tất cả {len(target_devices)} máy cùng lúc...")
             
             def run_search_parallel(device_id):
                 dev_idx = devices.index(device_id) + 1
-                success, err = adb.shopee_find_and_click_lamdong(device_id, keyword)
-                return dev_idx, success, err
+                current_keyword = random.choice(keywords)
+                bot.send_message(message.chat.id, f"🔍 **Máy {dev_idx}**: Bắt đầu quét từ khóa `{current_keyword}`...")
+                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled)
+                return dev_idx, current_keyword, success, err
                 
             results = []
             with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
@@ -499,35 +520,48 @@ def handle_all_messages(message):
                 for future in futures:
                     results.append(future.result())
             
-            success_count = sum(1 for r in results if r[1])
+            success_count = sum(1 for r in results if r[2])
             fail_count = len(results) - success_count
             
-            summary = f"🏁 **KẾT QUẢ TÌM SHOP LÂM ĐỒNG CHO '{keyword}':**\n\n"
+            summary = f"🏁 **KẾT QUẢ TÌM SHOP LÂM ĐỒNG:**\n\n"
             summary += f"✅ Thành công (đã click): **{success_count}/{len(target_devices)} máy**\n"
             if fail_count > 0:
-                summary += f"❌ Thất bại (không thấy shop): **{fail_count} máy**\n"
-                fails_list = [f"Máy {r[0]}" for r in results if not r[1]]
-                summary += f"⚠️ Các máy không tìm thấy: {', '.join(fails_list)}\n"
+                summary += f"❌ Thất bại (không thấy/lỗi): **{fail_count} máy**\n"
+                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
+                summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
             
             bot.edit_message_text(summary, message.chat.id, status_msg.message_id)
 
     elif action == "shopee_search_lamdong_sequential":
-        keyword = cmd["keyword"]
+        keywords = cmd["keywords"]
         global sequential_thread
         if sequential_thread and sequential_thread.is_alive():
             bot.reply_to(message, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng nhắn 'dừng' để hủy trước khi khởi chạy phiên mới.")
         else:
             sequential_thread = threading.Thread(
                 target=run_sequential_shopee_search, 
-                args=(message, keyword, target_devices)
+                args=(message, keywords, target_devices)
             )
             sequential_thread.daemon = True
             sequential_thread.start()
 
-    elif action == "stop_sequential":
-        global cancel_sequential
+    elif action == "stop_all":
+        global cancel_sequential, cancel_flag
         cancel_sequential = True
-        bot.reply_to(message, "🛑 Đang gửi lệnh dừng quy trình chạy tuần tự. Vui lòng đợi trong giây lát...")
+        cancel_flag = True
+        status_msg = bot.reply_to(message, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy và các luồng chạy...")
+        
+        def reset_cancel_flags():
+            time.sleep(3.5)
+            global cancel_sequential, cancel_flag
+            cancel_sequential = False
+            cancel_flag = False
+            try:
+                bot.edit_message_text("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", message.chat.id, status_msg.message_id)
+            except Exception:
+                pass
+                
+        threading.Thread(target=reset_cancel_flags).start()
 
     elif action == "open_shopee":
         if len(target_devices) == 1:
