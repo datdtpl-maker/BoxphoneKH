@@ -147,6 +147,15 @@ class ADBController:
         self.execute_adb(device_id, ["shell", "rm", remote_path])
         return True, local_path
 
+    def get_screen_size(self, device_id):
+        """Lấy độ phân giải màn hình của thiết bị (width, height)"""
+        code, stdout, stderr = self.execute_adb(device_id, ["shell", "wm", "size"])
+        if code == 0:
+            m = re.search(r"size:\s*(\d+)x(\d+)", stdout)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        return 1080, 1920 # Mặc định nếu lỗi
+
     def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
         def update_status(msg):
@@ -172,11 +181,17 @@ class ADBController:
                 time.sleep(1.0)
                 check_cancelled()
                 
+            # Lấy kích thước màn hình động
+            width, height = self.get_screen_size(device_id)
+            cx = width // 2
+
             # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
             update_status("Dạo trang chủ Shopee...")
             for _ in range(random.randint(2, 3)):
                 check_cancelled()
-                self.swipe(device_id, 540, random.randint(1300, 1500), 540, random.randint(400, 600), duration=random.randint(600, 900))
+                y_start = int(height * 0.75) + random.randint(-50, 50)
+                y_end = int(height * 0.3) + random.randint(-50, 50)
+                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
                 time.sleep(random.uniform(2.0, 3.0))
             
             update_status("Bấm vào thanh tìm kiếm...")
@@ -305,11 +320,17 @@ class ADBController:
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
                 return False, "Bị chặn bởi Captcha (Không thể tự giải sau khi mở Shopee)"
                 
+            # Lấy kích thước màn hình động
+            width, height = self.get_screen_size(device_id)
+            cx = width // 2
+
             # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
             update_status("Dạo trang chủ Shopee...")
             for _ in range(random.randint(2, 3)):
                 check_cancelled()
-                self.swipe(device_id, 540, random.randint(1300, 1500), 540, random.randint(400, 600), duration=random.randint(600, 900))
+                y_start = int(height * 0.75) + random.randint(-50, 50)
+                y_end = int(height * 0.3) + random.randint(-50, 50)
+                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
                 time.sleep(random.uniform(2.0, 3.0))
             
             check_cancelled()
@@ -354,7 +375,7 @@ class ADBController:
                 code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
                 if code != 0:
                     update_status("Cảnh báo: Không thể dump giao diện, thử vuốt tiếp...")
-                    self.swipe(device_id, 540, 1400, 540, 500, duration=800)
+                    self.swipe(device_id, cx, int(height * 0.75), cx, int(height * 0.28), duration=800)
                     time.sleep(2.0)
                     continue
                 
@@ -392,23 +413,36 @@ class ADBController:
                     self.tap(device_id, cx, click_y)
                     time.sleep(4.0) # Đợi trang sản phẩm mở ra
                     
-                    # Thực hiện lướt xem ngẫu nhiên 10 - 20 giây
-                    view_duration = random.randint(10, 20)
+                    # Thực hiện lướt xem ngẫu nhiên 15 - 30 giây
+                    view_duration = random.randint(15, 30)
                     start_time = time.time()
                     update_status(f"Đã mở sản phẩm. Đang lướt xem ngẫu nhiên trong {view_duration} giây...")
                     
                     while time.time() - start_time < view_duration:
                         check_cancelled()
-                        self.swipe(device_id, 540, 1300, 540, 600, duration=random.randint(600, 900))
+                        # Vuốt xuống để xem chi tiết bên dưới
+                        y_start = int(height * 0.75) + random.randint(-50, 50)
+                        y_end = int(height * 0.3) + random.randint(-50, 50)
+                        self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                         
-                        for _ in range(12):
-                            time.sleep(random.uniform(0.2, 0.3))
+                        # Đợi ngẫu nhiên 1.5 đến 3 giây để đọc thông tin
+                        read_delay = random.uniform(1.5, 3.0)
+                        temp_start = time.time()
+                        while time.time() - temp_start < read_delay:
+                            time.sleep(0.2)
                             check_cancelled()
                         
+                        # Tỷ lệ 30% vuốt ngược lên một chút để mô phỏng người dùng đọc lại phần trên
                         if random.random() < 0.3:
-                            self.swipe(device_id, 540, 600, 540, 1200, duration=random.randint(600, 900))
-                            for _ in range(10):
-                                time.sleep(random.uniform(0.2, 0.3))
+                            check_cancelled()
+                            y_start_up = int(height * 0.35) + random.randint(-30, 30)
+                            y_end_up = int(height * 0.65) + random.randint(-30, 30)
+                            self.swipe(device_id, cx, y_start_up, cx, y_end_up, duration=random.randint(700, 1000))
+                            
+                            read_delay_up = random.uniform(1.5, 2.5)
+                            temp_start_up = time.time()
+                            while time.time() - temp_start_up < read_delay_up:
+                                time.sleep(0.2)
                                 check_cancelled()
                             
                     update_status("Hoàn thành quy trình lướt xem sản phẩm!")
@@ -416,7 +450,7 @@ class ADBController:
                 
                 # Nếu không tìm thấy, vuốt cuộn xuống dưới
                 update_status("Chưa thấy Lâm Đồng, đang vuốt xuống dưới...")
-                self.swipe(device_id, 540, 1400, 540, 500, duration=800)
+                self.swipe(device_id, cx, int(height * 0.75), cx, int(height * 0.28), duration=800)
                 
                 for _ in range(10):
                     time.sleep(0.25)
