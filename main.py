@@ -129,7 +129,7 @@ def run_sequential_shopee_search(message, keywords, devices):
             
         if success:
             success_count += 1
-            bot.send_message(message.chat.id, f"✅ **Máy {dev_idx}**: Đã tìm thấy và click lướt sản phẩm Lâm Đồng thành công!")
+            bot.send_message(message.chat.id, f"✅ **Máy {dev_idx}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!")
         else:
             bot.send_message(message.chat.id, f"❌ **Máy {dev_idx}**: {err}")
             if "Captcha" in err or "bị chặn" in err.lower():
@@ -504,7 +504,7 @@ def handle_all_messages(message):
                 
             success, err = adb.shopee_find_and_click_lamdong(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled)
             if success:
-                bot.edit_message_text(f"🎉 **Máy {tgt_idx}**: Đã tìm thấy shop ở Lâm Đồng với từ khóa '{current_keyword}'!", message.chat.id, status_msg.message_id)
+                bot.edit_message_text(f"🎉 **Máy {tgt_idx}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!", message.chat.id, status_msg.message_id)
             else:
                 bot.edit_message_text(f"❌ **Máy {tgt_idx}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
                 if "Captcha" in err or "bị chặn" in err.lower():
@@ -547,7 +547,7 @@ def handle_all_messages(message):
             fail_count = len(results) - success_count
             
             summary = f"🏁 **KẾT QUẢ TÌM SHOP LÂM ĐỒNG:**\n\n"
-            summary += f"✅ Thành công (đã click): **{success_count}/{len(target_devices)} máy**\n"
+            summary += f"✅ Hoàn thành trọn vẹn quy trình: **{success_count}/{len(target_devices)} máy**\n"
             if fail_count > 0:
                 summary += f"❌ Thất bại (không thấy/lỗi): **{fail_count} máy**\n"
                 fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
