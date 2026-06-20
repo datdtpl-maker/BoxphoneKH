@@ -87,20 +87,27 @@ def run_sequential_shopee_search(message, keywords, devices):
     cancel_flag = False
     
     keyword_str = ", ".join(keywords)
+    
+    # Tạo nút dừng dạng Reply Keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP"))
+    
     bot.send_message(
         message.chat.id, 
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
         f"Danh sách từ khóa: `{keyword_str}`\n"
         f"Tổng số máy: {len(devices)} máy\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**.\n\n"
-        f"*(Bạn có thể nhắn 'dừng' để hủy toàn bộ)*",
-        parse_mode="Markdown"
+        f"*(Bạn có thể bấm nút dừng ở bên dưới bất kỳ lúc nào)*",
+        parse_mode="Markdown",
+        reply_markup=markup
     )
     
     success_count = 0
     for idx, dev in enumerate(devices):
         if cancel_sequential or cancel_flag:
-            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
+            markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
+            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.", reply_markup=markup_remove)
             break
             
         dev_idx = devices.index(dev) + 1
@@ -110,7 +117,8 @@ def run_sequential_shopee_search(message, keywords, devices):
         success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled)
         
         if cancel_sequential or cancel_flag:
-            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
+            markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
+            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.", reply_markup=markup_remove)
             break
             
         if success:
@@ -145,12 +153,14 @@ def run_sequential_shopee_search(message, keywords, devices):
                 time.sleep(1)
                 
     if not cancel_sequential and not cancel_flag:
+        markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
         bot.send_message(
             message.chat.id, 
             f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n\n"
             f"Đã xử lý xong: **{len(devices)}/{len(devices)} máy**\n"
             f"Thành công: **{success_count} máy**",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=markup_remove
         )
 
 
@@ -440,7 +450,10 @@ def handle_all_messages(message):
                 bot.edit_message_text(f"❌ **Keep {tgt_idx}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
         else:
             keyword_str = ", ".join(keywords)
-            status_msg = bot.reply_to(message, f"🚀 Đang khởi tạo tìm kiếm ngẫu nhiên từ khóa `{keyword_str}` trên {len(target_devices)} máy cùng lúc...")
+            # Tạo nút dừng
+            markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            markup.add(telebot.types.KeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP"))
+            status_msg = bot.reply_to(message, f"🚀 Đang khởi tạo tìm kiếm ngẫu nhiên từ khóa `{keyword_str}` trên {len(target_devices)} máy cùng lúc...", reply_markup=markup)
             
             def run_search_parallel(device_id):
                 dev_idx = devices.index(device_id) + 1
@@ -466,6 +479,9 @@ def handle_all_messages(message):
                 summary += f"⚠️ Các máy lỗi:\n" + "\n".join(fails_list)
             
             bot.edit_message_text(summary, message.chat.id, status_msg.message_id)
+            # Gửi tin nhắn phụ để ẩn bàn phím nút dừng
+            markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
+            bot.send_message(message.chat.id, "🏁 Tiến trình tìm kiếm Shopee song song đã kết thúc.", reply_markup=markup_remove)
 
     elif action == "shopee_search_lamdong":
         keywords = cmd["keywords"]
@@ -501,7 +517,10 @@ def handle_all_messages(message):
                             pass
         else:
             keyword_str = ", ".join(keywords)
-            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng ngẫu nhiên từ khóa `{keyword_str}` trên tất cả {len(target_devices)} máy cùng lúc...")
+            # Tạo nút dừng
+            markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            markup.add(telebot.types.KeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP"))
+            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng ngẫu nhiên từ khóa `{keyword_str}` trên tất cả {len(target_devices)} máy cùng lúc...", reply_markup=markup)
             
             def run_search_parallel(device_id):
                 dev_idx = devices.index(device_id) + 1
@@ -527,6 +546,9 @@ def handle_all_messages(message):
                 summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
             
             bot.edit_message_text(summary, message.chat.id, status_msg.message_id)
+            # Gửi tin nhắn phụ để ẩn bàn phím nút dừng
+            markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
+            bot.send_message(message.chat.id, "🏁 Tiến trình quét Lâm Đồng song song đã kết thúc.", reply_markup=markup_remove)
 
     elif action == "shopee_search_lamdong_sequential":
         keywords = cmd["keywords"]
@@ -545,7 +567,9 @@ def handle_all_messages(message):
         global cancel_sequential, cancel_flag
         cancel_sequential = True
         cancel_flag = True
-        status_msg = bot.reply_to(message, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy và các luồng chạy...")
+        # Gửi kèm ReplyKeyboardRemove để ẩn nút dừng ngay lập tức
+        markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
+        status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy và các luồng chạy...", reply_markup=markup_remove)
         
         def reset_cancel_flags():
             time.sleep(3.5)
