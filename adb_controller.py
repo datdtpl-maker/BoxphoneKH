@@ -74,6 +74,16 @@ class ADBController:
         """Vuốt từ (x1, y1) tới (x2, y2) trong khoảng thời gian duration (ms)"""
         return self.execute_adb(device_id, ["shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration)])
 
+    def swipe_curved(self, device_id, x1, y1, x2, y2, duration=800):
+        """Giả lập vuốt cong nhẹ bằng cách chia làm 2 đoạn vuốt liên tục nhanh với tọa độ trung gian lệch nhẹ"""
+        x_mid = (x1 + x2) // 2 + random.randint(-40, 40)
+        y_mid = (y1 + y2) // 2 + random.randint(-30, 30)
+        dur1 = int(duration * 0.4)
+        dur2 = duration - dur1
+        # Thực hiện vuốt đoạn 1 và đoạn 2 liên tiếp trong cùng một phiên shell để giảm độ trễ
+        shell_cmd = f"input swipe {x1} {y1} {x_mid} {y_mid} {dur1} && input swipe {x_mid} {y_mid} {x2} {y2} {dur2}"
+        return self.execute_adb(device_id, ["shell", shell_cmd])
+
     def keyevent(self, device_id, keycode):
         """Gửi mã phím hệ thống (ví dụ: 3=Home, 4=Back, 66=Enter)"""
         return self.execute_adb(device_id, ["shell", "input", "keyevent", str(keycode)])
@@ -155,6 +165,41 @@ class ADBController:
             if m:
                 return int(m.group(1)), int(m.group(2))
         return 1080, 1920 # Mặc định nếu lỗi
+
+    def find_element_coords_by_text(self, device_id, target_text):
+        """Dump XML và tìm tọa độ của phần tử khớp với target_text"""
+        xml_file = f"/sdcard/dump_text_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        
+        code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        if code != 0:
+            return None
+            
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_text_{device_id}.xml")
+        code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        coords = None
+        if os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    text = elem.get('text', '')
+                    if target_text.lower() in text.lower():
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+                            break
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+        return coords
 
     def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
@@ -413,7 +458,17 @@ class ADBController:
                     self.tap(device_id, cx, click_y)
                     time.sleep(4.0) # Đợi trang sản phẩm mở ra
                     
-                    # Thực hiện lướt xem ngẫu nhiên 15 - 30 giây
+                    # 1. Vuốt xem album ảnh sản phẩm (Swipe Image Carousel)
+                    update_status("Vuốt xem album ảnh sản phẩm...")
+                    for _ in range(random.randint(1, 2)):
+                        check_cancelled()
+                        x_start = int(width * 0.85) + random.randint(-20, 20)
+                        x_end = int(width * 0.15) + random.randint(-20, 20)
+                        y_img = int(height * 0.25) + random.randint(-30, 30)
+                        self.swipe(device_id, x_start, y_img, x_end, y_img, duration=random.randint(500, 700))
+                        time.sleep(random.uniform(1.5, 2.5))
+
+                    # 2. Thực hiện lướt xem ngẫu nhiên 15 - 30 giây
                     view_duration = random.randint(15, 30)
                     start_time = time.time()
                     update_status(f"Đã mở sản phẩm. Đang lướt xem ngẫu nhiên trong {view_duration} giây...")
@@ -423,7 +478,7 @@ class ADBController:
                         # Vuốt xuống để xem chi tiết bên dưới
                         y_start = int(height * 0.75) + random.randint(-50, 50)
                         y_end = int(height * 0.3) + random.randint(-50, 50)
-                        self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
+                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                         
                         # Đợi ngẫu nhiên 1.5 đến 3 giây để đọc thông tin
                         read_delay = random.uniform(1.5, 3.0)
@@ -437,20 +492,80 @@ class ADBController:
                             check_cancelled()
                             y_start_up = int(height * 0.35) + random.randint(-30, 30)
                             y_end_up = int(height * 0.65) + random.randint(-30, 30)
-                            self.swipe(device_id, cx, y_start_up, cx, y_end_up, duration=random.randint(700, 1000))
+                            self.swipe_curved(device_id, cx, y_start_up, cx, y_end_up, duration=random.randint(700, 1000))
                             
                             read_delay_up = random.uniform(1.5, 2.5)
                             temp_start_up = time.time()
                             while time.time() - temp_start_up < read_delay_up:
                                 time.sleep(0.2)
                                 check_cancelled()
+
+                    # 3. Tương tác ngẫu nhiên (Thả tim hoặc Thêm giỏ hàng với tỷ lệ 15%)
+                    if random.random() < 0.15:
+                        check_cancelled()
+                        update_status("Tương tác ngẫu nhiên (Bỏ giỏ hàng)...")
+                        cart_coords = self.find_element_coords_by_text(device_id, "Thêm vào giỏ hàng")
+                        if cart_coords:
+                            self.tap(device_id, cart_coords[0], cart_coords[1])
+                            time.sleep(2.5) # Đợi bảng chọn phân loại hiện lên
+                            check_cancelled()
+                            
+                            # Click chọn một tùy chọn ngẫu nhiên ở vùng thuộc tính
+                            self.tap(device_id, int(width * 0.3) + random.randint(-50, 50), int(height * 0.5) + random.randint(-50, 50))
+                            time.sleep(1.0)
+                            check_cancelled()
+                            
+                            # Nhấn Back để đóng bảng chọn
+                            self.keyevent(device_id, 4)
+                            time.sleep(1.5)
+
+                    # 4. Tìm nút "Xem Shop" và tiến hành dạo Shop
+                    update_status("Tìm nút Xem Shop...")
+                    shop_coords = None
+                    # Thử cuộn tìm nút Xem Shop tối đa 3 lần
+                    for scroll_find in range(3):
+                        check_cancelled()
+                        shop_coords = self.find_element_coords_by_text(device_id, "Xem Shop")
+                        if shop_coords:
+                            break
+                        # Cuộn xuống một chút để tìm
+                        y_start = int(height * 0.7)
+                        y_end = int(height * 0.4)
+                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=700)
+                        time.sleep(1.5)
+                        
+                    if shop_coords:
+                        update_status("Đang truy cập cửa hàng...")
+                        self.tap(device_id, shop_coords[0], shop_coords[1])
+                        time.sleep(4.0) # Đợi trang Shop tải
+                        
+                        # Dạo trang chủ Shop trong 10-15 giây
+                        shop_duration = random.randint(10, 15)
+                        shop_start = time.time()
+                        update_status(f"Đang dạo trang chủ Shop trong {shop_duration} giây...")
+                        while time.time() - shop_start < shop_duration:
+                            check_cancelled()
+                            y_start = int(height * 0.75) + random.randint(-40, 40)
+                            y_end = int(height * 0.3) + random.randint(-40, 40)
+                            self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
+                            
+                            read_delay = random.uniform(2.0, 3.5)
+                            temp_s = time.time()
+                            while time.time() - temp_s < read_delay:
+                                time.sleep(0.2)
+                                check_cancelled()
+                                
+                        # Nhấn nút Back để quay lại trang sản phẩm
+                        update_status("Hoàn thành dạo Shop. Quay lại sản phẩm...")
+                        self.keyevent(device_id, 4) # Quay lại sản phẩm
+                        time.sleep(2.0)
                             
                     update_status("Hoàn thành quy trình lướt xem sản phẩm!")
                     return True, "Thành công"
                 
                 # Nếu không tìm thấy, vuốt cuộn xuống dưới
                 update_status("Chưa thấy Lâm Đồng, đang vuốt xuống dưới...")
-                self.swipe(device_id, cx, int(height * 0.75), cx, int(height * 0.28), duration=800)
+                self.swipe_curved(device_id, cx, int(height * 0.75), cx, int(height * 0.28), duration=800)
                 
                 for _ in range(10):
                     time.sleep(0.25)
