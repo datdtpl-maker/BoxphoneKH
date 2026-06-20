@@ -59,15 +59,17 @@ Gõ lệnh `/start` hoặc `/help` trong bot Telegram để xem hướng dẫn t
 
 ### 🎯 1. Quy Trình Quét Shop Lâm Đồng
 - **Chạy lần lượt từng máy (Nên dùng để tránh quét IP):**
-  - Lệnh: `tìm tuần tự lâm đồng [từ khóa]` hoặc `tìm lần lượt lâm đồng [từ khóa]`
-  - *Ví dụ:* `tìm tuần tự lâm đồng deriva` (nghỉ 60-90 giây ngẫu nhiên giữa các máy).
-  - ⏹️ Để dừng tiến trình tuần tự này, gõ: `dừng` hoặc `dừng chạy`.
+  - Lệnh: `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2, ...]` (hoặc phân cách bằng dấu `;`, `|`).
+  - *Ví dụ:* `tìm tuần tự lâm đồng deriva, son môi, kem chống nắng` (nghỉ 60-90 giây ngẫu nhiên giữa các máy, mỗi máy sẽ tự động chọn ngẫu nhiên 1 từ khóa trong danh sách để tìm).
 - **Chạy song song tất cả các máy cùng lúc:**
-  - Lệnh: `tìm lâm đồng [từ khóa]`
-  - *Ví dụ:* `tìm lâm đồng deriva`.
+  - Lệnh: `tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
+  - *Ví dụ:* `tìm lâm đồng deriva, son môi` (mỗi máy sẽ chạy một từ khóa ngẫu nhiên trong danh sách).
 - **Chạy trên 1 máy cụ thể:**
-  - Lệnh: `máy [số] tìm lâm đồng [từ khóa]`
-  - *Ví dụ:* `máy 5 tìm lâm đồng deriva`.
+  - Lệnh: `máy [số] tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
+  - *Ví dụ:* `máy 5 tìm lâm đồng deriva, son môi`.
+
+⏹️ **Dừng khẩn cấp toàn bộ tác vụ:**
+Bạn nhắn tin cho bot bất kỳ câu nào sau đây: `dừng`, `stop`, `dừng tất cả`, `dừng chạy`. Bot sẽ lập tức gửi tín hiệu ngắt toàn bộ tác vụ đang chạy trên các máy và đưa bot về trạng thái sẵn sàng nhận lệnh mới sau 3 giây.
 
 ### 📸 2. Kiểm Tra & Giám Sát
 - **Chụp ảnh màn hình:**
