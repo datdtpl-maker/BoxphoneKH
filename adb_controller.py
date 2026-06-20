@@ -468,37 +468,28 @@ class ADBController:
                         self.swipe(device_id, x_start, y_img, x_end, y_img, duration=random.randint(500, 700))
                         time.sleep(random.uniform(1.5, 2.5))
 
-                    # 2. Thực hiện lướt xem ngẫu nhiên 15 - 30 giây
-                    view_duration = random.randint(15, 30)
-                    start_time = time.time()
-                    update_status(f"Đã mở sản phẩm. Đang lướt xem ngẫu nhiên trong {view_duration} giây...")
-                    
-                    while time.time() - start_time < view_duration:
+                    # 2. Vòng lặp cuộn xuống tìm "Xem Shop" từng bước nhỏ (Incremental Scrolling)
+                    update_status("Đang cuộn tìm nút Xem Shop...")
+                    shop_coords = None
+                    # Ta cuộn tối đa 6 lần để tìm nút
+                    for find_attempt in range(6):
                         check_cancelled()
-                        # Vuốt xuống để xem chi tiết bên dưới
-                        y_start = int(height * 0.75) + random.randint(-50, 50)
-                        y_end = int(height * 0.3) + random.randint(-50, 50)
-                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
+                        # Quét tìm nút Xem Shop ở màn hình hiện tại
+                        shop_coords = self.find_element_coords_by_text(device_id, "Xem Shop")
+                        if shop_coords:
+                            break
                         
-                        # Đợi ngẫu nhiên 1.5 đến 3 giây để đọc thông tin
-                        read_delay = random.uniform(1.5, 3.0)
+                        # Nếu chưa thấy, vuốt xuống một khoảng vừa phải (35% chiều cao màn hình) tránh bị trôi qua quá nhanh
+                        y_start = int(height * 0.7) + random.randint(-30, 30)
+                        y_end = int(height * 0.35) + random.randint(-30, 30)
+                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(750, 1000))
+                        
+                        # Đợi ngẫu nhiên 2.0 đến 3.5 giây để đọc thông tin
+                        read_delay = random.uniform(2.0, 3.5)
                         temp_start = time.time()
                         while time.time() - temp_start < read_delay:
-                            time.sleep(0.2)
+                            time.sleep(0.25)
                             check_cancelled()
-                        
-                        # Tỷ lệ 30% vuốt ngược lên một chút để mô phỏng người dùng đọc lại phần trên
-                        if random.random() < 0.3:
-                            check_cancelled()
-                            y_start_up = int(height * 0.35) + random.randint(-30, 30)
-                            y_end_up = int(height * 0.65) + random.randint(-30, 30)
-                            self.swipe_curved(device_id, cx, y_start_up, cx, y_end_up, duration=random.randint(700, 1000))
-                            
-                            read_delay_up = random.uniform(1.5, 2.5)
-                            temp_start_up = time.time()
-                            while time.time() - temp_start_up < read_delay_up:
-                                time.sleep(0.2)
-                                check_cancelled()
 
                     # 3. Tương tác ngẫu nhiên (Thả tim hoặc Thêm giỏ hàng với tỷ lệ 15%)
                     if random.random() < 0.15:
@@ -519,21 +510,7 @@ class ADBController:
                             self.keyevent(device_id, 4)
                             time.sleep(1.5)
 
-                    # 4. Tìm nút "Xem Shop" và tiến hành dạo Shop
-                    update_status("Tìm nút Xem Shop...")
-                    shop_coords = None
-                    # Thử cuộn tìm nút Xem Shop tối đa 3 lần
-                    for scroll_find in range(3):
-                        check_cancelled()
-                        shop_coords = self.find_element_coords_by_text(device_id, "Xem Shop")
-                        if shop_coords:
-                            break
-                        # Cuộn xuống một chút để tìm
-                        y_start = int(height * 0.7)
-                        y_end = int(height * 0.4)
-                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=700)
-                        time.sleep(1.5)
-                        
+                    # 4. Vào dạo Shop
                     if shop_coords:
                         update_status("Đang truy cập cửa hàng...")
                         self.tap(device_id, shop_coords[0], shop_coords[1])
@@ -558,7 +535,23 @@ class ADBController:
                         # Nhấn nút Back để quay lại trang sản phẩm
                         update_status("Hoàn thành dạo Shop. Quay lại sản phẩm...")
                         self.keyevent(device_id, 4) # Quay lại sản phẩm
-                        time.sleep(2.0)
+                        time.sleep(2.5)
+
+                    # 5. Dạo xem thêm chi tiết sản phẩm ở phần dưới sau khi quay lại (10-15 giây)
+                    view_duration = random.randint(10, 15)
+                    start_time = time.time()
+                    update_status(f"Tiếp tục lướt xem thông tin sản phẩm trong {view_duration} giây...")
+                    while time.time() - start_time < view_duration:
+                        check_cancelled()
+                        y_start = int(height * 0.7) + random.randint(-40, 40)
+                        y_end = int(height * 0.35) + random.randint(-40, 40)
+                        self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
+                        
+                        read_delay = random.uniform(2.0, 3.5)
+                        temp_start = time.time()
+                        while time.time() - temp_start < read_delay:
+                            time.sleep(0.25)
+                            check_cancelled()
                             
                     update_status("Hoàn thành quy trình lướt xem sản phẩm!")
                     return True, "Thành công"
