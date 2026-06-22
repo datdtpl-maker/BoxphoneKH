@@ -98,7 +98,9 @@ class ADBController:
         return self.execute_adb(device_id, ["shell", "input", "keyevent", str(keycode)])
 
     def launch_app(self, device_id, package_name):
-        """Khởi chạy một ứng dụng bằng package name"""
+        """Khởi chạy một ứng dụng bằng package name (Đảm bảo ra đúng màn hình chính bằng cách buộc dừng trước)"""
+        self.stop_app(device_id, package_name)
+        time.sleep(1.2)
         # Sử dụng monkey để khởi chạy nhanh app từ launcher
         return self.execute_adb(device_id, ["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
 
