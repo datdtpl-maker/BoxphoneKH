@@ -18,6 +18,14 @@ class ADBController:
     def _run_cmd(self, cmd_args, timeout=15):
         """Chạy lệnh hệ thống với ADB"""
         full_cmd = [self.adb_path] + cmd_args
+        
+        # Thiết lập ẩn cửa sổ CMD đen của tiến trình con trên Windows
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # 0 tương ứng với SW_HIDE
+            
         try:
             result = subprocess.run(
                 full_cmd,
@@ -26,7 +34,8 @@ class ADBController:
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                timeout=timeout
+                timeout=timeout,
+                startupinfo=startupinfo
             )
             return result.returncode, result.stdout.strip(), result.stderr.strip()
         except subprocess.TimeoutExpired:
