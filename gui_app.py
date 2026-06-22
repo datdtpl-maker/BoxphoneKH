@@ -550,22 +550,70 @@ class GUIApp(ctk.CTk):
             keyword_str = ", ".join(keywords)
             print(f"[GUI] Bắt đầu tìm kiếm song song '{keyword_str}' (Click đầu tiên: {click_first_item}) trên {len(target_devices)} máy...")
             
+            # Gửi tin nhắn bắt đầu chạy song song về Telegram
+            if config.ALLOWED_USER_IDS:
+                try:
+                    main.bot.send_message(
+                        config.ALLOWED_USER_IDS[0],
+                        f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG**\n\n"
+                        f"Từ khóa: `{keyword_str}`\n"
+                        f"Tổng số máy: {len(target_devices)} máy\n"
+                        f"Chế độ click đầu tiên: **{click_first_item}**"
+                    )
+                except Exception:
+                    pass
+            
             def run_search_parallel(device_id):
                 devices = main.get_ordered_devices()
                 dev_idx = devices.index(device_id) + 1
                 current_keyword = random.choice(keywords)
                 print(f"[Máy {dev_idx}] Bắt đầu tìm từ khóa `{current_keyword}`...")
+                
+                # Báo về Telegram máy bắt đầu chạy
+                if config.ALLOWED_USER_IDS:
+                    try:
+                        main.bot.send_message(config.ALLOWED_USER_IDS[0], f"🔍 **Máy {dev_idx}**: Bắt đầu quét từ khóa `{current_keyword}`...")
+                    except Exception:
+                        pass
+                
                 success, err = main.adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=main.is_cancelled, click_first_item=click_first_item)
                 if success:
                     print(f"[Máy {dev_idx}] ✅ Đã hoàn thành trọn vẹn quy trình lướt sản phẩm và dạo Shop!")
+                    if config.ALLOWED_USER_IDS:
+                        try:
+                            main.bot.send_message(config.ALLOWED_USER_IDS[0], f"✅ **Máy {dev_idx}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!")
+                        except Exception:
+                            pass
                 else:
                     print(f"[Máy {dev_idx}] ❌ Thất bại: {err}")
-                    
+                    if config.ALLOWED_USER_IDS:
+                        try:
+                            main.bot.send_message(config.ALLOWED_USER_IDS[0], f"❌ **Máy {dev_idx}**: {err}")
+                        except Exception:
+                            pass
+                return dev_idx, current_keyword, success, err
+                
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                list(executor.map(run_search_parallel, target_devices))
+                futures = [executor.submit(run_search_parallel, dev) for dev in target_devices]
+                results = [f.result() for f in futures]
+                
+            success_count = sum(1 for r in results if r[2])
+            fail_count = len(results) - success_count
+            
+            summary = f"🏁 **[GUI] KẾT QUẢ TÌM SHOP LÂM ĐỒNG (SONG SONG):**\n\n"
+            summary += f"✅ Hoàn thành trọn vẹn: **{success_count}/{len(target_devices)} máy**\n"
+            if fail_count > 0:
+                summary += f"❌ Thất bại: **{fail_count} máy**\n"
+                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
+                summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
                 
             print("[GUI] Tiến trình tìm kiếm song song kết thúc.")
+            if config.ALLOWED_USER_IDS:
+                try:
+                    main.bot.send_message(config.ALLOWED_USER_IDS[0], summary, parse_mode="Markdown")
+                except Exception:
+                    pass
             
         self.run_in_thread(action)
 
