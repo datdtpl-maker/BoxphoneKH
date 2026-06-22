@@ -98,11 +98,24 @@ class ADBController:
         return self.execute_adb(device_id, ["shell", "input", "keyevent", str(keycode)])
 
     def launch_app(self, device_id, package_name):
-        """Khởi chạy một ứng dụng bằng package name (Đảm bảo ra đúng màn hình chính bằng cách buộc dừng trước)"""
-        self.stop_app(device_id, package_name)
-        time.sleep(1.2)
+        """Khởi chạy một ứng dụng bằng package name"""
         # Sử dụng monkey để khởi chạy nhanh app từ launcher
         return self.execute_adb(device_id, ["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
+
+    def ensure_shopee_homepage(self, device_id):
+        """Đảm bảo đưa Shopee về trang chủ mà không cần force-stop để tránh kích hoạt Captcha"""
+        # 1. Đưa Shopee lên tiền cảnh
+        self.launch_app(device_id, "com.shopee.vn")
+        time.sleep(1.5)
+        
+        # 2. Nhấn phím Back 3 lần để thoát khỏi các trang con (shop, sản phẩm)
+        for _ in range(3):
+            self.keyevent(device_id, 4)
+            time.sleep(0.5)
+            
+        # 3. Đưa Shopee lên tiền cảnh một lần nữa (nếu phím Back làm thoát app ra màn hình Home, app sẽ mở lại ngay trang chủ)
+        self.launch_app(device_id, "com.shopee.vn")
+        time.sleep(1.5)
 
     def stop_app(self, device_id, package_name):
         """Buộc dừng một ứng dụng"""
@@ -229,13 +242,8 @@ class ADBController:
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
             
             check_cancelled()
-            update_status("Đang mở Shopee...")
-            self.launch_app(device_id, SHOPEE_PACKAGE)
-            
-            # Đợi Shopee tải (khoảng 7 giây)
-            for _ in range(7):
-                time.sleep(1.0)
-                check_cancelled()
+            update_status("Đang đưa Shopee về trang chủ...")
+            self.ensure_shopee_homepage(device_id)
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
@@ -364,13 +372,8 @@ class ADBController:
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
             
             check_cancelled()
-            update_status("Đang mở Shopee...")
-            self.launch_app(device_id, SHOPEE_PACKAGE)
-            
-            # Đợi Shopee tải (khoảng 7 giây)
-            for _ in range(7):
-                time.sleep(1.0)
-                check_cancelled()
+            update_status("Đang đưa Shopee về trang chủ...")
+            self.ensure_shopee_homepage(device_id)
             
             # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
