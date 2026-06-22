@@ -81,7 +81,7 @@ def get_ordered_devices():
     ordered = sorted(raw_devices, key=get_sort_key)
     return ordered
 
-def run_sequential_shopee_search(message, keywords, devices):
+def run_sequential_shopee_search(message, keywords, devices, click_first_item=False):
     global cancel_sequential, cancel_flag
     cancel_sequential = False
     cancel_flag = False
@@ -117,7 +117,7 @@ def run_sequential_shopee_search(message, keywords, devices):
         current_keyword = random.choice(keywords)
         bot.send_message(message.chat.id, f"📱 **Máy {dev_idx}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
-        success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled)
+        success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first_item)
         
         if cancel_sequential or cancel_flag:
             try:
@@ -297,8 +297,20 @@ def parse_natural_command(text):
             
             # Kiểm tra xem có yêu cầu tìm shop Lâm Đồng hay không
             if "lâm đồng" in text or "lam dong" in text:
+                # Phát hiện hậu tố click sản phẩm đầu tiên
+                click_first_item = False
+                first_item_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+                if any(ind in text for ind in first_item_indicators):
+                    click_first_item = True
+                
+                # Làm sạch từ khóa
                 keyword_clean = re.sub(r"(?:tỉnh\s+)?(?:lâm\s+đồng|lam\s+dong)", "", keyword, flags=re.IGNORECASE)
                 keyword_clean = re.sub(r"(?:tuần\s+tự|tuan\s+tu|lần\s+lượt|lan\s+luot)", "", keyword_clean, flags=re.IGNORECASE)
+                
+                # Loại bỏ các từ khóa chỉ định click sản phẩm đầu tiên khỏi từ khóa chính
+                for ind in first_item_indicators:
+                    keyword_clean = re.sub(r"\b" + re.escape(ind) + r"\b", "", keyword_clean, flags=re.IGNORECASE)
+                
                 keyword_clean = re.sub(r"\s+", " ", keyword_clean).strip()
                 
                 # Tách nhiều từ khóa bằng dấu phẩy, chấm phẩy hoặc gạch đứng
@@ -307,8 +319,18 @@ def parse_natural_command(text):
                     keywords = [keyword_clean]
                 
                 if any(k in text for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
-                    return {"action": "shopee_search_lamdong_sequential", "keywords": keywords, "device_idx": device_idx}
-                return {"action": "shopee_search_lamdong", "keywords": keywords, "device_idx": device_idx}
+                    return {
+                        "action": "shopee_search_lamdong_sequential", 
+                        "keywords": keywords, 
+                        "device_idx": device_idx,
+                        "click_first_item": click_first_item
+                    }
+                return {
+                    "action": "shopee_search_lamdong", 
+                    "keywords": keywords, 
+                    "device_idx": device_idx,
+                    "click_first_item": click_first_item
+                }
                 
             keywords = [k.strip() for k in re.split(r'[,;|]', keyword) if k.strip()]
             if not keywords:
@@ -349,27 +371,29 @@ def send_welcome(message):
 
     instructions = (
         "🤖 **BOX PHONE - SHOPEE KHẢI HOÀN** 📱\n\n"
-        "Chào mừng Admin! Danh sách lệnh nhanh:\n\n"
-        "🔄 **1. Tìm kiếm Shop Lâm Đồng (Tự động hoàn toàn)**\n"
-        "👉 **Chạy tuần tự (Khuyên dùng - Nghỉ 60-90s):**\n"
-        "• `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2...]`\n"
-        "*(Ví dụ: `tìm tuần tự lâm đồng deriva, son môi`)*\n"
-        "⏹️ **Để dừng tất cả các máy lập tức:**\n"
-        "• Click nút `🛑 DỪNG CHẠY KHẨN CẤP` dưới tin nhắn trạng thái\n"
-        "• Hoặc gõ lệnh: `/stop`, `dừng` hoặc `stop`\n\n"
-        "👉 **Chạy song song (Tất cả máy cùng lúc):**\n"
-        "• `tìm lâm đồng [từ khóa 1, từ khóa 2...]`\n\n"
-        "👉 **Chạy trên 1 máy cụ thể:**\n"
-        "• `máy [số] tìm lâm đồng [từ khóa]`\n\n"
-        "📸 **2. Chụp màn hình kiểm tra**\n"
-        "• `chụp màn hình máy [số]` (Ví dụ: `chụp màn hình máy 12`)\n\n"
-        "📊 **3. Kiểm tra kết nối thiết bị**\n"
+        "Chào mừng Admin! Danh sách lệnh mẫu dễ sao chép:\n\n"
+        "🔄 **1. Tìm kiếm & Click sản phẩm (Tự động hoàn toàn)**\n"
+        "👉 **Chạy TUẦN TỰ (Khuyên dùng - Nghỉ 60-90s giữa các máy):**\n"
+        "• Chế độ tìm Lâm Đồng: `tìm tuần tự lâm đồng deriva, son môi`\n"
+        "• Chế độ click bài đầu tiên (Video): `tìm tuần tự lâm đồng deriva video` hoặc `tìm tuần tự lâm đồng deriva đầu tiên`\n\n"
+        "👉 **Chạy SONG SONG (Tất cả các máy cùng chạy một lúc):**\n"
+        "• Chế độ tìm Lâm Đồng: `tìm lâm đồng deriva`\n"
+        "• Chế độ click bài đầu tiên (Video): `tìm lâm đồng deriva video`\n\n"
+        "👉 **Chạy trên MỘT MÁY chỉ định (Ví dụ: Máy 5):**\n"
+        "• Chế độ tìm Lâm Đồng: `máy 5 tìm lâm đồng deriva`\n"
+        "• Chế độ click bài đầu tiên (Video): `máy 5 tìm lâm đồng deriva video`\n\n"
+        "⏹️ **Dừng chạy khẩn cấp tất cả các máy:**\n"
+        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` đính kèm dưới tin nhắn chạy\n"
+        "• Hoặc gửi lệnh chat: `dừng`, `stop` hoặc `/stop`\n\n"
+        "📸 **2. Chụp ảnh màn hình kiểm tra (Giải Captcha):**\n"
+        "• `chụp màn hình máy 1` (Thay số máy bạn muốn kiểm tra)\n\n"
+        "📊 **3. Kiểm tra danh sách & Kết nối điện thoại:**\n"
         "• `trạng thái` hoặc `danh sách máy`\n\n"
-        "⚙️ **4. Phím điều khiển nhanh**\n"
-        "• `quay lại` | `quay lại máy [số]`\n"
-        "• `trang chủ` | `trang chủ máy [số]`\n"
-        "• `tắt xoay` | `tắt xoay máy [số]`\n"
-        "• `mở shopee` | `đóng shopee` (tất cả hoặc máy cụ thể)"
+        "⚙️ **4. Các phím điều khiển nhanh (Tất cả hoặc máy chỉ định):**\n"
+        "• `quay lại` | `quay lại máy 5`\n"
+        "• `trang chủ` | `trang chủ máy 5`\n"
+        "• `tắt xoay` | `tắt xoay máy 5`\n"
+        "• `mở shopee` | `đóng shopee` | `mở shopee máy 5`"
     )
     bot.reply_to(message, instructions, parse_mode="Markdown")
 
@@ -493,6 +517,7 @@ def handle_all_messages(message):
 
     elif action == "shopee_search_lamdong":
         keywords = cmd["keywords"]
+        click_first = cmd.get("click_first_item", False)
         
         if len(target_devices) == 1:
             tgt_idx = devices.index(target_devices[0]) + 1
@@ -502,7 +527,7 @@ def handle_all_messages(message):
             def cb(dev_id, msg):
                 bot.edit_message_text(f"🔍 **Máy {tgt_idx}**: {msg}", message.chat.id, status_msg.message_id)
                 
-            success, err = adb.shopee_find_and_click_lamdong(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled)
+            success, err = adb.shopee_find_and_click_lamdong(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled, click_first_item=click_first)
             if success:
                 bot.edit_message_text(f"🎉 **Máy {tgt_idx}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!", message.chat.id, status_msg.message_id)
             else:
@@ -534,7 +559,7 @@ def handle_all_messages(message):
                 dev_idx = devices.index(device_id) + 1
                 current_keyword = random.choice(keywords)
                 bot.send_message(message.chat.id, f"🔍 **Máy {dev_idx}**: Bắt đầu quét từ khóa `{current_keyword}`...")
-                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled)
+                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first)
                 return dev_idx, current_keyword, success, err
                 
             results = []
@@ -558,13 +583,14 @@ def handle_all_messages(message):
 
     elif action == "shopee_search_lamdong_sequential":
         keywords = cmd["keywords"]
+        click_first = cmd.get("click_first_item", False)
         global sequential_thread
         if sequential_thread and sequential_thread.is_alive():
             bot.reply_to(message, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng nhắn 'dừng' để hủy trước khi khởi chạy phiên mới.")
         else:
             sequential_thread = threading.Thread(
                 target=run_sequential_shopee_search, 
-                args=(message, keywords, target_devices)
+                args=(message, keywords, target_devices, click_first)
             )
             sequential_thread.daemon = True
             sequential_thread.start()

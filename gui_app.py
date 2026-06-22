@@ -281,6 +281,18 @@ class GUIApp(ctk.CTk):
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa tìm kiếm!")
             return
             
+        # Tự động phát hiện cờ click_first_item trong ô từ khóa của GUI
+        click_first_item = False
+        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        temp_str = keywords_str.lower()
+        if any(ind in temp_str for ind in first_indicators):
+            click_first_item = True
+            
+        # Làm sạch từ khóa
+        for ind in first_indicators:
+            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
+        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
+            
         keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
         target_devices = self.parse_targets()
         if not target_devices:
@@ -293,7 +305,7 @@ class GUIApp(ctk.CTk):
                         def __init__(self):
                             self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
                     self.chat = DummyChat()
-            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices)
+            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item)
             
         self.run_in_thread(action)
 
@@ -302,6 +314,18 @@ class GUIApp(ctk.CTk):
         if not keywords_str:
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa tìm kiếm!")
             return
+            
+        # Tự động phát hiện cờ click_first_item trong ô từ khóa của GUI
+        click_first_item = False
+        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        temp_str = keywords_str.lower()
+        if any(ind in temp_str for ind in first_indicators):
+            click_first_item = True
+            
+        # Làm sạch từ khóa
+        for ind in first_indicators:
+            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
+        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
             
         keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
         target_devices = self.parse_targets()
@@ -312,14 +336,14 @@ class GUIApp(ctk.CTk):
             main.cancel_flag = False
             main.cancel_sequential = False
             keyword_str = ", ".join(keywords)
-            print(f"[GUI] Bắt đầu tìm kiếm song song '{keyword_str}' trên {len(target_devices)} máy...")
+            print(f"[GUI] Bắt đầu tìm kiếm song song '{keyword_str}' (Click đầu tiên: {click_first_item}) trên {len(target_devices)} máy...")
             
             def run_search_parallel(device_id):
                 devices = main.get_ordered_devices()
                 dev_idx = devices.index(device_id) + 1
                 current_keyword = random.choice(keywords)
                 print(f"[Máy {dev_idx}] Bắt đầu tìm từ khóa `{current_keyword}`...")
-                success, err = main.adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=main.is_cancelled)
+                success, err = main.adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=main.is_cancelled, click_first_item=click_first_item)
                 if success:
                     print(f"[Máy {dev_idx}] ✅ Đã hoàn thành trọn vẹn quy trình lướt sản phẩm và dạo Shop!")
                 else:

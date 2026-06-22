@@ -336,8 +336,8 @@ class ADBController:
         update_status("[Captcha] Không thể tự giải Captcha sau nhiều lần thử.")
         return False
 
-    def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None):
-        """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng'"""
+    def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None, click_first_item=False):
+        """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng' (hoặc bài đăng đầu tiên nếu bật click_first_item)"""
         def update_status(msg):
             if status_callback:
                 status_callback(device_id, msg)
@@ -434,15 +434,86 @@ class ADBController:
                     try:
                         tree = ET.parse(local_xml)
                         root = tree.getroot()
-                        for elem in root.iter():
-                            text = elem.get('text', '')
-                            if 'Lâm Đồng' in text or 'Tỉnh Lâm Đồng' in text:
+                        
+                        # LOGIC CLICK SẢN PHẨM ĐẦU TIÊN (Nếu được bật và đang ở trang kết quả đầu tiên)
+                        if click_first_item and swipe_count == 0:
+                            update_status("[Chế độ Đầu tiên] Đang phân tích tìm bài đăng đầu tiên...")
+                            best_elem = None
+                            min_y = 99999
+                            
+                            # Chuẩn hóa từ khóa tìm kiếm (lấy các từ chính dài hơn 1 ký tự)
+                            kw_clean = keyword.lower().strip()
+                            kw_words = [w for w in kw_clean.split() if len(w) > 1]
+                            if not kw_words:
+                                kw_words = [kw_clean]
+                                
+                            # Bước 1: Quét tìm node có text chứa từ khóa tìm kiếm ở vùng trên (Y > 350)
+                            for elem in root.iter():
+                                text = elem.get('text', '').lower()
                                 bounds = elem.get('bounds', '')
+                                if not bounds:
+                                    continue
+                                    
+                                m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                                if not m:
+                                    continue
+                                x1, y1, x2, y2 = map(int, m.groups())
+                                
+                                # Bỏ qua các thành phần thuộc thanh tìm kiếm/bộ lọc
+                                if y1 < 350 or y1 > 1700:
+                                    continue
+                                    
+                                if any(word in text for word in kw_words):
+                                    if y1 < min_y:
+                                        min_y = y1
+                                        best_elem = elem
+                                        
+                            # Bước 2: Dự phòng nếu không khớp từ khóa (ví dụ video chỉ hiển thị text mô tả lạ)
+                            if best_elem is None:
+                                min_y = 99999
+                                for elem in root.iter():
+                                    text = elem.get('text', '')
+                                    bounds = elem.get('bounds', '')
+                                    if not bounds or len(text) < 12:
+                                        continue
+                                        
+                                    m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                                    if not m:
+                                        continue
+                                    x1, y1, x2, y2 = map(int, m.groups())
+                                    
+                                    # Lấy TextView có Y nhỏ nhất trong vùng chứa bài đăng đầu tiên
+                                    if 350 < y1 < 1200:
+                                        if y1 < min_y:
+                                            min_y = y1
+                                            best_elem = elem
+                                            
+                            if best_elem is not None:
+                                bounds = best_elem.get('bounds', '')
                                 m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                                 if m:
                                     x1, y1, x2, y2 = map(int, m.groups())
-                                    found_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                                    break
+                                    cx_elem = (x1 + x2) // 2
+                                    cy_elem = (y1 + y2) // 2
+                                    
+                                    # Dịch lên trên tiêu đề 130px để chắc chắn click trúng hình ảnh/vùng card sản phẩm
+                                    click_y = cy_elem - 130
+                                    if click_y < 350:
+                                        click_y = cy_elem
+                                    found_coords = (cx_elem, click_y)
+                                    update_status(f"[Chế độ Đầu tiên] Phát hiện bài đầu tiên '{best_elem.get('text')[:25]}...' tại ({cx_elem}, {cy_elem}).")
+                                    
+                        # LOGIC QUÉT LÂM ĐỒNG THƯỜNG (Nếu không bật click_first_item hoặc không tìm thấy bài đăng đầu tiên bằng dự phòng)
+                        if not found_coords:
+                            for elem in root.iter():
+                                text = elem.get('text', '')
+                                if 'Lâm Đồng' in text or 'Tỉnh Lâm Đồng' in text:
+                                    bounds = elem.get('bounds', '')
+                                    m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                                    if m:
+                                        x1, y1, x2, y2 = map(int, m.groups())
+                                        found_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+                                        break
                     except Exception as e:
                         print(f"Loi phan tich XML tren may {device_id}: {e}")
                     finally:
