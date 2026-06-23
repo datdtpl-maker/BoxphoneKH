@@ -121,6 +121,83 @@ class ADBController:
         """Buộc dừng một ứng dụng"""
         return self.execute_adb(device_id, ["shell", "am", "force-stop", package_name])
 
+    def bypass_shopee_popup(self, device_id):
+        """
+        Quét giao diện XML để phát hiện và click nút đóng popup quảng cáo (nếu có),
+        hoặc gửi phím Back dự phòng để đóng các Dialog quảng cáo đè trên trang chủ.
+        """
+        xml_file = f"/sdcard/dump_popup_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        
+        # Dump giao diện
+        code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        if code != 0:
+            # Nếu không dump được, gửi phím Back dự phòng
+            self.keyevent(device_id, 4)
+            time.sleep(1.0)
+            return
+            
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_popup_{device_id}.xml")
+        code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        closed = False
+        if os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                
+                # Danh sách các từ khóa nhận dạng nút Đóng popup
+                close_keywords = ["đóng", "close", "tắt", "dismiss", "cancel", "không, cảm ơn", "để sau", "lần sau"]
+                close_patterns = [re.compile(rf"\b{k}\b", re.IGNORECASE) for k in close_keywords]
+                
+                for elem in root.iter():
+                    text = elem.get('text', '')
+                    desc = elem.get('content-desc', '')
+                    res_id = elem.get('resource-id', '')
+                    
+                    # 1. Kiểm tra text hoặc content-desc khớp với từ khóa đóng
+                    matched = False
+                    for pattern in close_patterns:
+                        if pattern.search(text) or pattern.search(desc):
+                            matched = True
+                            break
+                            
+                    # 2. Hoặc resource-id chứa các hậu tố đóng quen thuộc
+                    if not matched and res_id:
+                        res_id_lower = res_id.lower()
+                        if any(x in res_id_lower for x in ["close", "dismiss", "cancel", "btn_close", "iv_close"]):
+                            matched = True
+                            
+                    if matched:
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            cx = (x1 + x2) // 2
+                            cy = (y1 + y2) // 2
+                            # Đảm bảo tọa độ hợp lệ
+                            if cx > 0 and cy > 0:
+                                print(f"[Device {device_id[:6]}] Phát hiện nút đóng popup tại ({cx}, {cy}) [Text: '{text}', ID: '{res_id}']")
+                                self.tap(device_id, cx, cy)
+                                closed = True
+                                time.sleep(1.0)
+                                break
+            except Exception as e:
+                print(f"[Device {device_id[:6]}] Lỗi phân tích XML popup: {e}")
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                # Xóa file XML trên thiết bị
+                self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+                    
+        # Nếu quét XML không chủ động click được nút nào, gửi phím Back dự phòng để đóng Dialog
+        if not closed:
+            print(f"[Device {device_id[:6]}] Gửi phím Back dự phòng để tắt popup Dialog...")
+            self.keyevent(device_id, 4)
+            time.sleep(1.0)
+
     def input_text(self, device_id, text):
         """Nhập chữ tiếng Việt thông qua bàn phím XwIME bằng Base64 broadcast"""
         # Đảm bảo IME đã bật
@@ -244,6 +321,10 @@ class ADBController:
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
             self.ensure_shopee_homepage(device_id)
+            
+            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            update_status("Kiểm tra và tắt popup quảng cáo...")
+            self.bypass_shopee_popup(device_id)
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
@@ -374,6 +455,10 @@ class ADBController:
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
             self.ensure_shopee_homepage(device_id)
+            
+            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            update_status("Kiểm tra và tắt popup quảng cáo...")
+            self.bypass_shopee_popup(device_id)
             
             # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
