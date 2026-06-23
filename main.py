@@ -33,6 +33,59 @@ def is_cancelled():
 # Caching mapping thiết bị toàn cục để tra cứu nhanh
 cached_mapping = {}
 
+def safe_send_message(chat_id, text, parse_mode=None, reply_markup=None, reply_to_message_id=None):
+    """Gửi tin nhắn Telegram an toàn, tự động retry nếu lỗi mạng để không làm sập luồng chính"""
+    for attempt in range(3):
+        try:
+            return bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+                reply_to_message_id=reply_to_message_id,
+                timeout=15
+            )
+        except Exception as e:
+            print(f"[Telegram ERROR] Gửi tin nhắn thất bại (Lần {attempt+1}/3): {e}")
+            if attempt < 2:
+                time.sleep(2.0)
+    return None
+
+def safe_edit_message(text, chat_id, message_id, reply_markup=None, parse_mode=None):
+    """Sửa tin nhắn Telegram an toàn, tự động retry nếu lỗi mạng"""
+    for attempt in range(3):
+        try:
+            return bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+                timeout=15
+            )
+        except Exception as e:
+            print(f"[Telegram ERROR] Sửa tin nhắn thất bại (Lần {attempt+1}/3): {e}")
+            if attempt < 2:
+                time.sleep(2.0)
+    return None
+
+def safe_send_photo(chat_id, photo, caption=None, reply_to_message_id=None):
+    """Gửi ảnh Telegram an toàn, tự động retry nếu lỗi mạng"""
+    for attempt in range(3):
+        try:
+            return bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                reply_to_message_id=reply_to_message_id,
+                timeout=20
+            )
+        except Exception as e:
+            print(f"[Telegram ERROR] Gửi ảnh thất bại (Lần {attempt+1}/3): {e}")
+            if attempt < 2:
+                time.sleep(2.0)
+    return None
+
 def get_ordered_devices():
     global cached_mapping
     raw_devices = adb.get_devices()
@@ -191,7 +244,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
     
-    start_msg = bot.send_message(
+    start_msg = safe_send_message(
         message.chat.id, 
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
         f"Danh sách từ khóa: `{keyword_str}`\n"
@@ -202,47 +255,54 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         reply_markup=markup
     )
     
+    start_msg_id = start_msg.message_id if start_msg else None
+    
     success_count = 0
     for idx, dev in enumerate(devices):
         if cancel_sequential or cancel_flag:
-            try:
-                bot.edit_message_reply_markup(message.chat.id, start_msg.message_id, reply_markup=None)
-            except Exception:
-                pass
-            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
+            if start_msg_id:
+                try:
+                    bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
+                except Exception:
+                    pass
+            safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
         dev_name = get_device_name(dev)
         current_keyword = random.choice(keywords)
-        bot.send_message(message.chat.id, f"📱 **Máy {dev_name}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
+        safe_send_message(message.chat.id, f"📱 **Máy {dev_name}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
         success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first_item)
         
         if cancel_sequential or cancel_flag:
-            try:
-                bot.edit_message_reply_markup(message.chat.id, start_msg.message_id, reply_markup=None)
-            except Exception:
-                pass
-            bot.send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
+            if start_msg_id:
+                try:
+                    bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
+                except Exception:
+                    pass
+            safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
         if success:
             success_count += 1
-            bot.send_message(message.chat.id, f"✅ **Máy {dev_name}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!")
+            safe_send_message(message.chat.id, f"✅ **Máy {dev_name}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!")
         else:
-            bot.send_message(message.chat.id, f"❌ **Máy {dev_name}**: {err}")
+            safe_send_message(message.chat.id, f"❌ **Máy {dev_name}**: {err}")
             if "Captcha" in err or "bị chặn" in err.lower():
                 temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
                 os.makedirs(temp_dir, exist_ok=True)
                 screenshot_path = os.path.join(temp_dir, f"captcha_alert_{dev_name}.png")
                 sc_success, _ = adb.take_screenshot(dev, screenshot_path)
                 if sc_success:
-                    with open(screenshot_path, 'rb') as photo:
-                        bot.send_photo(
-                            message.chat.id, 
-                            photo, 
-                            caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {dev_name}**\n\nHệ thống đã thử tự động giải bằng OpenCV nhưng thất bại. Vui lòng giải tay máy này trên phần mềm xiaowei!"
-                        )
+                    try:
+                        with open(screenshot_path, 'rb') as photo:
+                            safe_send_photo(
+                                message.chat.id, 
+                                photo, 
+                                caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {dev_name}**\n\nHệ thống đã thử tự động giải bằng OpenCV nhưng thất bại. Vui lòng giải tay máy này trên phần mềm xiaowei!"
+                            )
+                    except Exception as pe:
+                        print(f"Error opening/sending photo: {pe}")
                     try:
                         os.remove(screenshot_path)
                     except Exception:
@@ -250,7 +310,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             
         if idx < len(devices) - 1:
             delay = random.randint(60, 90)
-            bot.send_message(message.chat.id, f"⏳ Đợi **{delay} giây** trước khi sang máy tiếp theo...")
+            safe_send_message(message.chat.id, f"⏳ Đợi **{delay} giây** trước khi sang máy tiếp theo...")
             
             for _ in range(delay):
                 if cancel_sequential or cancel_flag:
@@ -258,11 +318,12 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
                 time.sleep(1)
                 
     if not cancel_sequential and not cancel_flag:
-        try:
-            bot.edit_message_reply_markup(message.chat.id, start_msg.message_id, reply_markup=None)
-        except Exception:
-            pass
-        bot.send_message(
+        if start_msg_id:
+            try:
+                bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
+            except Exception:
+                pass
+        safe_send_message(
             message.chat.id, 
             f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n\n"
             f"Đã xử lý xong: **{len(devices)}/{len(devices)} máy**\n"
