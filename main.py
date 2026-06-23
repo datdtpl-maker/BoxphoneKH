@@ -469,30 +469,39 @@ def send_welcome(message):
         return
 
     instructions = (
-        "🤖 **BOX PHONE - SHOPEE KHẢI HOÀN** 📱\n\n"
-        "Chào mừng Admin! Danh sách lệnh mẫu dễ sao chép:\n\n"
-        "🔄 **1. Tìm kiếm & Click sản phẩm (Tự động hoàn toàn)**\n"
-        "👉 **Chạy TUẦN TỰ (Khuyên dùng - Nghỉ 60-90s giữa các máy):**\n"
-        "• Chế độ tìm Lâm Đồng: `tìm tuần tự lâm đồng deriva, son môi`\n"
-        "• Chế độ click bài đầu tiên (Video): `tìm tuần tự lâm đồng deriva video` hoặc `tìm tuần tự lâm đồng deriva đầu tiên`\n\n"
-        "👉 **Chạy SONG SONG (Tất cả các máy cùng chạy một lúc):**\n"
-        "• Chế độ tìm Lâm Đồng: `tìm lâm đồng deriva`\n"
-        "• Chế độ click bài đầu tiên (Video): `tìm lâm đồng deriva video`\n\n"
-        "👉 **Chạy trên MỘT MÁY chỉ định (Ví dụ: Máy 5):**\n"
-        "• Chế độ tìm Lâm Đồng: `máy 5 tìm lâm đồng deriva`\n"
-        "• Chế độ click bài đầu tiên (Video): `máy 5 tìm lâm đồng deriva video`\n\n"
-        "⏹️ **Dừng chạy khẩn cấp tất cả các máy:**\n"
-        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` đính kèm dưới tin nhắn chạy\n"
-        "• Hoặc gửi lệnh chat: `dừng`, `stop` hoặc `/stop`\n\n"
-        "📸 **2. Chụp ảnh màn hình kiểm tra (Giải Captcha):**\n"
-        "• `chụp màn hình máy 1` (Thay số máy bạn muốn kiểm tra)\n\n"
-        "📊 **3. Kiểm tra danh sách & Kết nối điện thoại:**\n"
-        "• `trạng thái` hoặc `danh sách máy`\n\n"
-        "⚙️ **4. Các phím điều khiển nhanh (Tất cả hoặc máy chỉ định):**\n"
-        "• `quay lại` | `quay lại máy 5`\n"
-        "• `trang chủ` | `trang chủ máy 5`\n"
-        "• `tắt xoay` | `tắt xoay máy 5`\n"
-        "• `mở shopee` | `đóng shopee` | `mở shopee máy 5`"
+        "🤖 **BOX PHONE CONTROL - SHOPEE KHẢI HOÀN** 🤖\n\n"
+        "Chào mừng Admin! Dưới đây là bảng hướng dẫn điều khiển hệ thống Box Phone tự động. Bạn có thể sao chép nhanh các câu lệnh mẫu:\n\n"
+        
+        "📌 **1. LỆNH TÌM KIẾM & BƠM SẢN PHẨM (Tự động 100%)**\n"
+        "👉 **Chạy TUẦN TỰ (Khuyên dùng - Giãn cách 60-90s tránh quét IP):**\n"
+        "• Lướt tìm shop Lâm Đồng: `tìm tuần tự lâm đồng deriva, son môi`\n"
+        "• Lướt thẳng bài top 1/Video: `tìm tuần tự lâm đồng deriva video` hoặc `tìm tuần tự lâm đồng deriva đầu tiên`\n"
+        "👉 **Chạy SONG SONG (Tất cả các máy chạy cùng lúc):**\n"
+        "• Lướt tìm shop Lâm Đồng: `tìm lâm đồng deriva`\n"
+        "• Lướt thẳng bài top 1/Video: `tìm lâm đồng deriva video`\n"
+        "👉 **Chạy trên MỘT MÁY chỉ định (Ví dụ: Máy S10):**\n"
+        "• Lướt tìm shop Lâm Đồng: `máy 10 tìm lâm đồng deriva`\n"
+        "• Lướt thẳng bài top 1/Video: `máy 10 tìm lâm đồng deriva video`\n\n"
+        
+        "🛑 **DỪNG CHẠY KHẨN CẤP:**\n"
+        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` đính kèm trực tiếp dưới tin nhắn tiến trình của Bot.\n"
+        "• Hoặc gõ tin nhắn bất kỳ: `dừng`, `stop`, hoặc gửi lệnh `/stop` để hủy toàn bộ tác vụ lập tức.\n\n"
+        
+        "📸 **2. CHỤP ẢNH MÀN HÌNH GIÁM SÁT**\n"
+        "• Xem màn hình máy cụ thể: `chụp màn hình máy 16` (hoặc `chụp máy 16`)\n"
+        "*(Hỗ trợ giám sát từ xa hoặc tự giải Captcha thủ công nếu bot báo lỗi)*\n\n"
+        
+        "📊 **3. TRẠNG THÁI HỆ THỐNG**\n"
+        "• Xem danh sách kết nối: `trạng thái` hoặc `danh sách máy`\n"
+        "*(Hiển thị chi tiết tên máy thật S1-S20 cùng mã Serial ADB đang kết nối)*\n\n"
+        
+        "⚙️ **4. ĐIỀU KHIỂN THỦ CÔNG NHANH (Tất cả hoặc máy chỉ định)**\n"
+        "• Quay lại: `quay lại` | `quay lại máy 10`\n"
+        "• Về màn hình chính: `trang chủ` | `trang chủ máy 10`\n"
+        "• Khóa hướng dọc màn hình: `tắt xoay` | `tắt xoay máy 10`\n"
+        "• Mở Shopee & bypass popup: `mở shopee` | `mở shopee máy 10`\n"
+        "• Dừng Shopee & dọn RAM đa nhiệm: `đóng shopee` | `đóng shopee máy 10`\n\n"
+        "💡 *Lưu ý: Hệ thống đã tự động lọc trùng kết nối USB/Wifi và đồng bộ tên thật. Tên máy khi gõ lệnh (ví dụ: máy 10) tương ứng với máy nhãn S10 hiển thị trên phần mềm máy tính.*"
     )
     bot.reply_to(message, instructions, parse_mode="Markdown")
 
