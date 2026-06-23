@@ -102,20 +102,101 @@ class ADBController:
         # Sử dụng monkey để khởi chạy nhanh app từ launcher
         return self.execute_adb(device_id, ["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
 
-    def ensure_shopee_homepage(self, device_id):
-        """Đảm bảo đưa Shopee về trang chủ mà không cần force-stop để tránh kích hoạt Captcha"""
-        # 1. Đưa Shopee lên tiền cảnh
-        self.launch_app(device_id, "com.shopee.vn")
-        time.sleep(1.5)
+    def is_on_shopee_homepage(self, device_id):
+        """Kiểm tra xem thiết bị có đang ở màn hình chính Shopee hay không bằng cách dump XML và tìm bottom bar tabs"""
+        xml_file = f"/sdcard/check_home_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         
-        # 2. Nhấn phím Back 3 lần để thoát khỏi các trang con (shop, sản phẩm)
-        for _ in range(3):
-            self.keyevent(device_id, 4)
-            time.sleep(0.5)
+        code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        if code != 0:
+            return False
             
-        # 3. Đưa Shopee lên tiền cảnh một lần nữa (nếu phím Back làm thoát app ra màn hình Home, app sẽ mở lại ngay trang chủ)
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_check_home_{device_id}.xml")
+        code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        is_home = False
+        if os.path.exists(local_xml):
+            try:
+                with open(local_xml, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                
+                # Chỉ báo tab bottom bar:
+                # Tiếng Việt: "Mall", "Live", "Thông báo", "Tôi"
+                # Tiếng Anh: "Mall", "Live", "Notifications", "Me"
+                vi_indicators = ["Mall", "Live", "Thông báo", "Tôi"]
+                en_indicators = ["Mall", "Live", "Notifications", "Me"]
+                
+                vi_match = sum(1 for ind in vi_indicators if f'text="{ind}"' in content)
+                en_match = sum(1 for ind in en_indicators if f'text="{ind}"' in content)
+                
+                # Đồng thời kiểm tra sự hiện diện của SearchBar
+                has_search = "inputSearchBar" in content or "SearchBar" in content or "search" in content.lower()
+                
+                if vi_match >= 3 or en_match >= 3 or (vi_match >= 2 and has_search):
+                    is_home = True
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+        return is_home
+
+    def ensure_shopee_homepage(self, device_id, status_callback=None):
+        """Đảm bảo đưa Shopee về trang chủ và xác thực màn hình chính bằng uiautomator XML"""
+        def update_status(msg):
+            if status_callback:
+                status_callback(device_id, msg)
+
+        update_status("Khởi chạy Shopee...")
         self.launch_app(device_id, "com.shopee.vn")
-        time.sleep(1.5)
+        time.sleep(2.0)
+        
+        is_home = False
+        # Thử nhấn Back để quay về và dọn popup
+        for attempt in range(5):
+            update_status(f"Xác thực màn hình chính (Lần {attempt + 1}/5)...")
+            if self.is_on_shopee_homepage(device_id):
+                is_home = True
+                update_status("Đã ở màn hình chính Shopee.")
+                break
+            else:
+                update_status("Chưa thấy màn hình chính. Nhấn Back 1 lần...")
+                self.keyevent(device_id, 4)
+                time.sleep(1.5)
+                self.launch_app(device_id, "com.shopee.vn")
+                time.sleep(1.0)
+                
+        # Nếu vẫn không được, khởi động lại ứng dụng
+        if not is_home:
+            update_status("Không thể về trang chủ, đang khởi động lại Shopee...")
+            self.stop_app(device_id, "com.shopee.vn")
+            time.sleep(1.5)
+            self.launch_app(device_id, "com.shopee.vn")
+            time.sleep(3.5)
+            
+            # Kiểm tra lại
+            if self.is_on_shopee_homepage(device_id):
+                is_home = True
+                update_status("Xác thực màn hình chính thành công sau khi khởi động lại.")
+            else:
+                update_status("Nhấn Back 1 lần dọn popup khởi động...")
+                self.keyevent(device_id, 4)
+                time.sleep(2.0)
+                if self.is_on_shopee_homepage(device_id):
+                    is_home = True
+                    update_status("Xác thực màn hình chính thành công.")
+        
+        # Nhấn Back thêm 1 lần nữa để đảm bảo dọn popup ẩn
+        if is_home:
+            update_status("Nhấn Back 1 lần để chắc chắn tắt popup quảng cáo...")
+            self.keyevent(device_id, 4)
+            time.sleep(2.0)
+            return True
+            
+        update_status("Không thể xác thực màn hình chính Shopee.")
+        return False
 
     def stop_app(self, device_id, package_name):
         """Buộc dừng một ứng dụng và xóa khỏi danh sách đa nhiệm mà không mất dữ liệu"""
@@ -322,15 +403,9 @@ class ADBController:
             
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
-            self.ensure_shopee_homepage(device_id)
+            self.ensure_shopee_homepage(device_id, status_callback=status_callback)
             
-            # Nhấn back 1 lần để tắt popup quảng cáo theo yêu cầu
-            check_cancelled()
-            update_status("Nhấn Back 1 lần để đóng popup...")
-            self.keyevent(device_id, 4)
-            time.sleep(2.0)
-            
-            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có (dự phòng)
             check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
@@ -463,15 +538,13 @@ class ADBController:
             
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
-            self.ensure_shopee_homepage(device_id)
+            self.ensure_shopee_homepage(device_id, status_callback=status_callback)
             
-            # Nhấn back 1 lần để tắt popup quảng cáo theo yêu cầu
-            check_cancelled()
-            update_status("Nhấn Back 1 lần để đóng popup...")
-            self.keyevent(device_id, 4)
-            time.sleep(2.0)
-            
-            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
+            if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
+                return False, "Bị chặn bởi Captcha (Không thể tự giải sau khi mở Shopee)"
+                
+            # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có (dự phòng)
             check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
