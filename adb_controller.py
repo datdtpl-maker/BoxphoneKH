@@ -105,27 +105,19 @@ class ADBController:
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         
         code, stdout, stderr = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
-        if code != 0:
-            # Nếu uiautomator dump thất bại do lỗi idle state, coi như thiết bị đang ở Trang chủ Shopee (có hoạt ảnh chạy liên tục)
-            if "idle state" in stderr or "idle state" in stdout:
-                print(f"[Device {device_id[:6]}] Dump gặp lỗi idle state -> Giả định đang ở Trang chủ Shopee.")
-                return True
-            return False
-            
+        
         local_xml = os.path.join(os.path.dirname(__file__), f"temp_check_home_{device_id}.xml")
-        code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
         
         is_home = False
-        if os.path.exists(local_xml):
+        if pull_code == 0 and os.path.exists(local_xml):
             try:
                 with open(local_xml, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                 
-                # Chỉ báo tab bottom bar:
-                # Tiếng Việt: "Mall", "Live", "Thông báo", "Tôi"
-                # Tiếng Anh: "Mall", "Live", "Notifications", "Me"
-                vi_indicators = ["Mall", "Live", "Thông báo", "Tôi"]
-                en_indicators = ["Mall", "Live", "Notifications", "Me"]
+                # Chỉ báo tab bottom bar (thêm các biến thể như Live & Video, Live &amp; Video):
+                vi_indicators = ["Mall", "Live", "Thông báo", "Tôi", "Live &amp; Video", "Live & Video"]
+                en_indicators = ["Mall", "Live", "Notifications", "Me", "Live &amp; Video", "Live & Video"]
                 
                 vi_match = sum(1 for ind in vi_indicators if f'text="{ind}"' in content)
                 en_match = sum(1 for ind in en_indicators if f'text="{ind}"' in content)
@@ -142,6 +134,12 @@ class ADBController:
                     os.remove(local_xml)
                 except Exception:
                     pass
+        else:
+            # Nếu không pull được XML, kiểm tra lỗi idle state để giả định trang chủ
+            if code != 0 and ("idle state" in stderr or "idle state" in stdout):
+                print(f"[Device {device_id[:6]}] Dump gặp lỗi idle state và không có XML -> Giả định đang ở Trang chủ Shopee.")
+                return True
+                
         return is_home
 
     def ensure_shopee_homepage(self, device_id, status_callback=None):
