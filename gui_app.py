@@ -458,9 +458,10 @@ class GUIApp(ctk.CTk):
             cb_var = tk.BooleanVar(value=False)
             self.device_checkboxes[dev] = cb_var
             
+            dev_name = main.get_device_name(dev)
             cb_select = ctk.CTkCheckBox(
                 card,
-                text=f"Máy {idx+1} (S{idx+1}) 🟢",
+                text=f"Máy {dev_name} 🟢",
                 variable=cb_var,
                 font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                 text_color="#f8fafc",
@@ -497,7 +498,7 @@ class GUIApp(ctk.CTk):
                 fg_color="#475569", 
                 hover_color="#334155",
                 corner_radius=6,
-                command=lambda d=dev, i=idx+1: self.screenshot_device(d, i)
+                command=lambda d=dev: self.screenshot_device(d)
             )
             btn_cap.grid(row=0, column=0, padx=1, pady=2, sticky="ew")
             
@@ -559,19 +560,20 @@ class GUIApp(ctk.CTk):
             )
             btn_close.grid(row=0, column=1, padx=(2, 0), pady=1, sticky="ew")
 
-    def screenshot_device(self, dev_id, idx):
+    def screenshot_device(self, dev_id):
         def action():
-            print(f"[GUI] Đang chụp màn hình Máy {idx}...")
+            dev_name = main.get_device_name(dev_id)
+            print(f"[GUI] Đang chụp màn hình Máy {dev_name}...")
             temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
             os.makedirs(temp_dir, exist_ok=True)
-            local_path = os.path.join(temp_dir, f"gui_screenshot_{idx}.png")
+            local_path = os.path.join(temp_dir, f"gui_screenshot_{dev_name}.png")
             success, res = main.adb.take_screenshot(dev_id, local_path)
             if success:
-                print(f"[GUI] Chụp ảnh Máy {idx} thành công! Đường dẫn: {local_path}")
+                print(f"[GUI] Chụp ảnh Máy {dev_name} thành công! Đường dẫn: {local_path}")
                 # Mở ảnh bằng Windows Photo Viewer mặc định
                 os.startfile(local_path)
             else:
-                print(f"[GUI] Lỗi chụp màn hình Máy {idx}: {res}")
+                print(f"[GUI] Lỗi chụp màn hình Máy {dev_name}: {res}")
         self.run_in_thread(action)
 
     def stop_all(self):
@@ -693,14 +695,14 @@ class GUIApp(ctk.CTk):
             ordered_devices = main.get_ordered_devices()
             
             def snap(device_id):
-                dev_idx = ordered_devices.index(device_id) + 1
-                local_path = os.path.join(temp_dir, f"gui_screenshot_{dev_idx}.png")
+                dev_name = main.get_device_name(device_id)
+                local_path = os.path.join(temp_dir, f"gui_screenshot_{dev_name}.png")
                 success, res = main.adb.take_screenshot(device_id, local_path)
                 if success:
-                    print(f"[GUI] Chụp ảnh Máy {dev_idx} thành công! Đang hiển thị...")
+                    print(f"[GUI] Chụp ảnh Máy {dev_name} thành công! Đang hiển thị...")
                     os.startfile(local_path)
                 else:
-                    print(f"[GUI] Lỗi chụp màn hình Máy {dev_idx}: {res}")
+                    print(f"[GUI] Lỗi chụp màn hình Máy {dev_name}: {res}")
                     
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=len(selected)) as executor:
