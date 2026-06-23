@@ -23,8 +23,11 @@ class GUIApp(ctk.CTk):
         super().__init__()
         
         self.title("🤖 BOX PHONE - SHOPEE KHẢI HOÀN (Premium Dashboard) 📱")
-        self.geometry("1280x800")
-        self.configure(fg_color="#0f172a") # Slate 900 (Nền tối sâu tinh tế)
+        self.geometry("1280x850")
+        self.configure(fg_color="#0f172a") # Slate 900
+        
+        # Lưu trữ các biến Checkbox điều khiển hàng loạt
+        self.device_checkboxes = {}
         
         # Grid layout 1x2 (Cột trái: Dashboard cấu hình, Cột phải: Grid quản lý máy)
         self.grid_columnconfigure(0, weight=0, minsize=420)
@@ -40,9 +43,9 @@ class GUIApp(ctk.CTk):
             self.left_panel, 
             text="🤖 BOX PHONE SYSTEM", 
             font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
-            text_color="#38bdf8" # Sky blue
+            text_color="#38bdf8"
         )
-        self.lbl_brand.pack(pady=(20, 5), padx=25, anchor="w")
+        self.lbl_brand.pack(pady=(15, 2), padx=25, anchor="w")
         
         self.lbl_sub_brand = ctk.CTkLabel(
             self.left_panel, 
@@ -50,19 +53,19 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color="#94a3b8"
         )
-        self.lbl_sub_brand.pack(pady=(0, 15), padx=25, anchor="w")
+        self.lbl_sub_brand.pack(pady=(0, 10), padx=25, anchor="w")
         
         # Phân đoạn 1: Cấu hình
         self.settings_card = ctk.CTkFrame(self.left_panel, fg_color="#0f172a", corner_radius=12, border_width=1, border_color="#1e293b")
-        self.settings_card.pack(fill="x", padx=20, pady=10)
+        self.settings_card.pack(fill="x", padx=20, pady=5)
         
         self.lbl_settings = ctk.CTkLabel(
             self.settings_card, 
             text="🔒 Cấu hình kết nối", 
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#f1f5f9"
         )
-        self.lbl_settings.pack(pady=(12, 8), padx=15, anchor="w")
+        self.lbl_settings.pack(pady=(8, 4), padx=15, anchor="w")
         
         self.ent_token = ctk.CTkEntry(
             self.settings_card, 
@@ -71,9 +74,9 @@ class GUIApp(ctk.CTk):
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
-            height=36
+            height=32
         )
-        self.ent_token.pack(fill="x", padx=15, pady=4)
+        self.ent_token.pack(fill="x", padx=15, pady=3)
         self.ent_token.insert(0, config.TELEGRAM_BOT_TOKEN or "")
         
         admin_ids_str = ",".join(map(str, config.ALLOWED_USER_IDS or []))
@@ -83,9 +86,9 @@ class GUIApp(ctk.CTk):
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
-            height=36
+            height=32
         )
-        self.ent_admins.pack(fill="x", padx=15, pady=4)
+        self.ent_admins.pack(fill="x", padx=15, pady=3)
         self.ent_admins.insert(0, admin_ids_str)
         
         self.ent_adb = ctk.CTkEntry(
@@ -94,34 +97,34 @@ class GUIApp(ctk.CTk):
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
-            height=36
+            height=32
         )
-        self.ent_adb.pack(fill="x", padx=15, pady=4)
+        self.ent_adb.pack(fill="x", padx=15, pady=3)
         self.ent_adb.insert(0, config.ADB_PATH or "")
         
         self.btn_save = ctk.CTkButton(
             self.settings_card, 
             text="Lưu cấu hình", 
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            fg_color="#4f46e5", # Indigo 600
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#4f46e5", 
             hover_color="#4338ca",
             corner_radius=8,
-            height=34,
+            height=30,
             command=self.save_settings
         )
-        self.btn_save.pack(fill="x", padx=15, pady=(10, 15))
+        self.btn_save.pack(fill="x", padx=15, pady=(8, 12))
         
-        # Phân đoạn 2: Bảng tác vụ
+        # Phân đoạn 2: Bảng tác vụ tự động
         self.tasks_card = ctk.CTkFrame(self.left_panel, fg_color="#0f172a", corner_radius=12, border_width=1, border_color="#1e293b")
         self.tasks_card.pack(fill="x", padx=20, pady=5)
         
         self.lbl_tasks = ctk.CTkLabel(
             self.tasks_card, 
-            text="🚀 Điều khiển Tác vụ", 
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text="🚀 Điều khiển Tác vụ (Tự động)", 
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#f1f5f9"
         )
-        self.lbl_tasks.pack(pady=(12, 8), padx=15, anchor="w")
+        self.lbl_tasks.pack(pady=(8, 4), padx=15, anchor="w")
         
         self.ent_keywords = ctk.CTkEntry(
             self.tasks_card, 
@@ -129,9 +132,9 @@ class GUIApp(ctk.CTk):
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
-            height=38
+            height=34
         )
-        self.ent_keywords.pack(fill="x", padx=15, pady=4)
+        self.ent_keywords.pack(fill="x", padx=15, pady=3)
         
         self.ent_selection = ctk.CTkEntry(
             self.tasks_card, 
@@ -139,73 +142,181 @@ class GUIApp(ctk.CTk):
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
-            height=38
+            height=34
         )
-        self.ent_selection.pack(fill="x", padx=15, pady=4)
+        self.ent_selection.pack(fill="x", padx=15, pady=3)
         
         # Panel nút chạy tác vụ
         self.btn_grid = ctk.CTkFrame(self.tasks_card, fg_color="transparent")
-        self.btn_grid.pack(fill="x", padx=15, pady=(8, 12))
+        self.btn_grid.pack(fill="x", padx=15, pady=(6, 10))
         self.btn_grid.columnconfigure(0, weight=1)
         self.btn_grid.columnconfigure(1, weight=1)
         
         self.btn_seq = ctk.CTkButton(
             self.btn_grid, 
             text="Chạy Tuần Tự", 
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            fg_color="#059669", # Emerald 600
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#059669", 
             hover_color="#047857",
             corner_radius=8,
-            height=38,
+            height=34,
             command=self.run_seq_search
         )
-        self.btn_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        self.btn_seq.grid(row=0, column=0, padx=(0, 3), sticky="ew")
         
         self.btn_par = ctk.CTkButton(
             self.btn_grid, 
             text="Chạy Song Song", 
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            fg_color="#2563eb", # Blue 600
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#2563eb", 
             hover_color="#1d4ed8",
             corner_radius=8,
-            height=38,
+            height=34,
             command=self.run_par_search
         )
-        self.btn_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        self.btn_par.grid(row=0, column=1, padx=(3, 0), sticky="ew")
         
         self.btn_stop = ctk.CTkButton(
             self.tasks_card, 
             text="🛑 DỪNG CHẠY KHẨN CẤP", 
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            fg_color="#e11d48", # Rose 600
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color="#e11d48", 
             hover_color="#be123c",
             corner_radius=8,
-            height=40,
+            height=36,
             command=self.stop_all
         )
-        self.btn_stop.pack(fill="x", padx=15, pady=(0, 15))
+        self.btn_stop.pack(fill="x", padx=15, pady=(0, 12))
         
-        # Phân đoạn 3: Khung Terminal Log
+        # Phân đoạn 3: Bảng điều khiển hàng loạt thủ công (Mới nâng cấp)
+        self.bulk_card = ctk.CTkFrame(self.left_panel, fg_color="#0f172a", corner_radius=12, border_width=1, border_color="#1e293b")
+        self.bulk_card.pack(fill="x", padx=20, pady=5)
+        
+        self.lbl_bulk = ctk.CTkLabel(
+            self.bulk_card, 
+            text="🛠️ Điều khiển hàng loạt (Máy được chọn tích)", 
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#f1f5f9"
+        )
+        self.lbl_bulk.pack(pady=(8, 4), padx=15, anchor="w")
+        
+        # Hàng nút Chọn tất cả / Bỏ chọn
+        self.select_options_frame = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
+        self.select_options_frame.pack(fill="x", padx=15, pady=2)
+        self.select_options_frame.columnconfigure(0, weight=1)
+        self.select_options_frame.columnconfigure(1, weight=1)
+        
+        self.btn_select_all = ctk.CTkButton(
+            self.select_options_frame,
+            text="☑️ Chọn tất cả",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#334155",
+            hover_color="#1e293b",
+            height=28,
+            corner_radius=6,
+            command=self.select_all_devices
+        )
+        self.btn_select_all.grid(row=0, column=0, padx=(0, 2), sticky="ew")
+        
+        self.btn_deselect_all = ctk.CTkButton(
+            self.select_options_frame,
+            text="⬜ Bỏ chọn",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#334155",
+            hover_color="#1e293b",
+            height=28,
+            corner_radius=6,
+            command=self.deselect_all_devices
+        )
+        self.btn_deselect_all.grid(row=0, column=1, padx=(2, 0), sticky="ew")
+        
+        # Hàng nút điều khiển chung
+        self.bulk_actions = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
+        self.bulk_actions.pack(fill="x", padx=15, pady=(6, 12))
+        for i in range(5):
+            self.bulk_actions.columnconfigure(i, weight=1)
+            
+        self.btn_bulk_cap = ctk.CTkButton(
+            self.bulk_actions,
+            text="📸 Chụp",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#475569",
+            hover_color="#334155",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_screenshot
+        )
+        self.btn_bulk_cap.grid(row=0, column=0, padx=1, sticky="ew")
+        
+        self.btn_bulk_home = ctk.CTkButton(
+            self.bulk_actions,
+            text="🏠 Main",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#475569",
+            hover_color="#334155",
+            height=30,
+            corner_radius=6,
+            command=lambda: self.bulk_keyevent(3)
+        )
+        self.btn_bulk_home.grid(row=0, column=1, padx=1, sticky="ew")
+        
+        self.btn_bulk_back = ctk.CTkButton(
+            self.bulk_actions,
+            text="↩️ Back",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#475569",
+            hover_color="#334155",
+            height=30,
+            corner_radius=6,
+            command=lambda: self.bulk_keyevent(4)
+        )
+        self.btn_bulk_back.grid(row=0, column=2, padx=1, sticky="ew")
+        
+        self.btn_bulk_open = ctk.CTkButton(
+            self.bulk_actions,
+            text="🛒 Mở",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#059669",
+            hover_color="#047857",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_open_shopee
+        )
+        self.btn_bulk_open.grid(row=0, column=3, padx=1, sticky="ew")
+        
+        self.btn_bulk_close = ctk.CTkButton(
+            self.bulk_actions,
+            text="🛑 Tắt",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#991b1b",
+            hover_color="#7f1d1d",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_close_shopee
+        )
+        self.btn_bulk_close.grid(row=0, column=4, padx=1, sticky="ew")
+        
+        # Phân đoạn 4: Khung Terminal Log
         self.lbl_log = ctk.CTkLabel(
             self.left_panel, 
             text="📋 Nhật ký hoạt động thời gian thực", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#f1f5f9"
         )
-        self.lbl_log.pack(padx=20, anchor="w", pady=(15, 2))
+        self.lbl_log.pack(padx=20, anchor="w", pady=(10, 2))
         
         self.log_box = ctk.CTkTextbox(
             self.left_panel, 
-            height=160, 
+            height=120, 
             state="disabled",
-            fg_color="#020617", # Slate 950 (Đen sẫm hacker)
-            text_color="#22c55e", # Green 500 (Màu xanh lá terminal)
+            fg_color="#020617", 
+            text_color="#22c55e", 
             font=ctk.CTkFont(family="Consolas", size=11),
             border_width=1,
             border_color="#1e293b",
             corner_radius=10
         )
-        self.log_box.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.log_box.pack(fill="both", expand=True, padx=20, pady=(0, 15))
         
         # Redirect standard output
         sys.stdout = ConsoleRedirector(self.log_box)
@@ -236,7 +347,7 @@ class GUIApp(ctk.CTk):
             text="🔄 Tải lại thiết bị", 
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             width=140,
-            fg_color="#475569", # Slate 600
+            fg_color="#475569", 
             hover_color="#334155",
             corner_radius=8,
             command=self.load_devices_grid
@@ -310,9 +421,10 @@ class GUIApp(ctk.CTk):
         messagebox.showinfo("Thành công", "Đã lưu cấu hình và tự động nạp lại!")
 
     def load_devices_grid(self):
-        # Dọn dẹp grid cũ
+        # Dọn dẹp grid cũ và dictionary checkbox cũ
         for widget in self.grid_frame.winfo_children():
             widget.destroy()
+        self.device_checkboxes.clear()
             
         print("[Hệ thống] Đang quét các cổng thiết bị...")
         devices = main.get_ordered_devices()
@@ -342,14 +454,22 @@ class GUIApp(ctk.CTk):
             card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
             card.columnconfigure(0, weight=1)
             
-            # Tên máy (Bổ sung đèn LED trạng thái ONLINE 🟢 trực quan)
-            lbl_name = ctk.CTkLabel(
-                card, 
-                text=f"Máy {idx+1} (S{idx+1})  🟢", 
+            # Checkbox trạng thái tích chọn điều khiển hàng loạt (Đặt cạnh đèn LED ONLINE 🟢)
+            cb_var = tk.BooleanVar(value=False)
+            self.device_checkboxes[dev] = cb_var
+            
+            cb_select = ctk.CTkCheckBox(
+                card,
+                text=f"Máy {idx+1} (S{idx+1}) 🟢",
+                variable=cb_var,
                 font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-                text_color="#f8fafc"
+                text_color="#f8fafc",
+                fg_color="#4f46e5",
+                hover_color="#4338ca",
+                corner_radius=4,
+                border_width=2
             )
-            lbl_name.grid(row=0, column=0, padx=10, pady=(10, 2))
+            cb_select.grid(row=0, column=0, padx=12, pady=(10, 2), sticky="w")
             
             lbl_id = ctk.CTkLabel(
                 card, 
@@ -357,7 +477,7 @@ class GUIApp(ctk.CTk):
                 text_color="#94a3b8", 
                 font=ctk.CTkFont(family="Segoe UI", size=11)
             )
-            lbl_id.grid(row=1, column=0, padx=10, pady=(0, 10))
+            lbl_id.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="w")
             
             # Panel nút bấm hành động tinh tế
             btn_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -374,7 +494,7 @@ class GUIApp(ctk.CTk):
                 width=45, 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                fg_color="#475569", # Slate 600
+                fg_color="#475569", 
                 hover_color="#334155",
                 corner_radius=6,
                 command=lambda d=dev, i=idx+1: self.screenshot_device(d, i)
@@ -420,7 +540,7 @@ class GUIApp(ctk.CTk):
                 text="🛒 Mở Shopee", 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                fg_color="#334155", # Slate 700
+                fg_color="#334155", 
                 hover_color="#1e293b",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.launch_app, d, config.SHOPEE_PACKAGE)
@@ -432,7 +552,7 @@ class GUIApp(ctk.CTk):
                 text="🛑 Tắt app", 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                fg_color="#991b1b", # Red 800
+                fg_color="#991b1b", 
                 hover_color="#7f1d1d",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.stop_app, d, config.SHOPEE_PACKAGE)
@@ -487,6 +607,109 @@ class GUIApp(ctk.CTk):
             messagebox.showerror("Lỗi", "Cú pháp chọn máy không hợp lệ (Ví dụ: 1-5,10)")
             return []
 
+    # ================= CÁC HÀM ĐIỀU KHIỂN HÀNG LOẠT (MỚI NÂNG CẤP) =================
+    def get_selected_devices(self):
+        """Lấy danh sách các serial ID đang được tích chọn Checkbox"""
+        return [dev for dev, cb in self.device_checkboxes.items() if cb.get()]
+
+    def select_all_devices(self):
+        """Tích chọn cho tất cả các máy"""
+        for cb in self.device_checkboxes.values():
+            cb.set(True)
+        print("[GUI] Đã tích chọn tất cả các máy.")
+
+    def deselect_all_devices(self):
+        """Bỏ tích chọn cho tất cả các máy"""
+        for cb in self.device_checkboxes.values():
+            cb.set(False)
+        print("[GUI] Đã bỏ chọn tất cả các máy.")
+
+    def bulk_keyevent(self, keycode):
+        """Gửi phím Home/Back hàng loạt đa luồng"""
+        selected = self.get_selected_devices()
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để điều khiển hàng loạt!")
+            return
+            
+        name = "Home (Màn hình chính)" if keycode == 3 else "Back (Quay lại)"
+        print(f"[GUI] Đang gửi lệnh {name} hàng loạt đến {len(selected)} máy...")
+        
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(lambda d: main.adb.keyevent(d, keycode), selected)
+            print(f"[GUI] Đã thực hiện lệnh {name} thành công trên các máy đã chọn.")
+            
+        self.run_in_thread(action)
+
+    def bulk_open_shopee(self):
+        """Mở Shopee (đưa về trang chủ fresh) hàng loạt đa luồng"""
+        selected = self.get_selected_devices()
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để điều khiển hàng loạt!")
+            return
+            
+        print(f"[GUI] Đang mở Shopee (Fresh Home) hàng loạt trên {len(selected)} máy...")
+        
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(lambda d: main.adb.ensure_shopee_homepage(d), selected)
+            print("[GUI] Đã mở Shopee trên các máy đã chọn thành công.")
+            
+        self.run_in_thread(action)
+
+    def bulk_close_shopee(self):
+        """Buộc dừng Shopee hàng loạt đa luồng"""
+        selected = self.get_selected_devices()
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để điều khiển hàng loạt!")
+            return
+            
+        print(f"[GUI] Đang buộc dừng Shopee hàng loạt trên {len(selected)} máy...")
+        
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(lambda d: main.adb.stop_app(d, config.SHOPEE_PACKAGE), selected)
+            print("[GUI] Đã tắt Shopee trên các máy đã chọn thành công.")
+            
+        self.run_in_thread(action)
+
+    def bulk_screenshot(self):
+        """Chụp màn hình hàng loạt và mở file hàng loạt"""
+        selected = self.get_selected_devices()
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để điều khiển hàng loạt!")
+            return
+            
+        print(f"[GUI] Đang chụp màn hình hàng loạt trên {len(selected)} máy...")
+        
+        def action():
+            temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Lấy list ordered devices để hiển thị đúng số thứ tự máy (Ví dụ: Máy 1, Máy 5...)
+            ordered_devices = main.get_ordered_devices()
+            
+            def snap(device_id):
+                dev_idx = ordered_devices.index(device_id) + 1
+                local_path = os.path.join(temp_dir, f"gui_screenshot_{dev_idx}.png")
+                success, res = main.adb.take_screenshot(device_id, local_path)
+                if success:
+                    print(f"[GUI] Chụp ảnh Máy {dev_idx} thành công! Đang hiển thị...")
+                    os.startfile(local_path)
+                else:
+                    print(f"[GUI] Lỗi chụp màn hình Máy {dev_idx}: {res}")
+                    
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(snap, selected)
+            print("[GUI] Hoàn thành quy trình chụp ảnh hàng loạt.")
+            
+        self.run_in_thread(action)
+
+    # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM =================
     def run_seq_search(self):
         keywords_str = self.ent_keywords.get().strip()
         if not keywords_str:
