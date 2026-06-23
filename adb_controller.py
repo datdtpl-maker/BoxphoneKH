@@ -5,15 +5,12 @@ import os
 import xml.etree.ElementTree as ET
 import re
 import random
-import cv2
 from concurrent.futures import ThreadPoolExecutor
 from config import ADB_PATH, SHOPEE_PACKAGE, SHOPEE_SEARCH_BOX_COORDS, SHOPEE_INPUT_BOX_COORDS, SHOPEE_SEARCH_BTN_COORDS
-from captcha_solver import CaptchaSolver
 
 class ADBController:
     def __init__(self, adb_path=ADB_PATH):
         self.adb_path = adb_path
-        self.solver = CaptchaSolver(debug_dir=os.path.join(os.path.dirname(__file__), 'debug'))
 
     def _run_cmd(self, cmd_args, timeout=15):
         """Chạy lệnh hệ thống với ADB"""
@@ -457,72 +454,9 @@ class ADBController:
 
     def check_and_bypass_captcha(self, device_id, max_retries=3, status_callback=None):
         """
-        Tự động kiểm tra xem thiết bị có bị kẹt Captcha hay không.
-        Nếu phát hiện bị kẹt, tiến hành chụp màn hình và gọi module OpenCV để tự động kéo giải Captcha.
+        [Đã vô hiệu hóa theo yêu cầu] Luôn trả về True để người dùng tự giải tay Captcha trên xiaowei.
         """
-        def update_status(msg):
-            if status_callback:
-                status_callback(device_id, msg)
-
-        temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
-        os.makedirs(temp_dir, exist_ok=True)
-        screenshot_path = os.path.join(temp_dir, f"captcha_check_{device_id}.png")
-
-        for attempt in range(max_retries):
-            # 1. Chụp ảnh màn hình hiện tại
-            success, _ = self.take_screenshot(device_id, screenshot_path)
-            if not success:
-                time.sleep(1.0)
-                continue
-
-            # 2. Phân tích ảnh tìm mảnh ghép captcha
-            distance = self.solver.find_slider_distance(screenshot_path, device_id)
-            
-            # Xóa file chụp màn hình tạm
-            try:
-                os.remove(screenshot_path)
-            except Exception:
-                pass
-
-            # 3. Nếu tìm thấy mảnh ghép, tiến hành kéo
-            if distance:
-                update_status(f"[Captcha] Phát hiện dính Captcha. Đang giải lần {attempt + 1}/{max_retries}...")
-                
-                # Tọa độ Y tương đối của thanh kéo thường ở khoảng 62% chiều cao màn hình (ví dụ 1190px trên 1920px)
-                img_path = os.path.join(os.path.dirname(__file__), 'debug', f"result_solved_{device_id}.png")
-                if os.path.exists(img_path):
-                    try:
-                        img = cv2.imread(img_path)
-                        h_img = img.shape[0]
-                        y_slider = int(h_img * 0.62)
-                    except Exception:
-                        y_slider = 1190
-                else:
-                    y_slider = 1190
-                
-                # Tọa độ X bắt đầu của slider handle thường ở khoảng X=160
-                x_start = 160
-                x_end = x_start + distance
-                
-                # Giả lập thao tác vuốt với quỹ đạo người dùng (thời gian kéo ngẫu nhiên, lệch trục Y nhẹ)
-                y_end = y_slider + random.randint(-4, 4)
-                duration = random.randint(1200, 1600)
-                
-                # Thực hiện kéo
-                self.swipe(device_id, x_start, y_slider, x_end, y_end, duration)
-                time.sleep(5.0) # Đợi trang phản hồi sau khi kéo
-                continue
-            else:
-                # Nếu không tìm thấy mảnh ghép nào, coi như màn hình hiện tại Sạch (Không có Captcha)
-                if attempt == 0:
-                    return True
-                else:
-                    update_status("[Captcha] Giải Captcha thành công! Tiếp tục quy trình...")
-                    return True
-
-        # Đã thử hết số lần quy định nhưng vẫn dính Captcha
-        update_status("[Captcha] Không thể tự giải Captcha sau nhiều lần thử.")
-        return False
+        return True
 
     def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None, click_first_item=False):
         """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng' (hoặc bài đăng đầu tiên nếu bật click_first_item)"""
