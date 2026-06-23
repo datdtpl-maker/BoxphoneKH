@@ -30,27 +30,11 @@ def is_cancelled():
     global cancel_flag
     return cancel_flag
 
-# Cache mapping tên thiết bị toàn cục
-device_name_mapping = {}
-
-def get_device_name(serial):
-    """Trả về tên hiển thị chuẩn (ví dụ S1, S10) của thiết bị. Fallback về tên mặc định hoặc rút gọn nếu không tìm thấy."""
-    global device_name_mapping
-    name = device_name_mapping.get(serial, "")
-    if name:
-        # Chuẩn hóa chữ hoa chữ thường, ví dụ s10 thành S10
-        if name.lower().startswith("s") and name[1:].isdigit():
-            return name.upper()
-        return name
-    # Fallback nếu không map được
-    if serial.lower().startswith("samsung"):
-        return "Samsung"
-    if ":" in serial:
-        return f"IP_{serial.split(':')[0].split('.')[-1]}"
-    return f"S_{serial[:5]}"
+# Caching mapping thiết bị toàn cục để tra cứu nhanh
+cached_mapping = {}
 
 def get_ordered_devices():
-    global device_name_mapping
+    global cached_mapping
     raw_devices = adb.get_devices()
     search_dirs = [
         r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\Local Storage\leveldb",
@@ -58,7 +42,7 @@ def get_ordered_devices():
         r"C:\Users\datdt\AppData\Local\com.xiaowei.android\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb"
     ]
     
-    # 1. Thu thập tất cả file leveldb cùng thời gian sửa đổi (mtime)
+    # 1. Thu thập tất cả file leveldb cùng mtime của chúng
     db_files = []
     for sdir in search_dirs:
         if not os.path.exists(sdir):
@@ -69,7 +53,7 @@ def get_ordered_devices():
                 if os.path.isfile(filepath):
                     db_files.append((filepath, os.path.getmtime(filepath)))
                     
-    # Sắp xếp file theo mtime tăng dần để file mới nhất được đọc sau cùng
+    # Sắp xếp file theo mtime tăng dần để file mới được ghi sau cùng (ghi đè lên)
     db_files.sort(key=lambda x: x[1])
     
     mapping = {}
@@ -92,16 +76,16 @@ def get_ordered_devices():
                         if m:
                             name_val = m.group(0).decode('utf-8')
                             if name_val not in ['name', 'onlySerial', 'serial', 'sort']:
-                                # Ghi đè liên tục để lấy giá trị mới nhất trong file mới nhất
+                                # Ghi đè liên tục để lấy giá trị cuối cùng (mới nhất)
                                 mapping[serial] = name_val
                     idx += len(serial_bytes)
         except Exception:
             pass
 
-    # Cập nhật cache mapping toàn cục
-    device_name_mapping = mapping.copy()
+    # Lưu trữ mapping vào cache toàn cục
+    cached_mapping = mapping
 
-    # 2. Nhóm các serial theo tên máy (ví dụ "s10") để lọc trùng Wifi/USB
+    # Nhóm các serial theo tên chuẩn hóa (ví dụ "s10")
     grouped = {}  # name_lower -> list of serials
     unmapped = [] # list of serials
     
@@ -116,7 +100,7 @@ def get_ordered_devices():
         else:
             unmapped.append(serial)
             
-    # Lọc trùng: Với mỗi tên thiết bị, chỉ giữ lại 1 serial (ưu tiên kết nối USB)
+    # Lọc trùng lặp: Với mỗi tên máy, chỉ giữ lại 1 serial tốt nhất (ưu tiên kết nối USB)
     filtered_devices = []
     
     # Sắp xếp các tên từ s1 đến s20
@@ -127,7 +111,7 @@ def get_ordered_devices():
         if len(serials) == 1:
             filtered_devices.append(serials[0])
         else:
-            # Ưu tiên serial kết nối USB (không chứa dấu ':' của IP)
+            # Ưu tiên serial kết nối USB (không chứa dấu ':' của Wifi IP)
             usb_serials = [s for s in serials if ":" not in s]
             if usb_serials:
                 filtered_devices.append(usb_serials[0])
@@ -138,6 +122,63 @@ def get_ordered_devices():
     filtered_devices.extend(unmapped)
     
     return filtered_devices
+
+def get_device_name(serial):
+    """Lấy tên map thực tế của thiết bị (ví dụ: S1, S10) hoặc rút gọn serial nếu không có"""
+    global cached_mapping
+    # Nếu chưa có cache, chạy quét nhanh dựng mapping
+    if not cached_mapping:
+        raw_devices = adb.get_devices()
+        db_files = []
+        search_dirs = [
+            r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\Local Storage\leveldb",
+            r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb",
+            r"C:\Users\datdt\AppData\Local\com.xiaowei.android\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb"
+        ]
+        for sdir in search_dirs:
+            if not os.path.exists(sdir):
+                continue
+            for root, _, files in os.walk(sdir):
+                for file in files:
+                    filepath = os.path.join(root, file)
+                    if os.path.isfile(filepath):
+                        db_files.append((filepath, os.path.getmtime(filepath)))
+        db_files.sort(key=lambda x: x[1])
+        for filepath, _ in db_files:
+            try:
+                with open(filepath, 'rb') as f:
+                    data = f.read()
+                for s in raw_devices:
+                    s_bytes = s.encode('utf-8')
+                    idx = 0
+                    while True:
+                        idx = data.find(s_bytes, idx)
+                        if idx == -1:
+                            break
+                        chunk = data[idx:idx+350]
+                        name_idx = chunk.find(b'name')
+                        if name_idx != -1:
+                            subchunk = chunk[name_idx + 4 : name_idx + 30]
+                            m = re.search(b'[a-zA-Z0-9_\\-\\+]+', subchunk)
+                            if m:
+                                name_val = m.group(0).decode('utf-8')
+                                if name_val not in ['name', 'onlySerial', 'serial', 'sort']:
+                                    cached_mapping[s] = name_val
+                        idx += len(s_bytes)
+            except Exception:
+                pass
+                
+    name = cached_mapping.get(serial, "")
+    if name:
+        if name.lower().startswith("s") and name[1:].isdigit():
+            return f"S{name[1:]}"
+        return name
+        
+    if ":" in serial:
+        return f"Wifi_{serial.split(':')[0].split('.')[-1]}"
+    if len(serial) > 8:
+        return f"{serial[:8].upper()}"
+    return serial
 
 def run_sequential_shopee_search(message, keywords, devices, click_first_item=False):
     global cancel_sequential, cancel_flag
@@ -173,7 +214,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             
         dev_name = get_device_name(dev)
         current_keyword = random.choice(keywords)
-        bot.send_message(message.chat.id, f"📱 **Máy {dev_name} (chạy {idx+1}/{len(devices)})** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
+        bot.send_message(message.chat.id, f"📱 **Máy {dev_name}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
         success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first_item)
         
@@ -493,8 +534,8 @@ def handle_all_messages(message):
     # Thực hiện hành động cụ thể
     if action == "list_devices":
         response = f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI ({len(devices)} máy):**\n\n"
-        for i, d in enumerate(devices):
-            response += f"📱 **Máy {i+1}**: ID: `{d}`\n"
+        for d in devices:
+            response += f"📱 **Máy {get_device_name(d)}**: ID: `{d}`\n"
         bot.reply_to(message, response, parse_mode="Markdown")
 
     elif action == "screenshot":
@@ -503,7 +544,7 @@ def handle_all_messages(message):
         tgt_dev = target_devices[0]
         tgt_name = get_device_name(tgt_dev)
         
-        status_msg = bot.reply_to(message, f"📸 Đang chụp màn hình máy số {tgt_name}...")
+        status_msg = bot.reply_to(message, f"📸 Đang chụp màn hình máy {tgt_name}...")
         
         # Tạo đường dẫn lưu ảnh tạm
         temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
@@ -706,17 +747,17 @@ def handle_all_messages(message):
         for dev in target_devices:
             adb.keyevent(dev, 3)
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
-            bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên **Máy {tgt_name}**.")
+            tgt_idx = devices.index(target_devices[0]) + 1
+            bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên **Máy {tgt_idx}**.")
         else:
             bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên tất cả {len(target_devices)} máy.")
 
     elif action == "click":
         x, y = cmd["x"], cmd["y"]
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
+            tgt_idx = devices.index(target_devices[0]) + 1
             adb.tap(target_devices[0], x, y)
-            bot.reply_to(message, f"👆 Đã click tọa độ ({x}, {y}) trên **Máy {tgt_name}**.")
+            bot.reply_to(message, f"👆 Đã click tọa độ ({x}, {y}) trên **Máy {tgt_idx}**.")
         else:
             for dev in target_devices:
                 adb.tap(dev, x, y)
@@ -725,9 +766,9 @@ def handle_all_messages(message):
     elif action == "input":
         text_val = cmd["text"]
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
+            tgt_idx = devices.index(target_devices[0]) + 1
             adb.input_text(target_devices[0], text_val)
-            bot.reply_to(message, f"✍️ Đã nhập '{text_val}' trên **Máy {tgt_name}**.")
+            bot.reply_to(message, f"✍️ Đã nhập '{text_val}' trên **Máy {tgt_idx}**.")
         else:
             for dev in target_devices:
                 adb.input_text(dev, text_val)
@@ -735,10 +776,10 @@ def handle_all_messages(message):
 
     elif action == "disable_rotation":
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
+            tgt_idx = devices.index(target_devices[0]) + 1
             adb.execute_adb(target_devices[0], ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
             adb.execute_adb(target_devices[0], ["shell", "settings", "put", "system", "user_rotation", "0"])
-            bot.reply_to(message, f"📴 Đã tắt xoay màn hình và khóa hướng dọc trên **Máy {tgt_name}**.")
+            bot.reply_to(message, f"📴 Đã tắt xoay màn hình và khóa hướng dọc trên **Máy {tgt_idx}**.")
         else:
             for dev in target_devices:
                 adb.execute_adb(dev, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])

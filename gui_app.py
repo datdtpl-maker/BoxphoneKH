@@ -458,10 +458,9 @@ class GUIApp(ctk.CTk):
             cb_var = tk.BooleanVar(value=False)
             self.device_checkboxes[dev] = cb_var
             
-            dev_name = main.get_device_name(dev)
             cb_select = ctk.CTkCheckBox(
                 card,
-                text=f"Máy {dev_name} 🟢",
+                text=f"Máy {main.get_device_name(dev)} 🟢",
                 variable=cb_var,
                 font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                 text_color="#f8fafc",
@@ -498,7 +497,7 @@ class GUIApp(ctk.CTk):
                 fg_color="#475569", 
                 hover_color="#334155",
                 corner_radius=6,
-                command=lambda d=dev: self.screenshot_device(d)
+                command=lambda d=dev: self.screenshot_device(d, main.get_device_name(d))
             )
             btn_cap.grid(row=0, column=0, padx=1, pady=2, sticky="ew")
             
@@ -560,20 +559,19 @@ class GUIApp(ctk.CTk):
             )
             btn_close.grid(row=0, column=1, padx=(2, 0), pady=1, sticky="ew")
 
-    def screenshot_device(self, dev_id):
+    def screenshot_device(self, dev_id, name):
         def action():
-            dev_name = main.get_device_name(dev_id)
-            print(f"[GUI] Đang chụp màn hình Máy {dev_name}...")
+            print(f"[GUI] Đang chụp màn hình Máy {name}...")
             temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
             os.makedirs(temp_dir, exist_ok=True)
-            local_path = os.path.join(temp_dir, f"gui_screenshot_{dev_name}.png")
+            local_path = os.path.join(temp_dir, f"gui_screenshot_{name}.png")
             success, res = main.adb.take_screenshot(dev_id, local_path)
             if success:
-                print(f"[GUI] Chụp ảnh Máy {dev_name} thành công! Đường dẫn: {local_path}")
+                print(f"[GUI] Chụp ảnh Máy {name} thành công! Đường dẫn: {local_path}")
                 # Mở ảnh bằng Windows Photo Viewer mặc định
                 os.startfile(local_path)
             else:
-                print(f"[GUI] Lỗi chụp màn hình Máy {dev_name}: {res}")
+                print(f"[GUI] Lỗi chụp màn hình Máy {name}: {res}")
         self.run_in_thread(action)
 
     def stop_all(self):
@@ -690,9 +688,6 @@ class GUIApp(ctk.CTk):
         def action():
             temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
             os.makedirs(temp_dir, exist_ok=True)
-            
-            # Lấy list ordered devices để hiển thị đúng số thứ tự máy (Ví dụ: Máy 1, Máy 5...)
-            ordered_devices = main.get_ordered_devices()
             
             def snap(device_id):
                 dev_name = main.get_device_name(device_id)

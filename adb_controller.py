@@ -118,11 +118,10 @@ class ADBController:
         time.sleep(1.5)
 
     def stop_app(self, device_id, package_name):
-        """Buộc dừng một ứng dụng và xóa khỏi danh sách đa nhiệm"""
-        res = self.execute_adb(device_id, ["shell", "am", "force-stop", package_name])
+        """Buộc dừng một ứng dụng và xóa khỏi danh sách đa nhiệm mà không mất dữ liệu"""
+        self.execute_adb(device_id, ["shell", "am", "force-stop", package_name])
         self.execute_adb(device_id, ["shell", "pm", "disable-user", package_name])
-        self.execute_adb(device_id, ["shell", "pm", "enable", package_name])
-        return res
+        return self.execute_adb(device_id, ["shell", "pm", "enable", package_name])
 
     def bypass_shopee_popup(self, device_id):
         """
