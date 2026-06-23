@@ -324,7 +324,14 @@ class ADBController:
             update_status("Đang đưa Shopee về trang chủ...")
             self.ensure_shopee_homepage(device_id)
             
+            # Nhấn back 1 lần để tắt popup quảng cáo theo yêu cầu
+            check_cancelled()
+            update_status("Nhấn Back 1 lần để đóng popup...")
+            self.keyevent(device_id, 4)
+            time.sleep(2.0)
+            
             # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
                 
@@ -458,7 +465,14 @@ class ADBController:
             update_status("Đang đưa Shopee về trang chủ...")
             self.ensure_shopee_homepage(device_id)
             
+            # Nhấn back 1 lần để tắt popup quảng cáo theo yêu cầu
+            check_cancelled()
+            update_status("Nhấn Back 1 lần để đóng popup...")
+            self.keyevent(device_id, 4)
+            time.sleep(2.0)
+            
             # Tự động phát hiện và tắt popup quảng cáo trang chủ nếu có
+            check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
             
