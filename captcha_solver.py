@@ -138,18 +138,5 @@ class CaptchaSolver:
                 
             return distance
 
-        # 9. Fallback: Nếu không tìm thấy cặp trùng Y do nhiễu, thử lấy ứng viên nằm bên trái nhất làm điểm xuất phát,
-        # và tìm ứng viên có độ rộng tương tự ở bên phải nhất làm đích.
-        if len(candidates) >= 2:
-            sorted_cands = sorted(candidates, key=lambda c: c['cx_global'])
-            start_piece = sorted_cands[0]
-            # Lọc các ứng viên bên phải có Y chênh lệch không quá nhiều so với mảnh đầu
-            right_cands = [c for c in sorted_cands[1:] if abs(c['cy_global'] - start_piece['cy_global']) < 40 * scale_factor]
-            if right_cands:
-                target_gap = right_cands[-1] # Lấy mảnh xa nhất bên phải
-                distance = target_gap['cx_global'] - start_piece['cx_global']
-                print(f"[{device_id}] Fallback: Manh ghep tai X={start_piece['cx_global']} -> O khuyet tai X={target_gap['cx_global']}. Khoang cach can keo = {distance}px.")
-                return distance
-                
         print(f"[{device_id}] Canh bao: Khong tim thay manh ghep Captcha phu hop tren anh.")
         return None
