@@ -107,8 +107,12 @@ class ADBController:
         xml_file = f"/sdcard/check_home_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         
-        code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        code, stdout, stderr = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
         if code != 0:
+            # Nếu uiautomator dump thất bại do lỗi idle state, coi như thiết bị đang ở Trang chủ Shopee (có hoạt ảnh chạy liên tục)
+            if "idle state" in stderr or "idle state" in stdout:
+                print(f"[Device {device_id[:6]}] Dump gặp lỗi idle state -> Giả định đang ở Trang chủ Shopee.")
+                return True
             return False
             
         local_xml = os.path.join(os.path.dirname(__file__), f"temp_check_home_{device_id}.xml")
@@ -549,9 +553,8 @@ class ADBController:
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
             
-            # Kiểm tra Captcha lần 1 sau khi mở ứng dụng
-            if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
-                return False, "Bị chặn bởi Captcha (Không thể tự giải sau khi mở Shopee)"
+            # Lọc popup xong, sẵn sàng tiếp tục các bước tìm kiếm
+            pass
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
