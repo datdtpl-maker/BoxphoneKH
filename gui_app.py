@@ -233,7 +233,7 @@ class GUIApp(ctk.CTk):
         # Hàng nút điều khiển chung
         self.bulk_actions = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
         self.bulk_actions.pack(fill="x", padx=15, pady=(6, 12))
-        for i in range(5):
+        for i in range(6):
             self.bulk_actions.columnconfigure(i, weight=1)
             
         self.btn_bulk_cap = ctk.CTkButton(
@@ -295,6 +295,18 @@ class GUIApp(ctk.CTk):
             command=self.bulk_close_shopee
         )
         self.btn_bulk_close.grid(row=0, column=4, padx=1, sticky="ew")
+
+        self.btn_bulk_rot = ctk.CTkButton(
+            self.bulk_actions,
+            text="🔄 Tắt xoay",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#475569",
+            hover_color="#334155",
+            height=30,
+            corner_radius=6,
+            command=lambda: self.bulk_disable_rotation()
+        )
+        self.btn_bulk_rot.grid(row=0, column=5, padx=1, sticky="ew")
         
         # Phân đoạn 4: Khung Terminal Log
         self.lbl_log = ctk.CTkLabel(
@@ -438,6 +450,9 @@ class GUIApp(ctk.CTk):
             )
             lbl_empty.grid(row=0, column=0, columnspan=4, pady=120)
             return
+
+        # Tự động tắt xoay hàng loạt cho tất cả các máy vừa phát hiện được
+        self.bulk_disable_rotation(devices)
 
         for idx, dev in enumerate(devices):
             row = idx // 4
@@ -703,6 +718,30 @@ class GUIApp(ctk.CTk):
             with ThreadPoolExecutor(max_workers=len(selected)) as executor:
                 executor.map(snap, selected)
             print("[GUI] Hoàn thành quy trình chụp ảnh hàng loạt.")
+            
+        self.run_in_thread(action)
+
+    def bulk_disable_rotation(self, target_devices=None):
+        """Tắt tự động xoay và khóa màn hình hướng dọc hàng loạt"""
+        if target_devices is None:
+            selected = self.get_selected_devices()
+            if not selected:
+                messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để tắt xoay!")
+                return
+        else:
+            selected = target_devices
+            
+        print(f"[GUI] Đang tắt tự động xoay (khóa dọc) trên {len(selected)} máy...")
+        
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            def disable_rot(d):
+                main.adb.execute_adb(d, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
+                main.adb.execute_adb(d, ["shell", "settings", "put", "system", "user_rotation", "0"])
+                
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(disable_rot, selected)
+            print("[GUI] Đã tắt tự động xoay và khóa màn hình dọc thành công trên các máy.")
             
         self.run_in_thread(action)
 
