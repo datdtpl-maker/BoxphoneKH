@@ -628,6 +628,7 @@ class ADBController:
                                     
                         # LOGIC QUÉT LÂM ĐỒNG THƯỜNG (Nếu không bật click_first_item hoặc không tìm thấy bài đăng đầu tiên bằng dự phòng)
                         if not found_coords:
+                            lamdong_candidates = []
                             for elem in root.iter():
                                 text = elem.get('text', '')
                                 if 'Lâm Đồng' in text or 'Tỉnh Lâm Đồng' in text:
@@ -635,8 +636,14 @@ class ADBController:
                                     m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                                     if m:
                                         x1, y1, x2, y2 = map(int, m.groups())
-                                        found_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                                        break
+                                        cx = (x1 + x2) // 2
+                                        cy = (y1 + y2) // 2
+                                        if cx > 0 and cy > 0:
+                                            if (cx, cy) not in lamdong_candidates:
+                                                lamdong_candidates.append((cx, cy))
+                            if lamdong_candidates:
+                                found_coords = random.choice(lamdong_candidates)
+                                update_status(f"Tìm thấy {len(lamdong_candidates)} shop Lâm Đồng trên màn hình. Chọn ngẫu nhiên: ({found_coords[0]}, {found_coords[1]}).")
                     except Exception as e:
                         print(f"Loi phan tich XML tren may {device_id}: {e}")
                     finally:
