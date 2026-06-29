@@ -233,7 +233,7 @@ class GUIApp(ctk.CTk):
         # Hàng nút điều khiển chung
         self.bulk_actions = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
         self.bulk_actions.pack(fill="x", padx=15, pady=(6, 12))
-        for i in range(6):
+        for i in range(7):
             self.bulk_actions.columnconfigure(i, weight=1)
             
         self.btn_bulk_cap = ctk.CTkButton(
@@ -307,6 +307,18 @@ class GUIApp(ctk.CTk):
             command=lambda: self.bulk_disable_rotation()
         )
         self.btn_bulk_rot.grid(row=0, column=5, padx=1, sticky="ew")
+
+        self.btn_bulk_reboot = ctk.CTkButton(
+            self.bulk_actions,
+            text="🔄 Reboot",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#b91c1c",
+            hover_color="#991b1b",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_reboot
+        )
+        self.btn_bulk_reboot.grid(row=0, column=6, padx=1, sticky="ew")
         
         # Phân đoạn 4: Khung Terminal Log
         self.lbl_log = ctk.CTkLabel(
@@ -742,6 +754,39 @@ class GUIApp(ctk.CTk):
             with ThreadPoolExecutor(max_workers=len(selected)) as executor:
                 executor.map(disable_rot, selected)
             print("[GUI] Đã tắt tự động xoay và khóa màn hình dọc thành công trên các máy.")
+            
+        self.run_in_thread(action)
+
+    def bulk_reboot(self):
+        """Khởi động lại các thiết bị đã chọn hàng loạt đa luồng"""
+        selected = self.get_selected_devices()
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng tích chọn ít nhất 1 máy để khởi động lại!")
+            return
+            
+        confirm = messagebox.askyesno(
+            "Xác nhận", 
+            f"Bạn có chắc chắn muốn khởi động lại (Reboot) {len(selected)} thiết bị đã chọn không?"
+        )
+        if not confirm:
+            return
+            
+        print(f"[GUI] Đang gửi lệnh khởi động lại (Reboot) đến {len(selected)} máy...")
+        
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            def reboot_device(d):
+                dev_name = main.get_device_name(d)
+                try:
+                    # Timeout ngắn 3s để tránh bị treo khi ngắt kết nối adb đột ngột
+                    main.adb.execute_adb(d, ["reboot"], timeout=3)
+                    print(f"[GUI] Gửi lệnh Reboot đến Máy {dev_name} thành công.")
+                except Exception as e:
+                    print(f"[GUI] Gửi lệnh Reboot đến Máy {dev_name} gặp lỗi: {e}")
+                    
+            with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+                executor.map(reboot_device, selected)
+            print("[GUI] Hoàn thành gửi lệnh reboot tới các máy.")
             
         self.run_in_thread(action)
 
