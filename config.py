@@ -32,3 +32,7 @@ SHOPEE_SEARCH_BTN_COORDS = (980, 140)
 # Tên gói ứng dụng (package) của Shopee
 SHOPEE_PACKAGE = "com.shopee.vn"
 SHOPEE_ACTIVITY = "com.shopee.app.home.HomeActivity"
+
+# Danh sách tên shop của bạn dùng để tìm kiếm dự phòng
+SHOPEE_SHOP_NAMES_RAW = os.getenv("SHOPEE_SHOP_NAMES", "")
+SHOPEE_SHOP_NAMES = [s.strip() for s in SHOPEE_SHOP_NAMES_RAW.split(",") if s.strip()]
