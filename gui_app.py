@@ -101,6 +101,18 @@ class GUIApp(ctk.CTk):
         )
         self.ent_adb.pack(fill="x", padx=15, pady=3)
         self.ent_adb.insert(0, config.ADB_PATH or "")
+
+        self.ent_shops = ctk.CTkEntry(
+            self.settings_card, 
+            placeholder_text="Tên các Shop dự phòng (Cách nhau bởi dấu phẩy)",
+            fg_color="#1e293b",
+            border_color="#334155",
+            corner_radius=8,
+            height=32
+        )
+        self.ent_shops.pack(fill="x", padx=15, pady=3)
+        shops_str = ",".join(config.SHOPEE_SHOP_NAMES or [])
+        self.ent_shops.insert(0, shops_str)
         
         self.btn_save = ctk.CTkButton(
             self.settings_card, 
@@ -398,6 +410,7 @@ class GUIApp(ctk.CTk):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
         adb_path = self.ent_adb.get().strip()
+        shops = self.ent_shops.get().strip()
         
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         lines = []
@@ -408,7 +421,8 @@ class GUIApp(ctk.CTk):
         keys = {
             'TELEGRAM_BOT_TOKEN': token,
             'ALLOWED_USER_IDS': admin_ids,
-            'ADB_PATH': adb_path
+            'ADB_PATH': adb_path,
+            'SHOPEE_SHOP_NAMES': shops
         }
         
         new_lines = []
@@ -436,6 +450,7 @@ class GUIApp(ctk.CTk):
         config.ALLOWED_USER_IDS = [int(i.strip()) for i in admin_ids.split(',') if i.strip().isdigit()]
         config.ADB_PATH = adb_path
         main.adb.adb_path = adb_path
+        config.SHOPEE_SHOP_NAMES = [s.strip() for s in shops.split(',') if s.strip()]
         
         # Re-initialize bot object
         import telebot
