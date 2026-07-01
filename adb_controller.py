@@ -5,8 +5,9 @@ import os
 import xml.etree.ElementTree as ET
 import re
 import random
+import config
 from concurrent.futures import ThreadPoolExecutor
-from config import ADB_PATH, SHOPEE_PACKAGE, SHOPEE_SEARCH_BOX_COORDS, SHOPEE_INPUT_BOX_COORDS, SHOPEE_SEARCH_BTN_COORDS, SHOPEE_SHOP_NAMES
+from config import ADB_PATH, SHOPEE_PACKAGE, SHOPEE_SEARCH_BOX_COORDS, SHOPEE_INPUT_BOX_COORDS, SHOPEE_SEARCH_BTN_COORDS
 
 class ADBController:
     def __init__(self, adb_path=ADB_PATH):
@@ -790,7 +791,7 @@ class ADBController:
                     time.sleep(0.25)
                     check_cancelled()
                 
-            if SHOPEE_SHOP_NAMES:
+            if config.SHOPEE_SHOP_NAMES:
                 update_status("Không tìm thấy shop Lâm Đồng trực tiếp. Chuyển sang tìm theo tên Shop dự phòng...")
                 return self.shopee_fallback_by_shop_name(device_id, keyword, status_callback, is_cancelled)
             return False, f"Đã vuốt {max_swipes} lần nhưng không tìm thấy sản phẩm nào có nhãn Tỉnh Lâm Đồng."
@@ -948,10 +949,10 @@ class ADBController:
             if is_cancelled and is_cancelled():
                 raise Exception("Bị dừng bởi người dùng")
 
-        if not SHOPEE_SHOP_NAMES:
+        if not config.SHOPEE_SHOP_NAMES:
             return False, "Không có danh sách shop để chạy dự phòng."
 
-        shop_name = random.choice(SHOPEE_SHOP_NAMES)
+        shop_name = random.choice(config.SHOPEE_SHOP_NAMES)
         update_status(f"[Dự phòng] Bắt đầu tìm kiếm shop '{shop_name}'...")
 
         try:
