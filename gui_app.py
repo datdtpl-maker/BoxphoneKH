@@ -37,12 +37,12 @@ class GUIApp(ctk.CTk):
         self.device_checkboxes = {}
         
         # Grid layout 1x2 (Cột trái: Dashboard cấu hình, Cột phải: Grid quản lý máy)
-        self.grid_columnconfigure(0, weight=0, minsize=420)
+        self.grid_columnconfigure(0, weight=0, minsize=450)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         
-        # ================= LEFT DASHBOARD PANEL =================
-        self.left_panel = ctk.CTkFrame(self, width=420, corner_radius=16, fg_color="#1e293b", border_width=1, border_color="#334155")
+        # ================= LEFT DASHBOARD PANEL (Cuộn tránh tràn màn hình) =================
+        self.left_panel = ctk.CTkScrollableFrame(self, width=435, corner_radius=16, fg_color="#1e293b", border_width=1, border_color="#334155")
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(15, 10), pady=15)
         
         # Tiêu đề hệ thống
