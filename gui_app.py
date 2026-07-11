@@ -328,94 +328,100 @@ class GUIApp(ctk.CTk):
         self.btn_deselect_all.grid(row=0, column=1, padx=(2, 0), sticky="ew")
         
         # Hàng nút điều khiển chung
-        self.bulk_actions = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
-        self.bulk_actions.pack(fill="x", padx=15, pady=(6, 12))
-        for i in range(7):
-            self.bulk_actions.columnconfigure(i, weight=1)
+        self.bulk_row1 = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
+        self.bulk_row1.pack(fill="x", padx=15, pady=(6, 3))
+        for i in range(3):
+            self.bulk_row1.columnconfigure(i, weight=1)
             
-        self.btn_bulk_cap = ctk.CTkButton(
-            self.bulk_actions,
-            text="📸 Chụp",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color="#475569",
-            hover_color="#334155",
-            height=30,
-            corner_radius=6,
-            command=self.bulk_screenshot
-        )
-        self.btn_bulk_cap.grid(row=0, column=0, padx=1, sticky="ew")
-        
         self.btn_bulk_home = ctk.CTkButton(
-            self.bulk_actions,
-            text="🏠 Main",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            self.bulk_row1,
+            text="🏠 Trang chủ",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#475569",
             hover_color="#334155",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_keyevent(3)
         )
-        self.btn_bulk_home.grid(row=0, column=1, padx=1, sticky="ew")
+        self.btn_bulk_home.grid(row=0, column=0, padx=2, sticky="ew")
         
         self.btn_bulk_back = ctk.CTkButton(
-            self.bulk_actions,
+            self.bulk_row1,
             text="↩️ Back",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#475569",
             hover_color="#334155",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_keyevent(4)
         )
-        self.btn_bulk_back.grid(row=0, column=2, padx=1, sticky="ew")
+        self.btn_bulk_back.grid(row=0, column=1, padx=2, sticky="ew")
         
-        self.btn_bulk_open = ctk.CTkButton(
-            self.bulk_actions,
-            text="🛒 Mở",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color="#059669",
-            hover_color="#047857",
-            height=30,
-            corner_radius=6,
-            command=self.bulk_open_shopee
-        )
-        self.btn_bulk_open.grid(row=0, column=3, padx=1, sticky="ew")
-        
-        self.btn_bulk_close = ctk.CTkButton(
-            self.bulk_actions,
-            text="🛑 Tắt",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color="#991b1b",
-            hover_color="#7f1d1d",
-            height=30,
-            corner_radius=6,
-            command=self.bulk_close_shopee
-        )
-        self.btn_bulk_close.grid(row=0, column=4, padx=1, sticky="ew")
-
         self.btn_bulk_rot = ctk.CTkButton(
-            self.bulk_actions,
+            self.bulk_row1,
             text="🔄 Tắt xoay",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#475569",
             hover_color="#334155",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_disable_rotation()
         )
-        self.btn_bulk_rot.grid(row=0, column=5, padx=1, sticky="ew")
+        self.btn_bulk_rot.grid(row=0, column=2, padx=2, sticky="ew")
 
+        # Hàng thứ 2
+        self.bulk_row2 = ctk.CTkFrame(self.bulk_card, fg_color="transparent")
+        self.bulk_row2.pack(fill="x", padx=15, pady=(3, 12))
+        for i in range(4):
+            self.bulk_row2.columnconfigure(i, weight=1)
+            
+        self.btn_bulk_cap = ctk.CTkButton(
+            self.bulk_row2,
+            text="📸 Chụp",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#475569",
+            hover_color="#334155",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_screenshot
+        )
+        self.btn_bulk_cap.grid(row=0, column=0, padx=2, sticky="ew")
+        
+        self.btn_bulk_open = ctk.CTkButton(
+            self.bulk_row2,
+            text="🛒 Mở Shopee",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#059669",
+            hover_color="#047857",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_open_shopee
+        )
+        self.btn_bulk_open.grid(row=0, column=1, padx=2, sticky="ew")
+        
+        self.btn_bulk_close = ctk.CTkButton(
+            self.bulk_row2,
+            text="🛑 Tắt App",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#991b1b",
+            hover_color="#7f1d1d",
+            height=30,
+            corner_radius=6,
+            command=self.bulk_close_shopee
+        )
+        self.btn_bulk_close.grid(row=0, column=2, padx=2, sticky="ew")
+        
         self.btn_bulk_reboot = ctk.CTkButton(
-            self.bulk_actions,
-            text="🔄 Reboot",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            self.bulk_row2,
+            text="⚡ Reboot",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#b91c1c",
             hover_color="#991b1b",
             height=30,
             corner_radius=6,
             command=self.bulk_reboot
         )
-        self.btn_bulk_reboot.grid(row=0, column=6, padx=1, sticky="ew")
+        self.btn_bulk_reboot.grid(row=0, column=3, padx=2, sticky="ew")
         
         # Phân đoạn 4: Khung Terminal Log
         self.lbl_log = ctk.CTkLabel(
