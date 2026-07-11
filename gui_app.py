@@ -21,10 +21,17 @@ ctk.set_default_color_theme("blue")
 class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
         self.title("🤖 BOX PHONE - SHOPEE KHẢI HOÀN (Premium Dashboard) 📱")
         self.geometry("1280x850")
         self.configure(fg_color="#0f172a") # Slate 900
+        
+        # Thiết lập app icon bitmap
+        icon_path = os.path.join(os.path.dirname(__file__), "app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
         
         # Lưu trữ các biến Checkbox điều khiển hàng loạt
         self.device_checkboxes = {}
@@ -151,13 +158,46 @@ class GUIApp(ctk.CTk):
         
         self.ent_keywords = ctk.CTkEntry(
             self.tasks_card, 
-            placeholder_text="Từ khóa tìm kiếm (deriva, son môi...)",
+            placeholder_text="Từ khóa chính (deriva, son môi...)",
             fg_color="#1e293b",
             border_color="#334155",
             corner_radius=8,
             height=34
         )
         self.ent_keywords.pack(fill="x", padx=15, pady=3)
+        
+        # Nút sinh từ khóa qua AI
+        self.btn_gen_ai = ctk.CTkButton(
+            self.tasks_card,
+            text="🪄 Sinh từ khóa bằng AI (Gemini)",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            corner_radius=8,
+            height=30,
+            command=self.generate_ai_keywords_action
+        )
+        self.btn_gen_ai.pack(fill="x", padx=15, pady=4)
+        
+        # Textbox hiển thị danh sách từ khóa AI
+        self.lbl_ai_keywords = ctk.CTkLabel(
+            self.tasks_card,
+            text="Danh sách từ khóa ngẫu nhiên (AI Generated):",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#94a3b8"
+        )
+        self.lbl_ai_keywords.pack(padx=15, pady=(2, 0), anchor="w")
+        
+        self.txt_ai_keywords = ctk.CTkTextbox(
+            self.tasks_card,
+            fg_color="#1e293b",
+            border_color="#334155",
+            border_width=1,
+            corner_radius=8,
+            height=100,
+            font=ctk.CTkFont(family="Segoe UI", size=11)
+        )
+        self.txt_ai_keywords.pack(fill="x", padx=15, pady=3)
         
         self.ent_selection = ctk.CTkEntry(
             self.tasks_card, 
@@ -821,37 +861,48 @@ class GUIApp(ctk.CTk):
 
     # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM =================
     def run_seq_search(self):
-        keywords_str = self.ent_keywords.get().strip()
-        if not keywords_str:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa tìm kiếm!")
-            return
-            
-        # Tự động phát hiện cờ click_first_item trong ô từ khóa của GUI
+        ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        temp_str = keywords_str.lower()
-        if any(ind in temp_str for ind in first_indicators):
-            click_first_item = True
+        
+        if ai_keywords_raw:
+            keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
+            for kw in keywords:
+                if any(ind in kw.lower() for ind in first_indicators):
+                    click_first_item = True
+                    break
+        else:
+            keywords_str = self.ent_keywords.get().strip()
+            if not keywords_str:
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
+                return
+            if any(ind in keywords_str.lower() for ind in first_indicators):
+                click_first_item = True
+            for ind in first_indicators:
+                keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
+            keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
+            keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
             
-        # Làm sạch từ khóa
-        for ind in first_indicators:
-            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
-        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
-            
-        keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
         target_devices = self.parse_targets()
         if not target_devices:
             return
             
         def action():
-            def status_cb(msg):
-                self.log_message(f"[Gemini AI] {msg}")
-            
-            expanded_keywords = config.generate_keywords_via_gemini(
-                config.GEMINI_API_KEY, 
-                keywords, 
-                status_cb=status_cb
-            )
+            nonlocal keywords
+            if not ai_keywords_raw:
+                def status_cb(msg):
+                    self.log_message(f"[Gemini AI] {msg}")
+                expanded = config.generate_keywords_via_gemini(
+                    config.GEMINI_API_KEY, 
+                    keywords, 
+                    status_cb=status_cb
+                )
+                if click_first_item:
+                    expanded = [f"{k} video" for k in expanded]
+                keywords = expanded
+                self.txt_ai_keywords.delete("1.0", "end")
+                for k in keywords:
+                    self.txt_ai_keywords.insert("end", f"{k}\n")
             
             class DummyMessage:
                 def __init__(self):
@@ -859,47 +910,58 @@ class GUIApp(ctk.CTk):
                         def __init__(self):
                             self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
                     self.chat = DummyChat()
-            main.run_sequential_shopee_search(DummyMessage(), expanded_keywords, target_devices, click_first_item=click_first_item)
+            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item)
             
         self.run_in_thread(action)
 
     def run_par_search(self):
-        keywords_str = self.ent_keywords.get().strip()
-        if not keywords_str:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa tìm kiếm!")
-            return
-            
-        # Tự động phát hiện cờ click_first_item trong ô từ khóa của GUI
+        ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        temp_str = keywords_str.lower()
-        if any(ind in temp_str for ind in first_indicators):
-            click_first_item = True
+        
+        if ai_keywords_raw:
+            keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
+            for kw in keywords:
+                if any(ind in kw.lower() for ind in first_indicators):
+                    click_first_item = True
+                    break
+        else:
+            keywords_str = self.ent_keywords.get().strip()
+            if not keywords_str:
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
+                return
+            if any(ind in keywords_str.lower() for ind in first_indicators):
+                click_first_item = True
+            for ind in first_indicators:
+                keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
+            keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
+            keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
             
-        # Làm sạch từ khóa
-        for ind in first_indicators:
-            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
-        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
-            
-        keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
         target_devices = self.parse_targets()
         if not target_devices:
             return
             
         def action():
+            nonlocal keywords
             main.cancel_flag = False
             main.cancel_sequential = False
             
-            def status_cb(msg):
-                self.log_message(f"[Gemini AI] {msg}")
-                
-            expanded_keywords = config.generate_keywords_via_gemini(
-                config.GEMINI_API_KEY, 
-                keywords, 
-                status_cb=status_cb
-            )
+            if not ai_keywords_raw:
+                def status_cb(msg):
+                    self.log_message(f"[Gemini AI] {msg}")
+                expanded = config.generate_keywords_via_gemini(
+                    config.GEMINI_API_KEY, 
+                    keywords, 
+                    status_cb=status_cb
+                )
+                if click_first_item:
+                    expanded = [f"{k} video" for k in expanded]
+                keywords = expanded
+                self.txt_ai_keywords.delete("1.0", "end")
+                for k in keywords:
+                    self.txt_ai_keywords.insert("end", f"{k}\n")
             
-            keyword_str = ", ".join(expanded_keywords)
+            keyword_str = ", ".join(keywords)
             print(f"[GUI] Bắt đầu tìm kiếm song song (Mở rộng từ Gemini) trên {len(target_devices)} máy...")
             
             # Gửi tin nhắn bắt đầu chạy song song về Telegram
@@ -909,7 +971,7 @@ class GUIApp(ctk.CTk):
                         config.ALLOWED_USER_IDS[0],
                         f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG**\n\n"
                         f"Từ khóa chính: `{', '.join(keywords)}`\n"
-                        f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
+                        f"Từ khóa mở rộng (Gemini): Có {len(keywords)} từ khóa\n"
                         f"Tổng số máy: {len(target_devices)} máy\n"
                         f"Chế độ click đầu tiên: **{click_first_item}**"
                     )
@@ -919,7 +981,7 @@ class GUIApp(ctk.CTk):
             def run_search_parallel(device_id):
                 devices = main.get_ordered_devices()
                 dev_idx = devices.index(device_id) + 1
-                current_keyword = random.choice(expanded_keywords)
+                current_keyword = random.choice(keywords)
                 print(f"[Máy {dev_idx}] Bắt đầu tìm từ khóa `{current_keyword}`...")
                 
                 # Báo về Telegram máy bắt đầu chạy
@@ -968,6 +1030,60 @@ class GUIApp(ctk.CTk):
                 except Exception:
                     pass
             
+        self.run_in_thread(action)
+
+    def log_message(self, msg):
+        print(f"[GUI] {msg}")
+
+    def generate_ai_keywords_action(self):
+        keywords_str = self.ent_keywords.get().strip()
+        if not keywords_str:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước!")
+            return
+            
+        gemini_key = self.ent_gemini_key.get().strip()
+        if not gemini_key:
+            gemini_key = config.GEMINI_API_KEY
+            
+        # Làm sạch các chỉ báo video đầu tiên nếu có
+        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        temp_str = keywords_str.lower()
+        click_first_item = False
+        if any(ind in temp_str for ind in first_indicators):
+            click_first_item = True
+        for ind in first_indicators:
+            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
+        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
+        
+        keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
+        if not keywords:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hợp lệ!")
+            return
+            
+        self.log_message(f"Đang gửi yêu cầu sinh từ khóa phụ cho: {keywords}...")
+        self.btn_gen_ai.configure(state="disabled", text="🪄 Đang sinh từ khóa...")
+        
+        def action():
+            try:
+                def status_cb(msg):
+                    self.log_message(msg)
+                    
+                expanded = config.generate_keywords_via_gemini(gemini_key, keywords, status_cb=status_cb)
+                
+                # Hiển thị lên Textbox
+                self.txt_ai_keywords.delete("1.0", "end")
+                for kw in expanded:
+                    kw_to_insert = kw
+                    if click_first_item:
+                        kw_to_insert = f"{kw} video"
+                    self.txt_ai_keywords.insert("end", f"{kw_to_insert}\n")
+                    
+                self.log_message(f"Đã hiển thị {len(expanded)} từ khóa lên giao diện.")
+            except Exception as e:
+                self.log_message(f"Gặp lỗi khi sinh từ khóa: {e}")
+            finally:
+                self.btn_gen_ai.configure(state="normal", text="🪄 Sinh từ khóa bằng AI (Gemini)")
+                
         self.run_in_thread(action)
 
     def start_bot_service(self):

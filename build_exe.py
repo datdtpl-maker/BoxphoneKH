@@ -11,6 +11,7 @@ def build():
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--windowed",
+        "--icon=app_icon.ico",
         "--collect-all", "customtkinter",
         "--name", "BoxPhoneControl",
         "gui_app.py"
