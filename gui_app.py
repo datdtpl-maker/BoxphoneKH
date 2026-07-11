@@ -175,6 +175,31 @@ class GUIApp(ctk.CTk):
         )
         self.txt_main_keywords.pack(fill="x", padx=15, pady=3)
         
+        # Lựa chọn chế độ từ khóa
+        self.keyword_mode = ctk.StringVar(value="original")
+        self.mode_frame = ctk.CTkFrame(self.tasks_card, fg_color="transparent")
+        self.mode_frame.pack(fill="x", padx=15, pady=4)
+        
+        self.rad_orig = ctk.CTkRadioButton(
+            self.mode_frame, 
+            text="Từ khóa gốc (Không AI)", 
+            variable=self.keyword_mode, 
+            value="original",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#f1f5f9"
+        )
+        self.rad_orig.pack(side="left", padx=(0, 10))
+        
+        self.rad_ai = ctk.CTkRadioButton(
+            self.mode_frame, 
+            text="Từ khóa mở rộng (AI)", 
+            variable=self.keyword_mode, 
+            value="ai",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#f1f5f9"
+        )
+        self.rad_ai.pack(side="left", padx=10)
+        
         # Nút sinh từ khóa qua AI
         self.btn_gen_ai = ctk.CTkButton(
             self.tasks_card,
@@ -870,20 +895,14 @@ class GUIApp(ctk.CTk):
 
     # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM =================
     def run_seq_search(self):
-        ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        mode = self.keyword_mode.get()
         
-        if ai_keywords_raw:
-            keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
-            for kw in keywords:
-                if any(ind in kw.lower() for ind in first_indicators):
-                    click_first_item = True
-                    break
-        else:
+        if mode == "original":
             raw_text = self.txt_main_keywords.get("1.0", "end").strip()
             if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính!")
                 return
             keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
             for kw in keywords:
@@ -899,6 +918,33 @@ class GUIApp(ctk.CTk):
                 if clean_kw:
                     clean_keywords.append(clean_kw)
             keywords = clean_keywords
+        else:
+            ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
+            if ai_keywords_raw:
+                keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
+                for kw in keywords:
+                    if any(ind in kw.lower() for ind in first_indicators):
+                        click_first_item = True
+                        break
+            else:
+                raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+                if not raw_text:
+                    messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước khi chạy chế độ AI!")
+                    return
+                keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
+                for kw in keywords:
+                    if any(ind in kw.lower() for ind in first_indicators):
+                        click_first_item = True
+                        break
+                clean_keywords = []
+                for kw in keywords:
+                    clean_kw = kw
+                    for ind in first_indicators:
+                        clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
+                    clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
+                    if clean_kw:
+                        clean_keywords.append(clean_kw)
+                keywords = clean_keywords
             
         target_devices = self.parse_targets()
         if not target_devices:
@@ -906,7 +952,7 @@ class GUIApp(ctk.CTk):
             
         def action():
             nonlocal keywords
-            if not ai_keywords_raw:
+            if mode == "ai" and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
                 expanded = config.generate_keywords_via_gemini(
@@ -918,6 +964,8 @@ class GUIApp(ctk.CTk):
                     expanded = [f"{k} video" for k in expanded]
                 keywords = expanded
                 self.txt_ai_keywords.delete("1.0", "end")
+                for k in keywords:
+                    self.txt_ai_keywords.insert("end", f"{k}\n")
                 for k in keywords:
                     self.txt_ai_keywords.insert("end", f"{k}\n")
             
@@ -932,20 +980,14 @@ class GUIApp(ctk.CTk):
         self.run_in_thread(action)
 
     def run_par_search(self):
-        ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        mode = self.keyword_mode.get()
         
-        if ai_keywords_raw:
-            keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
-            for kw in keywords:
-                if any(ind in kw.lower() for ind in first_indicators):
-                    click_first_item = True
-                    break
-        else:
+        if mode == "original":
             raw_text = self.txt_main_keywords.get("1.0", "end").strip()
             if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính!")
                 return
             keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
             for kw in keywords:
@@ -961,6 +1003,33 @@ class GUIApp(ctk.CTk):
                 if clean_kw:
                     clean_keywords.append(clean_kw)
             keywords = clean_keywords
+        else:
+            ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
+            if ai_keywords_raw:
+                keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
+                for kw in keywords:
+                    if any(ind in kw.lower() for ind in first_indicators):
+                        click_first_item = True
+                        break
+            else:
+                raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+                if not raw_text:
+                    messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước khi chạy chế độ AI!")
+                    return
+                keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
+                for kw in keywords:
+                    if any(ind in kw.lower() for ind in first_indicators):
+                        click_first_item = True
+                        break
+                clean_keywords = []
+                for kw in keywords:
+                    clean_kw = kw
+                    for ind in first_indicators:
+                        clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
+                    clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
+                    if clean_kw:
+                        clean_keywords.append(clean_kw)
+                keywords = clean_keywords
             
         target_devices = self.parse_targets()
         if not target_devices:
@@ -971,7 +1040,7 @@ class GUIApp(ctk.CTk):
             main.cancel_flag = False
             main.cancel_sequential = False
             
-            if not ai_keywords_raw:
+            if mode == "ai" and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
                 expanded = config.generate_keywords_via_gemini(
