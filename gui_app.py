@@ -156,15 +156,24 @@ class GUIApp(ctk.CTk):
         )
         self.lbl_tasks.pack(pady=(8, 4), padx=15, anchor="w")
         
-        self.ent_keywords = ctk.CTkEntry(
+        self.lbl_main_keywords = ctk.CTkLabel(
+            self.tasks_card,
+            text="Từ khóa chính (Mỗi dòng 1 từ khóa):",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#94a3b8"
+        )
+        self.lbl_main_keywords.pack(padx=15, pady=(2, 0), anchor="w")
+
+        self.txt_main_keywords = ctk.CTkTextbox(
             self.tasks_card, 
-            placeholder_text="Từ khóa chính (deriva, son môi...)",
             fg_color="#1e293b",
             border_color="#334155",
+            border_width=1,
             corner_radius=8,
-            height=34
+            height=75,
+            font=ctk.CTkFont(family="Segoe UI", size=11)
         )
-        self.ent_keywords.pack(fill="x", padx=15, pady=3)
+        self.txt_main_keywords.pack(fill="x", padx=15, pady=3)
         
         # Nút sinh từ khóa qua AI
         self.btn_gen_ai = ctk.CTkButton(
@@ -872,16 +881,24 @@ class GUIApp(ctk.CTk):
                     click_first_item = True
                     break
         else:
-            keywords_str = self.ent_keywords.get().strip()
-            if not keywords_str:
+            raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+            if not raw_text:
                 messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
                 return
-            if any(ind in keywords_str.lower() for ind in first_indicators):
-                click_first_item = True
-            for ind in first_indicators:
-                keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
-            keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
-            keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
+            keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
+            for kw in keywords:
+                if any(ind in kw.lower() for ind in first_indicators):
+                    click_first_item = True
+                    break
+            clean_keywords = []
+            for kw in keywords:
+                clean_kw = kw
+                for ind in first_indicators:
+                    clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
+                clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
+                if clean_kw:
+                    clean_keywords.append(clean_kw)
+            keywords = clean_keywords
             
         target_devices = self.parse_targets()
         if not target_devices:
@@ -926,16 +943,24 @@ class GUIApp(ctk.CTk):
                     click_first_item = True
                     break
         else:
-            keywords_str = self.ent_keywords.get().strip()
-            if not keywords_str:
+            raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+            if not raw_text:
                 messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hoặc sinh từ khóa AI trước!")
                 return
-            if any(ind in keywords_str.lower() for ind in first_indicators):
-                click_first_item = True
-            for ind in first_indicators:
-                keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
-            keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
-            keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
+            keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
+            for kw in keywords:
+                if any(ind in kw.lower() for ind in first_indicators):
+                    click_first_item = True
+                    break
+            clean_keywords = []
+            for kw in keywords:
+                clean_kw = kw
+                for ind in first_indicators:
+                    clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
+                clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
+                if clean_kw:
+                    clean_keywords.append(clean_kw)
+            keywords = clean_keywords
             
         target_devices = self.parse_targets()
         if not target_devices:
@@ -1036,8 +1061,8 @@ class GUIApp(ctk.CTk):
         print(f"[GUI] {msg}")
 
     def generate_ai_keywords_action(self):
-        keywords_str = self.ent_keywords.get().strip()
-        if not keywords_str:
+        raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+        if not raw_text:
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước!")
             return
             
@@ -1045,17 +1070,24 @@ class GUIApp(ctk.CTk):
         if not gemini_key:
             gemini_key = config.GEMINI_API_KEY
             
-        # Làm sạch các chỉ báo video đầu tiên nếu có
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        temp_str = keywords_str.lower()
+        keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
         click_first_item = False
-        if any(ind in temp_str for ind in first_indicators):
-            click_first_item = True
-        for ind in first_indicators:
-            keywords_str = re.sub(r"\b" + re.escape(ind) + r"\b", "", keywords_str, flags=re.IGNORECASE)
-        keywords_str = re.sub(r"\s+", " ", keywords_str).strip()
+        for kw in keywords:
+            if any(ind in kw.lower() for ind in first_indicators):
+                click_first_item = True
+                break
+                
+        clean_keywords = []
+        for kw in keywords:
+            clean_kw = kw
+            for ind in first_indicators:
+                clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
+            clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
+            if clean_kw:
+                clean_keywords.append(clean_kw)
+        keywords = clean_keywords
         
-        keywords = [k.strip() for k in re.split(r'[,;|]', keywords_str) if k.strip()]
         if not keywords:
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hợp lệ!")
             return
