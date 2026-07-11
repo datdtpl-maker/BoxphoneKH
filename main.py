@@ -238,7 +238,17 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     cancel_sequential = False
     cancel_flag = False
     
-    keyword_str = ", ".join(keywords)
+    # Sinh từ khóa phụ qua Gemini
+    def gemini_status(msg):
+        safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
+        
+    expanded_keywords = config.generate_keywords_via_gemini(
+        config.GEMINI_API_KEY, 
+        keywords, 
+        status_cb=gemini_status
+    )
+    
+    keyword_str = ", ".join(expanded_keywords)
     
     # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
     markup = telebot.types.InlineKeyboardMarkup()
@@ -247,7 +257,8 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     start_msg = safe_send_message(
         message.chat.id, 
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
-        f"Danh sách từ khóa: `{keyword_str}`\n"
+        f"Từ khóa chính: `{', '.join(keywords)}`\n"
+        f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
         f"Tổng số máy: {len(devices)} máy\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**.\n\n"
         f"*(Bạn có thể bấm nút dừng ở bên dưới bất kỳ lúc nào)*",
@@ -269,7 +280,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             break
             
         dev_name = get_device_name(dev)
-        current_keyword = random.choice(keywords)
+        current_keyword = random.choice(expanded_keywords)
         safe_send_message(message.chat.id, f"📱 **Máy {dev_name}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
         success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first_item)
@@ -638,9 +649,18 @@ def handle_all_messages(message):
     elif action == "shopee_search":
         keywords = cmd["keywords"]
         
+        # Sinh từ khóa phụ qua Gemini
+        def gemini_status(msg):
+            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
+        expanded_keywords = config.generate_keywords_via_gemini(
+            config.GEMINI_API_KEY, 
+            keywords, 
+            status_cb=gemini_status
+        )
+        
         if len(target_devices) == 1:
             tgt_name = get_device_name(target_devices[0])
-            current_keyword = random.choice(keywords)
+            current_keyword = random.choice(expanded_keywords)
             status_msg = bot.reply_to(message, f"🛒 **Máy {tgt_name}**: Bắt đầu mở Shopee và tìm kiếm '{current_keyword}'...")
             
             def cb(dev_id, msg):
@@ -652,7 +672,7 @@ def handle_all_messages(message):
             else:
                 bot.edit_message_text(f"❌ **Máy {tgt_name}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
         else:
-            keyword_str = ", ".join(keywords)
+            keyword_str = ", ".join(expanded_keywords)
             # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
@@ -660,7 +680,7 @@ def handle_all_messages(message):
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
-                current_keyword = random.choice(keywords)
+                current_keyword = random.choice(expanded_keywords)
                 bot.send_message(message.chat.id, f"🔍 **Máy {dev_name}**: Bắt đầu tìm với từ khóa `{current_keyword}`...")
                 success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=is_cancelled)
                 return dev_name, current_keyword, success, err
@@ -688,9 +708,18 @@ def handle_all_messages(message):
         keywords = cmd["keywords"]
         click_first = cmd.get("click_first_item", False)
         
+        # Sinh từ khóa phụ qua Gemini
+        def gemini_status(msg):
+            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
+        expanded_keywords = config.generate_keywords_via_gemini(
+            config.GEMINI_API_KEY, 
+            keywords, 
+            status_cb=gemini_status
+        )
+        
         if len(target_devices) == 1:
             tgt_name = get_device_name(target_devices[0])
-            current_keyword = random.choice(keywords)
+            current_keyword = random.choice(expanded_keywords)
             status_msg = bot.reply_to(message, f"🔍 **Máy {tgt_name}**: Đang tìm kiếm '{current_keyword}' và quét tìm shop ở Lâm Đồng...")
             
             def cb(dev_id, msg):
@@ -718,7 +747,7 @@ def handle_all_messages(message):
                         except Exception:
                             pass
         else:
-            keyword_str = ", ".join(keywords)
+            keyword_str = ", ".join(expanded_keywords)
             # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
@@ -726,7 +755,7 @@ def handle_all_messages(message):
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
-                current_keyword = random.choice(keywords)
+                current_keyword = random.choice(expanded_keywords)
                 bot.send_message(message.chat.id, f"🔍 **Máy {dev_name}**: Bắt đầu quét từ khóa `{current_keyword}`...")
                 success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first)
                 return dev_name, current_keyword, success, err

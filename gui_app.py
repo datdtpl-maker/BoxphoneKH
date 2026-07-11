@@ -113,6 +113,17 @@ class GUIApp(ctk.CTk):
         self.ent_shops.pack(fill="x", padx=15, pady=3)
         shops_str = ",".join(config.SHOPEE_SHOP_NAMES or [])
         self.ent_shops.insert(0, shops_str)
+
+        self.ent_gemini_key = ctk.CTkEntry(
+            self.settings_card, 
+            placeholder_text="Gemini API Key",
+            fg_color="#1e293b",
+            border_color="#334155",
+            corner_radius=8,
+            height=32
+        )
+        self.ent_gemini_key.pack(fill="x", padx=15, pady=3)
+        self.ent_gemini_key.insert(0, config.GEMINI_API_KEY or "")
         
         self.btn_save = ctk.CTkButton(
             self.settings_card, 
@@ -411,6 +422,7 @@ class GUIApp(ctk.CTk):
         admin_ids = self.ent_admins.get().strip()
         adb_path = self.ent_adb.get().strip()
         shops = self.ent_shops.get().strip()
+        gemini_key = self.ent_gemini_key.get().strip()
         
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         lines = []
@@ -422,7 +434,8 @@ class GUIApp(ctk.CTk):
             'TELEGRAM_BOT_TOKEN': token,
             'ALLOWED_USER_IDS': admin_ids,
             'ADB_PATH': adb_path,
-            'SHOPEE_SHOP_NAMES': shops
+            'SHOPEE_SHOP_NAMES': shops,
+            'GEMINI_API_KEY': gemini_key
         }
         
         new_lines = []
@@ -451,6 +464,7 @@ class GUIApp(ctk.CTk):
         config.ADB_PATH = adb_path
         main.adb.adb_path = adb_path
         config.SHOPEE_SHOP_NAMES = [s.strip() for s in shops.split(',') if s.strip()]
+        config.GEMINI_API_KEY = gemini_key
         
         # Re-initialize bot object
         import telebot
@@ -830,13 +844,22 @@ class GUIApp(ctk.CTk):
             return
             
         def action():
+            def status_cb(msg):
+                self.log_message(f"[Gemini AI] {msg}")
+            
+            expanded_keywords = config.generate_keywords_via_gemini(
+                config.GEMINI_API_KEY, 
+                keywords, 
+                status_cb=status_cb
+            )
+            
             class DummyMessage:
                 def __init__(self):
                     class DummyChat:
                         def __init__(self):
                             self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
                     self.chat = DummyChat()
-            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item)
+            main.run_sequential_shopee_search(DummyMessage(), expanded_keywords, target_devices, click_first_item=click_first_item)
             
         self.run_in_thread(action)
 
@@ -866,8 +889,18 @@ class GUIApp(ctk.CTk):
         def action():
             main.cancel_flag = False
             main.cancel_sequential = False
-            keyword_str = ", ".join(keywords)
-            print(f"[GUI] Bắt đầu tìm kiếm song song '{keyword_str}' (Click đầu tiên: {click_first_item}) trên {len(target_devices)} máy...")
+            
+            def status_cb(msg):
+                self.log_message(f"[Gemini AI] {msg}")
+                
+            expanded_keywords = config.generate_keywords_via_gemini(
+                config.GEMINI_API_KEY, 
+                keywords, 
+                status_cb=status_cb
+            )
+            
+            keyword_str = ", ".join(expanded_keywords)
+            print(f"[GUI] Bắt đầu tìm kiếm song song (Mở rộng từ Gemini) trên {len(target_devices)} máy...")
             
             # Gửi tin nhắn bắt đầu chạy song song về Telegram
             if config.ALLOWED_USER_IDS:
@@ -875,7 +908,8 @@ class GUIApp(ctk.CTk):
                     main.bot.send_message(
                         config.ALLOWED_USER_IDS[0],
                         f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG**\n\n"
-                        f"Từ khóa: `{keyword_str}`\n"
+                        f"Từ khóa chính: `{', '.join(keywords)}`\n"
+                        f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
                         f"Tổng số máy: {len(target_devices)} máy\n"
                         f"Chế độ click đầu tiên: **{click_first_item}**"
                     )
@@ -885,7 +919,7 @@ class GUIApp(ctk.CTk):
             def run_search_parallel(device_id):
                 devices = main.get_ordered_devices()
                 dev_idx = devices.index(device_id) + 1
-                current_keyword = random.choice(keywords)
+                current_keyword = random.choice(expanded_keywords)
                 print(f"[Máy {dev_idx}] Bắt đầu tìm từ khóa `{current_keyword}`...")
                 
                 # Báo về Telegram máy bắt đầu chạy
