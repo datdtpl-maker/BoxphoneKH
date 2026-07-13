@@ -233,21 +233,24 @@ def get_device_name(serial):
         return f"{serial[:8].upper()}"
     return serial
 
-def run_sequential_shopee_search(message, keywords, devices, click_first_item=False):
+def run_sequential_shopee_search(message, keywords, devices, click_first_item=False, use_ai=True):
     global cancel_sequential, cancel_flag
     cancel_sequential = False
     cancel_flag = False
     
-    # Sinh từ khóa phụ qua Gemini
-    def gemini_status(msg):
-        safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
+    if use_ai:
+        # Sinh từ khóa phụ qua Gemini
+        def gemini_status(msg):
+            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
+            
+        expanded_keywords = config.generate_keywords_via_gemini(
+            config.GEMINI_API_KEY, 
+            keywords, 
+            status_cb=gemini_status
+        )
+    else:
+        expanded_keywords = keywords
         
-    expanded_keywords = config.generate_keywords_via_gemini(
-        config.GEMINI_API_KEY, 
-        keywords, 
-        status_cb=gemini_status
-    )
-    
     keyword_str = ", ".join(expanded_keywords)
     
     # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn

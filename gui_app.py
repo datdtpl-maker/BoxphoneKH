@@ -992,8 +992,6 @@ class GUIApp(ctk.CTk):
                 self.txt_ai_keywords.delete("1.0", "end")
                 for k in keywords:
                     self.txt_ai_keywords.insert("end", f"{k}\n")
-                for k in keywords:
-                    self.txt_ai_keywords.insert("end", f"{k}\n")
             
             class DummyMessage:
                 def __init__(self):
@@ -1001,7 +999,7 @@ class GUIApp(ctk.CTk):
                         def __init__(self):
                             self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
                     self.chat = DummyChat()
-            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item)
+            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item, use_ai=False)
             
         self.run_in_thread(action)
 
