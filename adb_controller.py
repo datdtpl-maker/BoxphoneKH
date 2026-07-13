@@ -701,8 +701,11 @@ class ADBController:
                     # Ta cuộn tối đa 6 lần để tìm nút
                     for find_attempt in range(6):
                         check_cancelled()
-                        # Quét tìm nút Xem Shop ở màn hình hiện tại
-                        shop_coords = self.find_element_coords_by_text(device_id, "Xem Shop")
+                        # Quét tìm nút Xem Shop ở màn hình hiện tại với nhiều biến thể ngôn ngữ
+                        for shop_btn_text in ["Xem Shop", "View Shop", "Ghé Shop", "Xem Cửa Hàng", "Visit Shop", "Visit Store"]:
+                            shop_coords = self.find_element_coords_by_text(device_id, shop_btn_text)
+                            if shop_coords:
+                                break
                         if shop_coords:
                             break
                         
@@ -1082,7 +1085,11 @@ class ADBController:
 
             # 9. Dạo shop
             update_status("[Dự phòng] Tìm nút Xem Shop...")
-            shop_coords = self.find_element_coords_by_text(device_id, "Xem Shop")
+            shop_coords = None
+            for shop_btn_text in ["Xem Shop", "View Shop", "Ghé Shop", "Xem Cửa Hàng", "Visit Shop", "Visit Store"]:
+                shop_coords = self.find_element_coords_by_text(device_id, shop_btn_text)
+                if shop_coords:
+                    break
             if shop_coords:
                 update_status("[Dự phòng] Đang truy cập cửa hàng để dạo...")
                 self.tap(device_id, shop_coords[0], shop_coords[1])
