@@ -437,10 +437,10 @@ class GUIApp(ctk.CTk):
             height=120, 
             state="disabled",
             fg_color="#020617", 
-            text_color="#22c55e", 
+            text_color="#06b6d4", 
             font=ctk.CTkFont(family="Consolas", size=11),
             border_width=1,
-            border_color="#1e293b",
+            border_color="#334155",
             corner_radius=10
         )
         self.log_box.pack(fill="both", expand=True, padx=20, pady=(0, 15))
@@ -590,13 +590,22 @@ class GUIApp(ctk.CTk):
             card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
             card.columnconfigure(0, weight=1)
             
-            # Checkbox trạng thái tích chọn điều khiển hàng loạt (Đặt cạnh đèn LED ONLINE 🟢)
+            # Hiệu ứng Hover viền phát sáng mượt mà
+            card.bind("<Enter>", lambda e, c=card: c.configure(border_color="#6366f1"))
+            card.bind("<Leave>", lambda e, c=card: c.configure(border_color="#334155"))
+            
+            # Checkbox trạng thái tích chọn điều khiển hàng loạt
             cb_var = tk.BooleanVar(value=False)
             self.device_checkboxes[dev] = cb_var
             
+            # Header frame chứa checkbox bên trái và chấm trạng thái bên phải
+            header_frame = ctk.CTkFrame(card, fg_color="transparent")
+            header_frame.grid(row=0, column=0, padx=12, pady=(10, 2), sticky="ew")
+            header_frame.columnconfigure(0, weight=1)
+            
             cb_select = ctk.CTkCheckBox(
-                card,
-                text=f"Máy {main.get_device_name(dev)} 🟢",
+                header_frame,
+                text=f"Máy {main.get_device_name(dev)}",
                 variable=cb_var,
                 font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                 text_color="#f8fafc",
@@ -605,7 +614,16 @@ class GUIApp(ctk.CTk):
                 corner_radius=4,
                 border_width=2
             )
-            cb_select.grid(row=0, column=0, padx=12, pady=(10, 2), sticky="w")
+            cb_select.grid(row=0, column=0, sticky="w")
+            
+            # Chấm Online phát sáng neon
+            lbl_online = ctk.CTkLabel(
+                header_frame,
+                text="● Online",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color="#10b981"
+            )
+            lbl_online.grid(row=0, column=1, sticky="e")
             
             lbl_id = ctk.CTkLabel(
                 card, 
@@ -629,7 +647,7 @@ class GUIApp(ctk.CTk):
                 text="📸 Chụp", 
                 width=45, 
                 height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 fg_color="#475569", 
                 hover_color="#334155",
                 corner_radius=6,
@@ -643,7 +661,7 @@ class GUIApp(ctk.CTk):
                 text="🏠 Main", 
                 width=45, 
                 height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 fg_color="#475569",
                 hover_color="#334155",
                 corner_radius=6,
@@ -657,7 +675,7 @@ class GUIApp(ctk.CTk):
                 text="↩️ Back", 
                 width=45, 
                 height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 fg_color="#475569",
                 hover_color="#334155",
                 corner_radius=6,
@@ -675,9 +693,10 @@ class GUIApp(ctk.CTk):
                 app_btn_frame, 
                 text="🛒 Mở Shopee", 
                 height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                fg_color="#334155", 
-                hover_color="#1e293b",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                fg_color="#ee4d2d", 
+                hover_color="#d73c1f",
+                text_color="#ffffff",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.launch_app, d, config.SHOPEE_PACKAGE)
             )
@@ -687,9 +706,10 @@ class GUIApp(ctk.CTk):
                 app_btn_frame, 
                 text="🛑 Tắt app", 
                 height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                fg_color="#991b1b", 
-                hover_color="#7f1d1d",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                fg_color="#ef4444", 
+                hover_color="#dc2626",
+                text_color="#ffffff",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.stop_app, d, config.SHOPEE_PACKAGE)
             )
