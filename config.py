@@ -123,3 +123,85 @@ def generate_keywords_via_gemini(api_key, main_keywords, status_cb=None):
             fallback_list.append(f"{kw}{s}")
     log(f"Đã tạo {len(fallback_list)} từ khóa phụ dự phòng.")
     return fallback_list
+
+def generate_keywords_tier2_via_gemini(api_key, shopee_product_title, status_cb=None):
+    """
+    Sử dụng Gemini API để sinh ra 30 từ khóa Tầng 2 từ tiêu đề thô Shopee.
+    """
+    def log(msg):
+        print(f"[Gemini Tầng 2] {msg}")
+        if status_cb:
+            status_cb(msg)
+            
+    if not api_key:
+        api_key = ""
+        
+    shopee_product_title = shopee_product_title.strip()
+    if not shopee_product_title:
+        return []
+
+    log(f"Đang sinh từ khóa Tầng 2 từ Tiêu đề thô: \"{shopee_product_title[:50]}...\"")
+    
+    prompt = (
+        "Bạn là một Engine Phân tích Hành vi E-commerce (Shopee) xử lý ngôn ngữ tự nhiên.\n"
+        f"Đầu vào của bạn là một tiêu đề sản phẩm thô trên Shopee (thường nhồi nhét nhiều từ khóa): \"{shopee_product_title}\"\n\n"
+        "Hãy thực hiện NGẦM quá trình suy luận (Chain of Thought) theo 4 bước sau, NHƯNG KHÔNG IN RA QUÁ TRÌNH NÀY:\n\n"
+        "1. Bóc tách & Làm sạch (Parsing): Lọc bỏ các từ khóa rác/giật tít (như \"chính hãng\", \"freeship\", \"giá rẻ\", \"tuýp\", \"gram\"). Xác định chính xác \"Lõi sản phẩm\" (Core Product) và hoạt chất/vật liệu chính.\n"
+        "2. Truy vấn Tri thức (Contextualizing): Phân tích công dụng thực sự của lõi sản phẩm này là gì? Ai là người cần nó? Nó giải quyết bài toán nào trong đời sống thực?\n"
+        "3. Suy luận Hành vi (Behavioral Mapping): Nếu một người đang gặp vấn đề mà sản phẩm này có thể giải quyết, nhưng họ CHƯA BIẾT tên sản phẩm, họ sẽ gõ gì vào ô tìm kiếm?\n"
+        "   - Y tế/Mỹ phẩm: Ánh xạ thành triệu chứng, nỗi đau, khuyết điểm, tên gọi dân gian.\n"
+        "   - Thời trang: Ánh xạ thành bối cảnh sử dụng, cách phối đồ, form dáng.\n"
+        "   - Công nghệ/Gia dụng: Ánh xạ thành vấn đề cần khắc phục, nhu cầu tự động hóa, tính năng mong muốn.\n"
+        "   - Ngành khác: Ánh xạ thành mục đích sử dụng cuối cùng.\n"
+        "4. Tổng hợp Từ khóa Tầng 2: Tạo ra danh sách 30 cụm từ tìm kiếm tự nhiên, bình dân, đúng văn phong người dùng Việt Nam. Tuyệt đối KHÔNG chứa tên thương hiệu, KHÔNG chứa lại tên sản phẩm gốc.\n\n"
+        "YÊU CẦU ĐẦU RA KỸ THUẬT (STRICT REQUIREMENT):\n"
+        "- Kết quả trả về DUY NHẤT một mảng JSON hợp lệ (Valid JSON Array) chứa các chuỗi từ khóa.\n"
+        "- KHÔNG hiển thị quá trình suy luận, KHÔNG dùng markdown định dạng khác ngoài mảng, KHÔNG sinh thêm bất kỳ ký tự hoặc câu chữ giao tiếp nào.\n\n"
+        "Ví dụ Output mong đợi: [\"tu khoa 1\", \"tu khoa 2\", \"tu khoa 3\"]"
+    )
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+    
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            text_response = res_data['candidates'][0]['content']['parts'][0]['text']
+            
+            generated_list = json.loads(text_response.strip())
+            if isinstance(generated_list, list):
+                res = [str(item).strip() for item in generated_list if item]
+                log(f"Đã dùng Gemini sinh ra {len(res)} từ khóa Tầng 2 thành công!")
+                return res
+    except Exception as e:
+        log(f"Lỗi gọi Gemini API sinh từ khóa Tầng 2 ({e}). Đang tạo danh sách dự phòng...")
+        
+    # Luồng dự phòng nếu API lỗi: tự sinh từ khóa liên quan bằng các hậu tố phổ biến
+    suffixes = [
+        " trị mụn", " bôi da", " tốt nhất", " hiệu quả", " chính hãng", 
+        " an toàn", " cho bé", " giá rẻ", " cao cấp", " tốt không"
+    ]
+    fallback_list = []
+    # Trích xuất từ khóa đơn giản từ tiêu đề thô để ghép
+    words = [w for w in shopee_product_title.split() if len(w) > 2][:3]
+    base_kw = " ".join(words) if words else shopee_product_title
+    for s in suffixes:
+        fallback_list.append(f"{base_kw} {s}")
+    log(f"Đã tạo {len(fallback_list)} từ khóa Tầng 2 dự phòng.")
+    return fallback_list

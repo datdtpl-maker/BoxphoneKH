@@ -182,28 +182,38 @@ class GUIApp(ctk.CTk):
         
         self.rad_orig = ctk.CTkRadioButton(
             self.mode_frame, 
-            text="Từ khóa gốc (Không AI)", 
+            text="Gốc (Không AI)", 
             variable=self.keyword_mode, 
             value="original",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
             text_color="#f1f5f9"
         )
-        self.rad_orig.pack(side="left", padx=(0, 10))
+        self.rad_orig.pack(side="left", padx=(0, 5))
         
         self.rad_ai = ctk.CTkRadioButton(
             self.mode_frame, 
-            text="Từ khóa mở rộng (AI)", 
+            text="Mở rộng (AI)", 
             variable=self.keyword_mode, 
             value="ai",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
             text_color="#f1f5f9"
         )
-        self.rad_ai.pack(side="left", padx=10)
+        self.rad_ai.pack(side="left", padx=5)
+
+        self.rad_ai_t2 = ctk.CTkRadioButton(
+            self.mode_frame, 
+            text="Tầng 2 (AI sinh)", 
+            variable=self.keyword_mode, 
+            value="ai_t2",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color="#f1f5f9"
+        )
+        self.rad_ai_t2.pack(side="left", padx=(5, 0))
         
         # Nút sinh từ khóa qua AI
         self.btn_gen_ai = ctk.CTkButton(
             self.tasks_card,
-            text="🪄 Sinh từ khóa bằng AI (Gemini)",
+            text="🪄 Sinh từ khóa Tầng 1 (Mở rộng SEO)",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color="#7c3aed",
             hover_color="#6d28d9",
@@ -211,7 +221,19 @@ class GUIApp(ctk.CTk):
             height=30,
             command=self.generate_ai_keywords_action
         )
-        self.btn_gen_ai.pack(fill="x", padx=15, pady=4)
+        self.btn_gen_ai.pack(fill="x", padx=15, pady=2)
+        
+        self.btn_gen_ai_t2 = ctk.CTkButton(
+            self.tasks_card,
+            text="🪄 Sinh từ khóa Tầng 2 (Bóc tách Tiêu đề thô)",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#8b5cf6",
+            hover_color="#7c3aed",
+            corner_radius=8,
+            height=30,
+            command=self.generate_ai_keywords_tier2_action
+        )
+        self.btn_gen_ai_t2.pack(fill="x", padx=15, pady=2)
         
         # Textbox hiển thị danh sách từ khóa AI
         self.lbl_ai_keywords = ctk.CTkLabel(
@@ -978,14 +1000,21 @@ class GUIApp(ctk.CTk):
             
         def action():
             nonlocal keywords
-            if mode == "ai" and not ai_keywords_raw:
+            if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
-                expanded = config.generate_keywords_via_gemini(
-                    config.GEMINI_API_KEY, 
-                    keywords, 
-                    status_cb=status_cb
-                )
+                if mode == "ai":
+                    expanded = config.generate_keywords_via_gemini(
+                        config.GEMINI_API_KEY, 
+                        keywords, 
+                        status_cb=status_cb
+                    )
+                else:
+                    expanded = config.generate_keywords_tier2_via_gemini(
+                        config.GEMINI_API_KEY,
+                        keywords[0] if keywords else "",
+                        status_cb=status_cb
+                    )
                 if click_first_item:
                     expanded = [f"{k} video" for k in expanded]
                 keywords = expanded
@@ -1064,14 +1093,21 @@ class GUIApp(ctk.CTk):
             main.cancel_flag = False
             main.cancel_sequential = False
             
-            if mode == "ai" and not ai_keywords_raw:
+            if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
-                expanded = config.generate_keywords_via_gemini(
-                    config.GEMINI_API_KEY, 
-                    keywords, 
-                    status_cb=status_cb
-                )
+                if mode == "ai":
+                    expanded = config.generate_keywords_via_gemini(
+                        config.GEMINI_API_KEY, 
+                        keywords, 
+                        status_cb=status_cb
+                    )
+                else:
+                    expanded = config.generate_keywords_tier2_via_gemini(
+                        config.GEMINI_API_KEY,
+                        keywords[0] if keywords else "",
+                        status_cb=status_cb
+                    )
                 if click_first_item:
                     expanded = [f"{k} video" for k in expanded]
                 keywords = expanded
@@ -1207,7 +1243,61 @@ class GUIApp(ctk.CTk):
             except Exception as e:
                 self.log_message(f"Gặp lỗi khi sinh từ khóa: {e}")
             finally:
-                self.btn_gen_ai.configure(state="normal", text="🪄 Sinh từ khóa bằng AI (Gemini)")
+                self.btn_gen_ai.configure(state="normal", text="🪄 Sinh từ khóa Tầng 1 (Mở rộng SEO)")
+                
+        self.run_in_thread(action)
+
+    def generate_ai_keywords_tier2_action(self):
+        raw_text = self.txt_main_keywords.get("1.0", "end").strip()
+        if not raw_text:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập tiêu đề thô Shopee trong ô từ khóa chính!")
+            return
+            
+        gemini_key = self.ent_gemini_key.get().strip()
+        if not gemini_key:
+            gemini_key = config.GEMINI_API_KEY
+            
+        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
+        # Lấy dòng đầu tiên làm tiêu đề sản phẩm thô
+        lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+        if not lines:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập tiêu đề thô hợp lệ!")
+            return
+        product_title = lines[0]
+        
+        click_first_item = False
+        if any(ind in product_title.lower() for ind in first_indicators):
+            click_first_item = True
+            
+        # Làm sạch tiêu đề thô khỏi chỉ báo click_first_item trước khi gửi cho Gemini
+        clean_title = product_title
+        for ind in first_indicators:
+            clean_title = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_title, flags=re.IGNORECASE)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        
+        self.log_message(f"Đang gửi yêu cầu sinh từ khóa Tầng 2 cho tiêu đề: \"{clean_title[:45]}...\"")
+        self.btn_gen_ai_t2.configure(state="disabled", text="🪄 Đang sinh từ khóa Tầng 2...")
+        
+        def action():
+            try:
+                def status_cb(msg):
+                    self.log_message(msg)
+                    
+                expanded = config.generate_keywords_tier2_via_gemini(gemini_key, clean_title, status_cb=status_cb)
+                
+                # Hiển thị lên Textbox
+                self.txt_ai_keywords.delete("1.0", "end")
+                for kw in expanded:
+                    kw_to_insert = kw
+                    if click_first_item:
+                        kw_to_insert = f"{kw} video"
+                    self.txt_ai_keywords.insert("end", f"{kw_to_insert}\n")
+                    
+                self.log_message(f"Đã hiển thị {len(expanded)} từ khóa Tầng 2 lên giao diện.")
+            except Exception as e:
+                self.log_message(f"Gặp lỗi khi sinh từ khóa Tầng 2: {e}")
+            finally:
+                self.btn_gen_ai_t2.configure(state="normal", text="🪄 Sinh từ khóa Tầng 2 (Bóc tách Tiêu đề thô)")
                 
         self.run_in_thread(action)
 
