@@ -317,11 +317,20 @@ class ADBController:
 
 
     def press_enter(self, device_id):
-        """Gửi lệnh enter thông qua bàn phím XwIME"""
+        """Gửi lệnh enter thông qua bàn phím XwIME và Android keyevent"""
         # Cách 1: Gửi qua broadcast của XwIME (Mã code 13 = Enter)
         self.execute_adb(device_id, ["shell", "am", "broadcast", "-a", "XW_INPUT_CODE", "--ei", "code", "13", "--receiver-foreground"])
-        # Cách 2 (Dự phòng): Lệnh keyevent chuẩn của Android
+        # Cách 2: Lệnh keyevent ENTER chuẩn của Android (66)
         self.keyevent(device_id, 66)
+        # Cách 3: Lệnh keyevent SEARCH của Android (84)
+        self.keyevent(device_id, 84)
+
+    def clear_input_field(self, device_id, max_chars=60):
+        """Xóa sạch văn bản cũ trong ô tìm kiếm trước khi nhập văn bản mới"""
+        try:
+            self.execute_adb(device_id, ["shell", "input", "keyevent"] + ["67"] * max_chars)
+        except Exception:
+            pass
 
     def take_screenshot(self, device_id, local_path):
         """Chụp màn hình điện thoại và tải về máy tính"""
@@ -434,6 +443,10 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
             
+            # Xóa văn bản cũ trong ô tìm kiếm
+            self.clear_input_field(device_id)
+            time.sleep(0.5)
+            
             update_status(f"Đang nhập từ khóa '{keyword}'...")
             self.input_text(device_id, keyword)
             time.sleep(1.5)
@@ -441,6 +454,10 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
+            time.sleep(0.5)
+            # Click dự phòng vào nút Tìm kiếm/Kính lúp ở góc phải thanh tìm kiếm
+            width, height = self.get_screen_size(device_id)
+            self.tap(device_id, int(width * 0.92), 140)
             time.sleep(2.0)
             check_cancelled()
             
@@ -510,6 +527,11 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
             
+            # Xóa sạch văn bản cũ trong ô tìm kiếm trước khi gõ từ khóa mới
+            update_status("Xóa từ khóa cũ trong ô tìm kiếm...")
+            self.clear_input_field(device_id)
+            time.sleep(0.5)
+            
             update_status(f"Nhập từ khóa '{keyword}' (gõ tự nhiên)...")
             self.input_text_naturally(device_id, keyword)
             time.sleep(1.5)
@@ -517,6 +539,9 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
+            time.sleep(0.5)
+            # Click dự phòng vào biểu tượng Tìm kiếm/Kính lúp ở góc trên bên phải
+            self.tap(device_id, int(width * 0.92), 140)
             
             # Đợi trang kết quả tải xong
             for _ in range(4):
@@ -975,6 +1000,10 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
             
+            # Xóa sạch chữ cũ
+            self.clear_input_field(device_id)
+            time.sleep(0.5)
+            
             update_status(f"[Dự phòng] Nhập tên shop '{shop_name}'...")
             self.input_text(device_id, shop_name)
             time.sleep(1.5)
@@ -982,6 +1011,9 @@ class ADBController:
             
             update_status("[Dự phòng] Gửi lệnh tìm kiếm shop...")
             self.press_enter(device_id)
+            time.sleep(0.5)
+            width, height = self.get_screen_size(device_id)
+            self.tap(device_id, int(width * 0.92), 140)
             time.sleep(3.5)
             check_cancelled()
 
@@ -1016,6 +1048,10 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
 
+            # Xóa từ khóa cũ trong shop nếu có
+            self.clear_input_field(device_id)
+            time.sleep(0.5)
+
             # 5. Nhập từ khóa sản phẩm và tìm kiếm trong Shop
             update_status(f"[Dự phòng] Nhập từ khóa '{keyword}' trong Shop...")
             self.input_text_naturally(device_id, keyword)
@@ -1024,6 +1060,8 @@ class ADBController:
             
             update_status("[Dự phòng] Tìm kiếm sản phẩm trong Shop...")
             self.press_enter(device_id)
+            time.sleep(0.5)
+            self.tap(device_id, int(width * 0.92), 140)
             time.sleep(3.5)
             check_cancelled()
 
