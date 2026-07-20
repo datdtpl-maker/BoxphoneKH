@@ -755,15 +755,7 @@ class GUIApp(ctk.CTk):
     def stop_all(self):
         main.cancel_flag = True
         main.cancel_sequential = True
-        print("[GUI] 🛑 ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP TOÀN BỘ CÁC MÁY!")
-        
-        def reset_flags():
-            time.sleep(3.5)
-            main.cancel_flag = False
-            main.cancel_sequential = False
-            print("[GUI] Bot đã sẵn sàng nhận các câu lệnh mới.")
-            
-        self.run_in_thread(reset_flags)
+        print("[GUI] 🛑 ĐÃ XÓA TOÀN BỘ LUỒNG VÀ DỪNG KHẨN CẤP! Phần mềm sẵn sàng nhận lệnh mới.")
 
     def parse_targets(self):
         selection = self.ent_selection.get().strip()
@@ -1000,6 +992,8 @@ class GUIApp(ctk.CTk):
             
         def action():
             nonlocal keywords
+            main.cancel_flag = False
+            main.cancel_sequential = False
             if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")

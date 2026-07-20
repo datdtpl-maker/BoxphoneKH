@@ -454,11 +454,7 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
-            time.sleep(0.5)
-            # Click dự phòng vào nút Tìm kiếm/Kính lúp ở góc phải thanh tìm kiếm
-            width, height = self.get_screen_size(device_id)
-            self.tap(device_id, int(width * 0.92), 140)
-            time.sleep(2.0)
+            time.sleep(3.5)
             check_cancelled()
             
             update_status("Hoàn thành tìm kiếm!")
@@ -539,9 +535,6 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
-            time.sleep(0.5)
-            # Click dự phòng vào biểu tượng Tìm kiếm/Kính lúp ở góc trên bên phải
-            self.tap(device_id, int(width * 0.92), 140)
             
             # Đợi trang kết quả tải xong
             for _ in range(4):
@@ -1011,9 +1004,6 @@ class ADBController:
             
             update_status("[Dự phòng] Gửi lệnh tìm kiếm shop...")
             self.press_enter(device_id)
-            time.sleep(0.5)
-            width, height = self.get_screen_size(device_id)
-            self.tap(device_id, int(width * 0.92), 140)
             time.sleep(3.5)
             check_cancelled()
 
@@ -1060,8 +1050,6 @@ class ADBController:
             
             update_status("[Dự phòng] Tìm kiếm sản phẩm trong Shop...")
             self.press_enter(device_id)
-            time.sleep(0.5)
-            self.tap(device_id, int(width * 0.92), 140)
             time.sleep(3.5)
             check_cancelled()
 
