@@ -14,8 +14,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import main
 
-# Thiết lập giao diện CustomTkinter
-ctk.set_appearance_mode("dark")
+# Thiết lập giao diện CustomTkinter Sáng Sang Trọng (Light Mode Dashboard)
+ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 class GUIApp(ctk.CTk):
@@ -23,7 +23,7 @@ class GUIApp(ctk.CTk):
         super().__init__()
         self.title("🤖 KHẢI HOÁN SYSTEM - PRO AUTOMATION CONTROL CENTER 📱")
         self.geometry("1300x880")
-        self.configure(fg_color="#0b0f19") # Dark Slate / Obsidian Theme
+        self.configure(fg_color="#f1f5f9") # Soft Slate Light Background
         
         # Thiết lập app icon bitmap
         icon_path = os.path.join(os.path.dirname(__file__), "app_icon.ico")
@@ -46,23 +46,23 @@ class GUIApp(ctk.CTk):
             self, 
             width=445, 
             corner_radius=16, 
-            fg_color="#111827", 
+            fg_color="#ffffff", 
             border_width=1, 
-            border_color="#1f293d",
-            scrollbar_button_color="#374151",
-            scrollbar_button_hover_color="#4b5563"
+            border_color="#cbd5e1",
+            scrollbar_button_color="#cbd5e1",
+            scrollbar_button_hover_color="#94a3b8"
         )
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(16, 8), pady=16)
         
-        # Header Banner Cá nhân hóa (Personalized Header)
-        self.brand_badge = ctk.CTkFrame(self.left_panel, fg_color="#1e1b4b", corner_radius=12, border_width=1, border_color="#4338ca")
+        # Header Banner Cá nhân hóa (Light Premium Banner)
+        self.brand_badge = ctk.CTkFrame(self.left_panel, fg_color="#eff6ff", corner_radius=14, border_width=1, border_color="#bfdbfe")
         self.brand_badge.pack(fill="x", padx=16, pady=(12, 10))
         
         self.lbl_brand = ctk.CTkLabel(
             self.brand_badge, 
             text="⚡ KHẢI HOÁN AUTOMATION ⚡", 
             font=ctk.CTkFont(family="Segoe UI", size=17, weight="bold"),
-            text_color="#818cf8"
+            text_color="#1d4ed8"
         )
         self.lbl_brand.pack(pady=(10, 2), padx=16, anchor="w")
         
@@ -70,19 +70,19 @@ class GUIApp(ctk.CTk):
             self.brand_badge, 
             text="Box Phone System Pro • Tự Động Hóa Shopee", 
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#94a3b8"
+            text_color="#475569"
         )
         self.lbl_sub_brand.pack(pady=(0, 10), padx=16, anchor="w")
         
         # Phân đoạn 1: Cấu hình hệ thống & Kết nối
-        self.settings_card = ctk.CTkFrame(self.left_panel, fg_color="#161f32", corner_radius=14, border_width=1, border_color="#23324d")
+        self.settings_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.settings_card.pack(fill="x", padx=16, pady=6)
         
         self.lbl_settings = ctk.CTkLabel(
             self.settings_card, 
             text="⚙️ Cấu hình hệ thống & Kết nối", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#38bdf8"
+            text_color="#0f172a"
         )
         self.lbl_settings.pack(pady=(10, 4), padx=16, anchor="w")
         
@@ -90,10 +90,10 @@ class GUIApp(ctk.CTk):
             self.settings_card, 
             placeholder_text="Telegram Bot Token (629xxxxxx:...)", 
             show="*",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -104,10 +104,10 @@ class GUIApp(ctk.CTk):
         self.ent_admins = ctk.CTkEntry(
             self.settings_card, 
             placeholder_text="Allowed Admin IDs (Cách nhau bởi dấu phẩy)",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -117,10 +117,10 @@ class GUIApp(ctk.CTk):
         self.ent_adb = ctk.CTkEntry(
             self.settings_card, 
             placeholder_text="Đường dẫn ADB (Ví dụ: C:\\adb.exe)",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -130,10 +130,10 @@ class GUIApp(ctk.CTk):
         self.ent_shops = ctk.CTkEntry(
             self.settings_card, 
             placeholder_text="Tên các Shop dự phòng (Cách nhau bởi dấu phẩy)",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -144,10 +144,10 @@ class GUIApp(ctk.CTk):
         self.ent_gemini_key = ctk.CTkEntry(
             self.settings_card, 
             placeholder_text="Gemini API Key",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -160,6 +160,7 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color="#4f46e5", 
             hover_color="#4338ca",
+            text_color="#ffffff",
             corner_radius=8,
             height=32,
             command=self.save_settings
@@ -167,14 +168,14 @@ class GUIApp(ctk.CTk):
         self.btn_save.pack(fill="x", padx=16, pady=(8, 12))
         
         # Phân đoạn 2: Bảng tác vụ tự động
-        self.tasks_card = ctk.CTkFrame(self.left_panel, fg_color="#161f32", corner_radius=14, border_width=1, border_color="#23324d")
+        self.tasks_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.tasks_card.pack(fill="x", padx=16, pady=6)
         
         self.lbl_tasks = ctk.CTkLabel(
             self.tasks_card, 
             text="🚀 Điều khiển Tác vụ & Từ khóa", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#38bdf8"
+            text_color="#0f172a"
         )
         self.lbl_tasks.pack(pady=(10, 4), padx=16, anchor="w")
         
@@ -182,15 +183,15 @@ class GUIApp(ctk.CTk):
             self.tasks_card,
             text="📌 Từ khóa chính (Mỗi dòng 1 từ khóa):",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            text_color="#334155"
         )
         self.lbl_main_keywords.pack(padx=16, pady=(2, 0), anchor="w")
 
         self.txt_main_keywords = ctk.CTkTextbox(
             self.tasks_card, 
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
             border_width=1,
             corner_radius=8,
             height=75,
@@ -198,9 +199,9 @@ class GUIApp(ctk.CTk):
         )
         self.txt_main_keywords.pack(fill="x", padx=16, pady=3)
         
-        # Lựa chọn chế độ từ khóa (Segmented Radio Group)
+        # Lựa chọn chế độ từ khóa (Segmented Light Radio Group)
         self.keyword_mode = ctk.StringVar(value="original")
-        self.mode_frame = ctk.CTkFrame(self.tasks_card, fg_color="#111827", corner_radius=8, border_width=1, border_color="#1f293d")
+        self.mode_frame = ctk.CTkFrame(self.tasks_card, fg_color="#f1f5f9", corner_radius=8, border_width=1, border_color="#e2e8f0")
         self.mode_frame.pack(fill="x", padx=16, pady=5)
         
         self.rad_orig = ctk.CTkRadioButton(
@@ -209,9 +210,9 @@ class GUIApp(ctk.CTk):
             variable=self.keyword_mode, 
             value="original",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#f8fafc",
-            fg_color="#3b82f6",
-            hover_color="#2563eb"
+            text_color="#1e293b",
+            fg_color="#2563eb",
+            hover_color="#1d4ed8"
         )
         self.rad_orig.pack(side="left", padx=(8, 4), pady=6)
         
@@ -221,7 +222,7 @@ class GUIApp(ctk.CTk):
             variable=self.keyword_mode, 
             value="ai",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#f8fafc",
+            text_color="#1e293b",
             fg_color="#8b5cf6",
             hover_color="#7c3aed"
         )
@@ -233,7 +234,7 @@ class GUIApp(ctk.CTk):
             variable=self.keyword_mode, 
             value="ai_t2",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#f8fafc",
+            text_color="#1e293b",
             fg_color="#a855f7",
             hover_color="#9333ea"
         )
@@ -246,6 +247,7 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#7c3aed",
             hover_color="#6d28d9",
+            text_color="#ffffff",
             corner_radius=8,
             height=30,
             command=self.generate_ai_keywords_action
@@ -258,6 +260,7 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#8b5cf6",
             hover_color="#7c3aed",
+            text_color="#ffffff",
             corner_radius=8,
             height=30,
             command=self.generate_ai_keywords_tier2_action
@@ -269,15 +272,15 @@ class GUIApp(ctk.CTk):
             self.tasks_card,
             text="🤖 Từ khóa ngẫu nhiên (AI Generated):",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            text_color="#334155"
         )
         self.lbl_ai_keywords.pack(padx=16, pady=(4, 0), anchor="w")
         
         self.txt_ai_keywords = ctk.CTkTextbox(
             self.tasks_card,
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#38bdf8",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0284c7",
             border_width=1,
             corner_radius=8,
             height=95,
@@ -288,10 +291,10 @@ class GUIApp(ctk.CTk):
         self.ent_selection = ctk.CTkEntry(
             self.tasks_card, 
             placeholder_text="Chọn máy chạy (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
-            fg_color="#18243b",
-            border_color="#2a3d5e",
-            text_color="#f8fafc",
-            placeholder_text_color="#64748b",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
             corner_radius=8,
             height=34
         )
@@ -307,8 +310,9 @@ class GUIApp(ctk.CTk):
             self.btn_grid, 
             text="▶️ Chạy Tuần Tự", 
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            fg_color="#059669", 
-            hover_color="#047857",
+            fg_color="#10b981", 
+            hover_color="#059669",
+            text_color="#ffffff",
             corner_radius=8,
             height=36,
             command=self.run_seq_search
@@ -321,6 +325,7 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color="#2563eb", 
             hover_color="#1d4ed8",
+            text_color="#ffffff",
             corner_radius=8,
             height=36,
             command=self.run_par_search
@@ -331,10 +336,11 @@ class GUIApp(ctk.CTk):
             self.tasks_card, 
             text="🛑 DỪNG CHẠY KHẨN CẤP", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            fg_color="#dc2626", 
-            hover_color="#b91c1c",
+            fg_color="#ef4444", 
+            hover_color="#dc2626",
+            text_color="#ffffff",
             border_width=1,
-            border_color="#ef4444",
+            border_color="#f87171",
             corner_radius=8,
             height=38,
             command=self.stop_all
@@ -342,14 +348,14 @@ class GUIApp(ctk.CTk):
         self.btn_stop.pack(fill="x", padx=16, pady=(0, 12))
         
         # Phân đoạn 3: Bảng điều khiển hàng loạt thủ công
-        self.bulk_card = ctk.CTkFrame(self.left_panel, fg_color="#161f32", corner_radius=14, border_width=1, border_color="#23324d")
+        self.bulk_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.bulk_card.pack(fill="x", padx=16, pady=6)
         
         self.lbl_bulk = ctk.CTkLabel(
             self.bulk_card, 
             text="🛠️ Điều khiển hàng loạt (Máy đã tích)", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#38bdf8"
+            text_color="#0f172a"
         )
         self.lbl_bulk.pack(pady=(10, 4), padx=16, anchor="w")
         
@@ -363,8 +369,9 @@ class GUIApp(ctk.CTk):
             self.select_options_frame,
             text="☑️ Chọn tất cả",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=28,
             corner_radius=6,
             command=self.select_all_devices
@@ -375,8 +382,9 @@ class GUIApp(ctk.CTk):
             self.select_options_frame,
             text="⬜ Bỏ chọn",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=28,
             corner_radius=6,
             command=self.deselect_all_devices
@@ -393,8 +401,9 @@ class GUIApp(ctk.CTk):
             self.bulk_row1,
             text="🏠 Trang chủ",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_keyevent(3)
@@ -405,8 +414,9 @@ class GUIApp(ctk.CTk):
             self.bulk_row1,
             text="↩️ Back",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_keyevent(4)
@@ -417,8 +427,9 @@ class GUIApp(ctk.CTk):
             self.bulk_row1,
             text="🔄 Tắt xoay",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=30,
             corner_radius=6,
             command=lambda: self.bulk_disable_rotation()
@@ -435,8 +446,9 @@ class GUIApp(ctk.CTk):
             self.bulk_row2,
             text="📸 Chụp",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#334155",
-            hover_color="#1e293b",
+            fg_color="#e2e8f0",
+            hover_color="#cbd5e1",
+            text_color="#1e293b",
             height=30,
             corner_radius=6,
             command=self.bulk_screenshot
@@ -460,8 +472,8 @@ class GUIApp(ctk.CTk):
             self.bulk_row2,
             text="🛑 Tắt App",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#b91c1c",
-            hover_color="#991b1b",
+            fg_color="#dc2626",
+            hover_color="#b91c1c",
             text_color="#ffffff",
             height=30,
             corner_radius=6,
@@ -473,8 +485,8 @@ class GUIApp(ctk.CTk):
             self.bulk_row2,
             text="⚡ Reboot",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#d97706",
-            hover_color="#b45309",
+            fg_color="#f59e0b",
+            hover_color="#d97706",
             text_color="#ffffff",
             height=30,
             corner_radius=6,
@@ -482,12 +494,12 @@ class GUIApp(ctk.CTk):
         )
         self.btn_bulk_reboot.grid(row=0, column=3, padx=2, sticky="ew")
         
-        # Phân đoạn 4: Khung Terminal Log
+        # Phân đoạn 4: Khung Terminal Log (High contrast slate console)
         self.lbl_log = ctk.CTkLabel(
             self.left_panel, 
             text="📟 Nhật ký hoạt động (Real-time Console)", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#38bdf8"
+            text_color="#0f172a"
         )
         self.lbl_log.pack(padx=20, anchor="w", pady=(10, 2))
         
@@ -495,11 +507,11 @@ class GUIApp(ctk.CTk):
             self.left_panel, 
             height=130, 
             state="disabled",
-            fg_color="#070c18", 
+            fg_color="#0f172a", 
             text_color="#06b6d4", 
             font=ctk.CTkFont(family="Consolas", size=11),
             border_width=1,
-            border_color="#1f293d",
+            border_color="#cbd5e1",
             corner_radius=10
         )
         self.log_box.pack(fill="both", expand=True, padx=16, pady=(0, 16))
@@ -509,7 +521,7 @@ class GUIApp(ctk.CTk):
         sys.stderr = ConsoleRedirector(self.log_box)
         
         # ================= RIGHT MONITOR GRID PANEL =================
-        self.right_panel = ctk.CTkFrame(self, corner_radius=16, fg_color="#111827", border_width=1, border_color="#1f293d")
+        self.right_panel = ctk.CTkFrame(self, corner_radius=16, fg_color="#ffffff", border_width=1, border_color="#cbd5e1")
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=16)
         
         self.right_panel.grid_rowconfigure(0, weight=0)
@@ -524,7 +536,7 @@ class GUIApp(ctk.CTk):
             self.header_frame, 
             text="📱 QUẢN LÝ THIẾT BỊ BOX PHONE (20 DEVICE SLOTS)", 
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
-            text_color="#f8fafc"
+            text_color="#0f172a"
         )
         self.lbl_devices.pack(side="left")
         
@@ -534,10 +546,11 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             width=150,
             height=34,
-            fg_color="#374151", 
-            hover_color="#1f2937",
+            fg_color="#e2e8f0", 
+            hover_color="#cbd5e1",
+            text_color="#0f172a",
             border_width=1,
-            border_color="#4b5563",
+            border_color="#cbd5e1",
             corner_radius=8,
             command=self.load_devices_grid
         )
@@ -546,10 +559,10 @@ class GUIApp(ctk.CTk):
         # Scrollable grid frame for devices
         self.grid_frame = ctk.CTkScrollableFrame(
             self.right_panel, 
-            fg_color="#0b0f19", 
+            fg_color="#f8fafc", 
             corner_radius=12,
-            scrollbar_button_color="#374151",
-            scrollbar_button_hover_color="#4b5563"
+            scrollbar_button_color="#cbd5e1",
+            scrollbar_button_hover_color="#94a3b8"
         )
         self.grid_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         
@@ -647,20 +660,20 @@ class GUIApp(ctk.CTk):
             row = idx // 4
             col = idx % 4
             
-            # Khởi tạo card máy với thiết kế hiện đại
+            # Khởi tạo card máy phong cách Light Elevation
             card = ctk.CTkFrame(
                 self.grid_frame, 
                 border_width=1, 
-                border_color="#2a3754", 
-                fg_color="#162032", 
+                border_color="#cbd5e1", 
+                fg_color="#ffffff", 
                 corner_radius=14
             )
             card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
             card.columnconfigure(0, weight=1)
             
-            # Hiệu ứng Hover viền phát sáng Indigo mượt mà
-            card.bind("<Enter>", lambda e, c=card: c.configure(border_color="#6366f1"))
-            card.bind("<Leave>", lambda e, c=card: c.configure(border_color="#2a3754"))
+            # Hiệu ứng Hover viền Royal Blue mượt mà
+            card.bind("<Enter>", lambda e, c=card: c.configure(border_color="#2563eb"))
+            card.bind("<Leave>", lambda e, c=card: c.configure(border_color="#cbd5e1"))
             
             # Checkbox trạng thái tích chọn điều khiển hàng loạt
             cb_var = tk.BooleanVar(value=False)
@@ -676,27 +689,27 @@ class GUIApp(ctk.CTk):
                 text=f"Máy {main.get_device_name(dev)}",
                 variable=cb_var,
                 font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-                text_color="#f8fafc",
-                fg_color="#6366f1",
-                hover_color="#4f46e5",
+                text_color="#0f172a",
+                fg_color="#2563eb",
+                hover_color="#1d4ed8",
                 corner_radius=4,
                 border_width=2
             )
             cb_select.grid(row=0, column=0, sticky="w")
             
-            # Chấm Online phát sáng neon
+            # Chấm Online phát sáng Xanh Emerald
             lbl_online = ctk.CTkLabel(
                 header_frame,
                 text="● Online",
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                text_color="#10b981"
+                text_color="#059669"
             )
             lbl_online.grid(row=0, column=1, sticky="e")
             
             lbl_id = ctk.CTkLabel(
                 card, 
                 text=f"ID: {dev[:12]}...", 
-                text_color="#94a3b8", 
+                text_color="#64748b", 
                 font=ctk.CTkFont(family="Segoe UI", size=11)
             )
             lbl_id.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="w")
@@ -716,8 +729,9 @@ class GUIApp(ctk.CTk):
                 width=45, 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                fg_color="#334155", 
-                hover_color="#1e293b",
+                fg_color="#e2e8f0", 
+                hover_color="#cbd5e1",
+                text_color="#1e293b",
                 corner_radius=6,
                 command=lambda d=dev: self.screenshot_device(d, main.get_device_name(d))
             )
@@ -730,8 +744,9 @@ class GUIApp(ctk.CTk):
                 width=45, 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                fg_color="#334155",
-                hover_color="#1e293b",
+                fg_color="#e2e8f0",
+                hover_color="#cbd5e1",
+                text_color="#1e293b",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.keyevent, d, 3)
             )
@@ -744,8 +759,9 @@ class GUIApp(ctk.CTk):
                 width=45, 
                 height=26,
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                fg_color="#334155",
-                hover_color="#1e293b",
+                fg_color="#e2e8f0",
+                hover_color="#cbd5e1",
+                text_color="#1e293b",
                 corner_radius=6,
                 command=lambda d=dev: self.run_in_thread(main.adb.keyevent, d, 4)
             )
