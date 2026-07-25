@@ -1043,7 +1043,7 @@ class GUIApp(ctk.CTk):
                 else:
                     expanded = config.generate_keywords_tier2_via_gemini(
                         config.GEMINI_API_KEY,
-                        keywords[0] if keywords else "",
+                        keywords,
                         status_cb=status_cb
                     )
                 if click_first_item:
@@ -1136,7 +1136,7 @@ class GUIApp(ctk.CTk):
                 else:
                     expanded = config.generate_keywords_tier2_via_gemini(
                         config.GEMINI_API_KEY,
-                        keywords[0] if keywords else "",
+                        keywords,
                         status_cb=status_cb
                     )
                 if click_first_item:
@@ -1282,7 +1282,7 @@ class GUIApp(ctk.CTk):
     def generate_ai_keywords_tier2_action(self):
         raw_text = self.txt_main_keywords.get("1.0", "end").strip()
         if not raw_text:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập tiêu đề thô Shopee trong ô từ khóa chính!")
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập các tiêu đề thô Shopee trong ô từ khóa chính!")
             return
             
         gemini_key = self.ent_gemini_key.get().strip()
@@ -1290,24 +1290,24 @@ class GUIApp(ctk.CTk):
             gemini_key = config.GEMINI_API_KEY
             
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        # Lấy dòng đầu tiên làm tiêu đề sản phẩm thô
         lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
         if not lines:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập tiêu đề thô hợp lệ!")
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập các tiêu đề thô hợp lệ!")
             return
-        product_title = lines[0]
-        
-        click_first_item = False
-        if any(ind in product_title.lower() for ind in first_indicators):
-            click_first_item = True
             
-        # Làm sạch tiêu đề thô khỏi chỉ báo click_first_item trước khi gửi cho Gemini
-        clean_title = product_title
-        for ind in first_indicators:
-            clean_title = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_title, flags=re.IGNORECASE)
-        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        click_first_item = False
+        clean_titles = []
+        for title in lines:
+            if any(ind in title.lower() for ind in first_indicators):
+                click_first_item = True
+            clean_title = title
+            for ind in first_indicators:
+                clean_title = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_title, flags=re.IGNORECASE)
+            clean_title = re.sub(r"\s+", " ", clean_title).strip()
+            if clean_title:
+                clean_titles.append(clean_title)
         
-        self.log_message(f"Đang gửi yêu cầu sinh từ khóa Tầng 2 cho tiêu đề: \"{clean_title[:45]}...\"")
+        self.log_message(f"Đang gửi yêu cầu sinh từ khóa Tầng 2 cho {len(clean_titles)} tiêu đề sản phẩm...")
         self.btn_gen_ai_t2.configure(state="disabled", text="🪄 Đang sinh từ khóa Tầng 2...")
         
         def action():
@@ -1315,7 +1315,7 @@ class GUIApp(ctk.CTk):
                 def status_cb(msg):
                     self.log_message(msg)
                     
-                expanded = config.generate_keywords_tier2_via_gemini(gemini_key, clean_title, status_cb=status_cb)
+                expanded = config.generate_keywords_tier2_via_gemini(gemini_key, clean_titles, status_cb=status_cb)
                 
                 # Hiển thị lên Textbox
                 self.txt_ai_keywords.delete("1.0", "end")
@@ -1325,7 +1325,7 @@ class GUIApp(ctk.CTk):
                         kw_to_insert = f"{kw} video"
                     self.txt_ai_keywords.insert("end", f"{kw_to_insert}\n")
                     
-                self.log_message(f"Đã hiển thị {len(expanded)} từ khóa Tầng 2 lên giao diện.")
+                self.log_message(f"Đã hiển thị tổng cộng {len(expanded)} từ khóa Tầng 2 lên giao diện cho {len(clean_titles)} sản phẩm!")
             except Exception as e:
                 self.log_message(f"Gặp lỗi khi sinh từ khóa Tầng 2: {e}")
             finally:
