@@ -700,18 +700,18 @@ class ADBController:
                     self.tap(device_id, cx, click_y)
                     time.sleep(4.0) # Đợi trang sản phẩm mở ra
                     
-                    # 1. Vuốt xem album ảnh sản phẩm (Swipe Image Carousel)
-                    update_status("Vuốt xem album ảnh sản phẩm...")
-                    for _ in range(random.randint(1, 2)):
+                    # 1. Vuốt xem album ảnh sản phẩm (Swipe Image Carousel - 2-4 ảnh)
+                    update_status("Vuốt xem album ảnh sản phẩm chi tiết...")
+                    for _ in range(random.randint(2, 4)):
                         check_cancelled()
                         x_start = int(width * 0.85) + random.randint(-20, 20)
                         x_end = int(width * 0.15) + random.randint(-20, 20)
                         y_img = int(height * 0.25) + random.randint(-30, 30)
                         self.swipe(device_id, x_start, y_img, x_end, y_img, duration=random.randint(500, 700))
-                        time.sleep(random.uniform(1.5, 2.5))
+                        time.sleep(random.uniform(2.5, 4.0))
 
-                    # 2. Vòng lặp cuộn xuống tìm "Xem Shop" từng bước nhỏ (Incremental Scrolling)
-                    update_status("Đang cuộn tìm nút Xem Shop...")
+                    # 2. Vòng lặp cuộn xuống tìm "Xem Shop" từng bước nhỏ (Incremental Scrolling & đọc nội dung)
+                    update_status("Đang cuộn tìm nút Xem Shop & đọc thông tin...")
                     shop_coords = None
                     # Ta cuộn tối đa 6 lần để tìm nút
                     for find_attempt in range(6):
@@ -724,13 +724,13 @@ class ADBController:
                         if shop_coords:
                             break
                         
-                        # Nếu chưa thấy, vuốt xuống một khoảng vừa phải (35% chiều cao màn hình) tránh bị trôi qua quá nhanh
+                        # Vuốt xuống một khoảng vừa phải (35% chiều cao màn hình) tránh bị trôi qua quá nhanh
                         y_start = int(height * 0.7) + random.randint(-30, 30)
                         y_end = int(height * 0.35) + random.randint(-30, 30)
                         self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(750, 1000))
                         
-                        # Đợi ngẫu nhiên 2.0 đến 3.5 giây để đọc thông tin
-                        read_delay = random.uniform(2.0, 3.5)
+                        # Đợi ngẫu nhiên 3.5 đến 5.5 giây để đọc thông tin bài đăng tự nhiên
+                        read_delay = random.uniform(3.5, 5.5)
                         temp_start = time.time()
                         while time.time() - temp_start < read_delay:
                             time.sleep(0.25)
@@ -743,26 +743,26 @@ class ADBController:
                         cart_coords = self.find_element_coords_by_text(device_id, "Thêm vào giỏ hàng")
                         if cart_coords:
                             self.tap(device_id, cart_coords[0], cart_coords[1])
-                            time.sleep(2.5) # Đợi bảng chọn phân loại hiện lên
+                            time.sleep(3.0) # Đợi bảng chọn phân loại hiện lên
                             check_cancelled()
                             
                             # Click chọn một tùy chọn ngẫu nhiên ở vùng thuộc tính
                             self.tap(device_id, int(width * 0.3) + random.randint(-50, 50), int(height * 0.5) + random.randint(-50, 50))
-                            time.sleep(1.0)
+                            time.sleep(1.5)
                             check_cancelled()
                             
                             # Nhấn Back để đóng bảng chọn
                             self.keyevent(device_id, 4)
-                            time.sleep(1.5)
+                            time.sleep(2.0)
 
-                    # 4. Vào dạo Shop
+                    # 4. Vào dạo Shop kỹ lưỡng (30 - 45 giây)
                     if shop_coords:
                         update_status("Đang truy cập cửa hàng...")
                         self.tap(device_id, shop_coords[0], shop_coords[1])
-                        time.sleep(4.0) # Đợi trang Shop tải
+                        time.sleep(4.5) # Đợi trang Shop tải
                         
-                        # Dạo trang chủ Shop trong 10-15 giây
-                        shop_duration = random.randint(10, 15)
+                        # Dạo trang chủ Shop trong 30 - 45 giây
+                        shop_duration = random.randint(30, 45)
                         shop_start = time.time()
                         update_status(f"Đang dạo trang chủ Shop trong {shop_duration} giây...")
                         while time.time() - shop_start < shop_duration:
@@ -771,28 +771,28 @@ class ADBController:
                             y_end = int(height * 0.3) + random.randint(-40, 40)
                             self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                             
-                            read_delay = random.uniform(2.0, 3.5)
+                            read_delay = random.uniform(3.5, 6.0)
                             temp_s = time.time()
                             while time.time() - temp_s < read_delay:
-                                time.sleep(0.2)
+                                time.sleep(0.25)
                                 check_cancelled()
                                 
                         # Nhấn nút Back để quay lại trang sản phẩm
                         update_status("Hoàn thành dạo Shop. Quay lại sản phẩm...")
                         self.keyevent(device_id, 4) # Quay lại sản phẩm
-                        time.sleep(2.5)
+                        time.sleep(3.0)
 
-                    # 5. Dạo xem thêm chi tiết sản phẩm ở phần dưới sau khi quay lại (10-15 giây)
-                    view_duration = random.randint(10, 15)
+                    # 5. Dạo xem thêm chi tiết sản phẩm & Đánh giá sau khi quay lại (30 - 45 giây)
+                    view_duration = random.randint(30, 45)
                     start_time = time.time()
-                    update_status(f"Tiếp tục lướt xem thông tin sản phẩm trong {view_duration} giây...")
+                    update_status(f"Tiếp tục lướt xem thông tin sản phẩm & Đánh giá trong {view_duration} giây...")
                     while time.time() - start_time < view_duration:
                         check_cancelled()
                         y_start = int(height * 0.7) + random.randint(-40, 40)
                         y_end = int(height * 0.35) + random.randint(-40, 40)
                         self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                         
-                        read_delay = random.uniform(2.0, 3.5)
+                        read_delay = random.uniform(3.5, 6.0)
                         temp_start = time.time()
                         while time.time() - temp_start < read_delay:
                             time.sleep(0.25)
@@ -1067,17 +1067,17 @@ class ADBController:
             width, height = self.get_screen_size(device_id)
             cx = width // 2
             
-            update_status("[Dự phòng] Vuốt xem album ảnh sản phẩm...")
-            for _ in range(random.randint(1, 2)):
+            update_status("[Dự phòng] Vuốt xem album ảnh sản phẩm chi tiết...")
+            for _ in range(random.randint(2, 4)):
                 check_cancelled()
                 x_start = int(width * 0.85) + random.randint(-20, 20)
                 x_end = int(width * 0.15) + random.randint(-20, 20)
                 y_img = int(height * 0.25) + random.randint(-30, 30)
                 self.swipe(device_id, x_start, y_img, x_end, y_img, duration=random.randint(500, 700))
-                time.sleep(random.uniform(1.5, 2.5))
+                time.sleep(random.uniform(2.5, 4.0))
 
-            update_status("[Dự phòng] Đang cuộn xem thông tin chi tiết...")
-            view_duration = random.randint(10, 15)
+            update_status("[Dự phòng] Đang cuộn xem thông tin chi tiết & Đánh giá...")
+            view_duration = random.randint(30, 45)
             start_time = time.time()
             while time.time() - start_time < view_duration:
                 check_cancelled()
@@ -1085,7 +1085,7 @@ class ADBController:
                 y_end = int(height * 0.35) + random.randint(-40, 40)
                 self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                 
-                read_delay = random.uniform(2.0, 3.5)
+                read_delay = random.uniform(3.5, 6.0)
                 temp_start = time.time()
                 while time.time() - temp_start < read_delay:
                     time.sleep(0.25)
@@ -1098,13 +1098,13 @@ class ADBController:
                 cart_coords = self.find_element_coords_by_text(device_id, "Thêm vào giỏ hàng")
                 if cart_coords:
                     self.tap(device_id, cart_coords[0], cart_coords[1])
-                    time.sleep(2.5)
+                    time.sleep(3.0)
                     check_cancelled()
                     self.tap(device_id, int(width * 0.3) + random.randint(-50, 50), int(height * 0.5) + random.randint(-50, 50))
-                    time.sleep(1.0)
+                    time.sleep(1.5)
                     check_cancelled()
                     self.keyevent(device_id, 4)
-                    time.sleep(1.5)
+                    time.sleep(2.0)
 
             # 9. Dạo shop
             update_status("[Dự phòng] Tìm nút Xem Shop...")
@@ -1116,9 +1116,9 @@ class ADBController:
             if shop_coords:
                 update_status("[Dự phòng] Đang truy cập cửa hàng để dạo...")
                 self.tap(device_id, shop_coords[0], shop_coords[1])
-                time.sleep(4.0)
+                time.sleep(4.5)
                 
-                shop_duration = random.randint(8, 12)
+                shop_duration = random.randint(30, 45)
                 shop_start = time.time()
                 while time.time() - shop_start < shop_duration:
                     check_cancelled()
@@ -1126,15 +1126,15 @@ class ADBController:
                     y_end = int(height * 0.3) + random.randint(-40, 40)
                     self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
                     
-                    read_delay = random.uniform(2.0, 3.5)
+                    read_delay = random.uniform(3.5, 6.0)
                     temp_s = time.time()
                     while time.time() - temp_s < read_delay:
-                        time.sleep(0.2)
+                        time.sleep(0.25)
                         check_cancelled()
                         
                 update_status("[Dự phòng] Hoàn thành dạo Shop. Quay lại sản phẩm...")
                 self.keyevent(device_id, 4)
-                time.sleep(2.5)
+                time.sleep(3.0)
 
             update_status("[Dự phòng] Hoàn thành quy trình tương tác sản phẩm!")
             return True, "Thành công (Dự phòng qua tên Shop)"
