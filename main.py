@@ -27,8 +27,8 @@ cancel_flag = False
 sequential_thread = None
 
 def is_cancelled():
-    global cancel_flag
-    return cancel_flag
+    global cancel_flag, cancel_sequential
+    return cancel_flag or cancel_sequential
 
 # Caching mapping thiết bị toàn cục để tra cứu nhanh
 cached_mapping = {}
@@ -85,6 +85,124 @@ def safe_send_photo(chat_id, photo, caption=None, reply_to_message_id=None):
             if attempt < 2:
                 time.sleep(2.0)
     return None
+
+# ================= THEME & TELEGRAM REAL-TIME TRACKER =================
+class TelegramRealtimeTracker:
+    def __init__(self, bot_obj, chat_id, reply_markup=None):
+        self.bot = bot_obj
+        self.chat_id = chat_id
+        self.reply_markup = reply_markup
+        self.live_msg_id = None
+        self.last_edit_time = 0
+        self.last_text = ""
+        self.completed_steps = []
+        self.current_step = ""
+        self.device_name = ""
+        self.device_serial = ""
+        self.keyword = ""
+        self.current_idx = 0
+        self.total_devices = 0
+
+    def start_dashboard(self, initial_text):
+        msg = safe_send_message(self.chat_id, initial_text, parse_mode="Markdown", reply_markup=self.reply_markup)
+        if msg:
+            self.live_msg_id = msg.message_id
+            self.last_text = initial_text
+            self.last_edit_time = time.time()
+
+    def set_active_device(self, dev_name, dev_serial, keyword, current_idx, total_devices):
+        self.device_name = dev_name
+        self.device_serial = dev_serial
+        self.keyword = keyword
+        self.current_idx = current_idx
+        self.total_devices = total_devices
+        self.completed_steps = []
+        self.current_step = "Đang khởi động Shopee..."
+        self._force_update()
+
+    def status_callback(self, dev_id, msg):
+        if not msg:
+            return
+        if self.current_step and self.current_step != msg and self.current_step not in self.completed_steps:
+            self.completed_steps.append(self.current_step)
+            if len(self.completed_steps) > 4:
+                self.completed_steps = self.completed_steps[-4:]
+        self.current_step = msg
+
+        now = time.time()
+        if now - self.last_edit_time < 1.2:
+            return
+
+        self._force_update()
+
+    def _force_update(self):
+        if not self.live_msg_id:
+            return
+        text = self.render_progress_text()
+        if text != self.last_text:
+            self.last_edit_time = time.time()
+            self.last_text = text
+            safe_edit_message(text, self.chat_id, self.live_msg_id, reply_markup=self.reply_markup, parse_mode="Markdown")
+
+    def render_progress_text(self):
+        text = f"🤖 **Log tiến trình: Máy {self.device_name} ({self.current_idx}/{self.total_devices})**\n"
+        text += f"📱 ID: `{self.device_serial[:10]}`\n"
+        text += f"🔑 Từ khóa: `{self.keyword}`\n"
+        text += "----------------------------------------\n"
+        for step in self.completed_steps:
+            text += f"🟢 {step}\n"
+        if self.current_step:
+            text += f"🔵 **{self.current_step}**...\n"
+        text += "----------------------------------------\n"
+        text += "_Cập nhật liên tục từ trình duyệt/thiết bị..._"
+        return text
+
+    def update_rest_countdown(self, next_dev_name, remaining_seconds):
+        now = time.time()
+        if now - self.last_edit_time < 3.0 and remaining_seconds > 0:
+            return
+        text = f"⏳ **THỜI GIAN TẠM NGHỊ GIỮA CÁC MÁY**\n\n"
+        text += f"📱 Máy tiếp theo: **Máy {next_dev_name}**\n"
+        text += f"⏱️ Đang nghỉ: **{remaining_seconds} giây** nữa...\n"
+        text += "----------------------------------------\n"
+        text += "_(Giãn khoảng thời gian tự nhiên giữa các phiên)_"
+        if text != self.last_text and self.live_msg_id:
+            self.last_edit_time = now
+            self.last_text = text
+            safe_edit_message(text, self.chat_id, self.live_msg_id, reply_markup=self.reply_markup, parse_mode="Markdown")
+
+    def finish_dashboard(self, summary_text):
+        if self.live_msg_id:
+            try:
+                bot.edit_message_reply_markup(self.chat_id, self.live_msg_id, reply_markup=None)
+            except Exception:
+                pass
+            safe_edit_message(summary_text, self.chat_id, self.live_msg_id, parse_mode="Markdown")
+
+def send_device_finished_card(chat_id, dev_name, dev_id, keyword, success, err, duration_sec):
+    minutes = int(duration_sec // 60)
+    seconds = int(duration_sec % 60)
+    if minutes > 0:
+        time_str = f"{minutes} phút {seconds} giây"
+    else:
+        time_str = f"{seconds} giây"
+        
+    if success:
+        text = (
+            f"🟢 **Kịch bản đã hoàn tất thành công!**\n"
+            f"Profile: **{dev_name}** (ID: `{dev_id[:10]}`)\n"
+            f"🔑 Từ khóa: `{keyword}`\n"
+            f"⏳ Thời gian chạy: **{time_str}**"
+        )
+    else:
+        text = (
+            f"🔴 **KỊCH BẢN CHẠY THẤT BẠI**\n"
+            f"Profile: **{dev_name}** (ID: `{dev_id[:10]}`)\n"
+            f"🔑 Từ khóa: `{keyword}`\n"
+            f"⚠️ Lỗi: `{err}`"
+        )
+    safe_send_message(chat_id, text, parse_mode="Markdown")
+
 
 def get_ordered_devices():
     global cached_mapping
@@ -239,7 +357,6 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     cancel_flag = False
     
     if use_ai:
-        # Sinh từ khóa phụ qua Gemini
         def gemini_status(msg):
             safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
             
@@ -251,57 +368,56 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     else:
         expanded_keywords = keywords
         
-    keyword_str = ", ".join(expanded_keywords)
-    
     # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
     
-    start_msg = safe_send_message(
-        message.chat.id, 
+    tracker = TelegramRealtimeTracker(bot, message.chat.id, reply_markup=markup)
+    
+    initial_text = (
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
         f"Từ khóa chính: `{', '.join(keywords)}`\n"
         f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
         f"Tổng số máy: {len(devices)} máy\n"
-        f"Nghỉ giữa mỗi phiên: **60 - 90 giây**.\n\n"
-        f"*(Bạn có thể bấm nút dừng ở bên dưới bất kỳ lúc nào)*",
-        parse_mode="Markdown",
-        reply_markup=markup
+        f"Nghỉ giữa mỗi phiên: **60 - 90 giây**\n\n"
+        f"_(Cập nhật tiến trình thời gian thực từng thiết bị ở bên dưới)_"
     )
+    tracker.start_dashboard(initial_text)
     
-    start_msg_id = start_msg.message_id if start_msg else None
-    
+    total_start_time = time.time()
     success_count = 0
+    
     for idx, dev in enumerate(devices):
         if cancel_sequential or cancel_flag:
-            if start_msg_id:
-                try:
-                    bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
-                except Exception:
-                    pass
             safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
         dev_name = get_device_name(dev)
         current_keyword = random.choice(expanded_keywords)
-        safe_send_message(message.chat.id, f"📱 **Máy {dev_name}/{len(devices)}** ({dev}): Bắt đầu tìm với từ khóa `{current_keyword}`...")
         
-        success, err = adb.shopee_find_and_click_lamdong(dev, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first_item)
+        # Bắt đầu theo dõi thời gian thực cho máy hiện tại
+        dev_start_time = time.time()
+        tracker.set_active_device(dev_name, dev, current_keyword, idx + 1, len(devices))
+        
+        success, err = adb.shopee_find_and_click_lamdong(
+            dev, 
+            current_keyword, 
+            status_callback=tracker.status_callback, 
+            is_cancelled=is_cancelled, 
+            click_first_item=click_first_item
+        )
+        
+        dev_duration = time.time() - dev_start_time
         
         if cancel_sequential or cancel_flag:
-            if start_msg_id:
-                try:
-                    bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
-                except Exception:
-                    pass
             safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
         if success:
             success_count += 1
-            safe_send_message(message.chat.id, f"✅ **Máy {dev_name}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!")
+            send_device_finished_card(message.chat.id, dev_name, dev, current_keyword, True, "", dev_duration)
         else:
-            safe_send_message(message.chat.id, f"❌ **Máy {dev_name}**: {err}")
+            send_device_finished_card(message.chat.id, dev_name, dev, current_keyword, False, err, dev_duration)
             if "Captcha" in err or "bị chặn" in err.lower():
                 temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
                 os.makedirs(temp_dir, exist_ok=True)
@@ -313,38 +429,39 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
                             safe_send_photo(
                                 message.chat.id, 
                                 photo, 
-                                caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {dev_name}**\n\nHệ thống đã thử tự động giải bằng OpenCV nhưng thất bại. Vui lòng giải tay máy này trên phần mềm xiaowei!"
+                                caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {dev_name}**\n\nVui lòng giải tay máy này trên phần mềm xiaowei!"
                             )
                     except Exception as pe:
-                        print(f"Error opening/sending photo: {pe}")
+                        print(f"Error sending photo: {pe}")
                     try:
                         os.remove(screenshot_path)
                     except Exception:
                         pass
             
         if idx < len(devices) - 1:
+            next_dev_name = get_device_name(devices[idx + 1])
             delay = random.randint(60, 90)
-            safe_send_message(message.chat.id, f"⏳ Đợi **{delay} giây** trước khi sang máy tiếp theo...")
             
-            for _ in range(delay):
+            for rem in range(delay, 0, -1):
                 if cancel_sequential or cancel_flag:
                     break
+                tracker.update_rest_countdown(next_dev_name, rem)
                 time.sleep(1)
                 
     if not cancel_sequential and not cancel_flag:
-        if start_msg_id:
-            try:
-                bot.edit_message_reply_markup(message.chat.id, start_msg_id, reply_markup=None)
-            except Exception:
-                pass
-        safe_send_message(
-            message.chat.id, 
-            f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n\n"
-            f"Đã xử lý xong: **{len(devices)}/{len(devices)} máy**\n"
-            f"Thành công: **{success_count} máy**",
-            parse_mode="Markdown"
+        total_duration = time.time() - total_start_time
+        total_min = int(total_duration // 60)
+        total_sec = int(total_duration % 60)
+        total_time_str = f"{total_min} phút {total_sec} giây" if total_min > 0 else f"{total_sec} giây"
+        
+        final_summary = (
+            f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n"
+            f"----------------------------------------\n"
+            f"📊 Tổng xử lý: **{len(devices)}/{len(devices)} máy**\n"
+            f"🟢 Thành công: **{success_count} máy**\n"
+            f"⏱️ Tổng thời gian: **{total_time_str}**"
         )
-
+        tracker.finish_dashboard(final_summary)
 
 
 # Hàm cập nhật ALLOWED_USER_IDS vào file .env để lưu cấu hình bảo mật lâu dài
@@ -405,7 +522,6 @@ def parse_natural_command(text):
         return {"action": "list_devices"}
         
     # 2. Chụp màn hình điện thoại
-    # Định dạng: "chụp màn hình máy 5", "chụp ảnh máy số 12", "chụp máy 1"
     m_screenshot = re.search(r"(?:chụp màn hình|chụp ảnh|chụp)\s*(?:máy|máy số|số|device)?\s*(\d+)", text)
     if m_screenshot:
         return {"action": "screenshot", "device_idx": int(m_screenshot.group(1))}
@@ -435,59 +551,46 @@ def parse_natural_command(text):
         return {"action": "close_shopee", "device_idx": device_idx}
 
     # 7. Tìm kiếm sản phẩm trên Shopee
-    # Các mẫu: "tìm áo thun trên shopee", "mở shopee tìm áo khoác máy 3", "shopee tìm giày thể thao"
     shopee_keywords = ["shopee", "tìm", "tìm kiếm"]
     if any(k in text for k in shopee_keywords):
-        # Xác định máy chỉ định (nếu có)
         m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
         device_idx = int(m_device.group(1)) if m_device else None
         
-        # Trích xuất từ khóa tìm kiếm
         keyword = ""
-        # Trích xuất dạng "tìm kiếm [từ khóa] trên shopee" hoặc "tìm [từ khóa] ở shopee"
         m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+?)\s+(?:trên|ở)\s+shopee", text)
         if m_search:
             keyword = m_search.group(1)
         else:
-            # Trích xuất dạng "shopee tìm [từ khóa]" hoặc "mở shopee tìm [từ khóa]"
             m_search = re.search(r"shopee\s+(?:tìm kiếm|tìm)\s+(.+)", text)
             if m_search:
                 keyword = m_search.group(1)
             else:
-                # Trích xuất dạng "tìm shopee [từ khóa]"
                 m_search = re.search(r"(?:tìm kiếm|tìm)\s+shopee\s+(.+)", text)
                 if m_search:
                     keyword = m_search.group(1)
                 else:
-                    # Trích xuất dạng mặc định "tìm [từ khóa]"
                     m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+)", text)
                     if m_search:
                         keyword = m_search.group(1)
         
-        # Dọn dẹp từ khóa tìm kiếm (bỏ phần chỉ định máy)
         if keyword:
             keyword = re.sub(r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+", "", keyword)
             keyword = keyword.strip()
             
-            # Kiểm tra xem có yêu cầu tìm shop Lâm Đồng hay không
             if "lâm đồng" in text or "lam dong" in text:
-                # Phát hiện hậu tố click sản phẩm đầu tiên
                 click_first_item = False
                 first_item_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
                 if any(ind in text for ind in first_item_indicators):
                     click_first_item = True
                 
-                # Làm sạch từ khóa
                 keyword_clean = re.sub(r"(?:tỉnh\s+)?(?:lâm\s+đồng|lam\s+dong)", "", keyword, flags=re.IGNORECASE)
                 keyword_clean = re.sub(r"(?:tuần\s+tự|tuan\s+tu|lần\s+lượt|lan\s+luot)", "", keyword_clean, flags=re.IGNORECASE)
                 
-                # Loại bỏ các từ khóa chỉ định click sản phẩm đầu tiên khỏi từ khóa chính
                 for ind in first_item_indicators:
                     keyword_clean = re.sub(r"\b" + re.escape(ind) + r"\b", "", keyword_clean, flags=re.IGNORECASE)
                 
                 keyword_clean = re.sub(r"\s+", " ", keyword_clean).strip()
                 
-                # Tách nhiều từ khóa bằng dấu phẩy, chấm phẩy hoặc gạch đứng
                 keywords = [k.strip() for k in re.split(r'[,;|]', keyword_clean) if k.strip()]
                 if not keywords:
                     keywords = [keyword_clean]
@@ -511,14 +614,14 @@ def parse_natural_command(text):
                 keywords = [keyword]
             return {"action": "shopee_search", "keywords": keywords, "device_idx": device_idx}
             
-    # 8. Lệnh Click tọa độ thủ công: "click 500 600 máy 1" hoặc "click 500 600" (tất cả máy)
+    # 8. Lệnh Click tọa độ thủ công
     m_click = re.search(r"click\s+(\d+)\s+(\d+)(?:\s+(?:máy|máy số|số|device)?\s*(\d+))?", text)
     if m_click:
         x, y = int(m_click.group(1)), int(m_click.group(2))
         device_idx = int(m_click.group(3)) if m_click.group(3) else None
         return {"action": "click", "x": x, "y": y, "device_idx": device_idx}
 
-    # 9. Lệnh Nhập text thủ công: "nhập hello world máy 1" hoặc "nhập xin chào" (tất cả máy)
+    # 9. Lệnh Nhập text thủ công
     m_input = re.search(r"nhập\s+(.+?)(?:\s+(?:máy|máy số|số|device)\s*(\d+))?$", text)
     if m_input:
         input_text_val = m_input.group(1).strip()
@@ -537,7 +640,7 @@ def parse_natural_command(text):
 
     return None
 
-# Xử lý lệnh /start và /help để hiển thị hướng dẫn ngắn gọn
+# Xử lý lệnh /start và /help
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if not check_auth(message):
@@ -545,38 +648,25 @@ def send_welcome(message):
 
     instructions = (
         "🤖 **BOX PHONE CONTROL - SHOPEE KHẢI HOÀN** 🤖\n\n"
-        "Chào mừng Admin! Dưới đây là bảng hướng dẫn điều khiển hệ thống Box Phone tự động. Bạn có thể sao chép nhanh các câu lệnh mẫu:\n\n"
+        "Chào mừng Admin! Dưới đây là bảng hướng dẫn điều khiển hệ thống Box Phone tự động:\n\n"
         
-        "📌 **1. LỆNH TÌM KIẾM & BƠM SẢN PHẨM (Tự động 100%)**\n"
-        "👉 **Chạy TUẦN TỰ (Khuyên dùng - Giãn cách 60-90s tránh quét IP):**\n"
+        "📌 **1. LỆNH TÌM KIẾM & BƠM SẢN PHẨM**\n"
+        "👉 **Chạy TUẦN TỰ (Cập nhật Real-time 100%):**\n"
         "• Lướt tìm shop Lâm Đồng: `tìm tuần tự lâm đồng deriva, son môi`\n"
-        "• Lướt thẳng bài top 1/Video: `tìm tuần tự lâm đồng deriva video` hoặc `tìm tuần tự lâm đồng deriva đầu tiên`\n"
-        "👉 **Chạy SONG SONG (Tất cả các máy chạy cùng lúc):**\n"
+        "• Lướt thẳng bài top 1/Video: `tìm tuần tự lâm đồng deriva video`\n"
+        "👉 **Chạy SONG SONG:**\n"
         "• Lướt tìm shop Lâm Đồng: `tìm lâm đồng deriva`\n"
-        "• Lướt thẳng bài top 1/Video: `tìm lâm đồng deriva video`\n"
-        "👉 **Chạy trên MỘT MÁY chỉ định (Ví dụ: Máy S10):**\n"
-        "• Lướt tìm shop Lâm Đồng: `máy 10 tìm lâm đồng deriva`\n"
-        "• Lướt thẳng bài top 1/Video: `máy 10 tìm lâm đồng deriva video`\n\n"
+        "👉 **Chạy trên MỘT MÁY chỉ định (Máy S10):**\n"
+        "• Lướt tìm shop Lâm Đồng: `máy 10 tìm lâm đồng deriva`\n\n"
         
         "🛑 **DỪNG CHẠY KHẨN CẤP:**\n"
-        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` đính kèm trực tiếp dưới tin nhắn tiến trình của Bot.\n"
-        "• Hoặc gõ tin nhắn bất kỳ: `dừng`, `stop`, hoặc gửi lệnh `/stop` để hủy toàn bộ tác vụ lập tức.\n\n"
+        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` hoặc gõ `dừng`, `stop`.\n\n"
         
         "📸 **2. CHỤP ẢNH MÀN HÌNH GIÁM SÁT**\n"
-        "• Xem màn hình máy cụ thể: `chụp màn hình máy 16` (hoặc `chụp máy 16`)\n"
-        "*(Hỗ trợ giám sát từ xa hoặc tự giải Captcha thủ công nếu bot báo lỗi)*\n\n"
+        "• Xem màn hình máy cụ thể: `chụp màn hình máy 16`\n\n"
         
         "📊 **3. TRẠNG THÁI HỆ THỐNG**\n"
         "• Xem danh sách kết nối: `trạng thái` hoặc `danh sách máy`\n"
-        "*(Hiển thị chi tiết tên máy thật S1-S20 cùng mã Serial ADB đang kết nối)*\n\n"
-        
-        "⚙️ **4. ĐIỀU KHIỂN THỦ CÔNG NHANH (Tất cả hoặc máy chỉ định)**\n"
-        "• Quay lại: `quay lại` | `quay lại máy 10`\n"
-        "• Về màn hình chính: `trang chủ` | `trang chủ máy 10`\n"
-        "• Khóa hướng dọc màn hình: `tắt xoay` | `tắt xoay máy 10`\n"
-        "• Mở Shopee & bypass popup: `mở shopee` | `mở shopee máy 10`\n"
-        "• Dừng Shopee & dọn RAM đa nhiệm: `đóng shopee` | `đóng shopee máy 10`\n\n"
-        "💡 *Lưu ý: Hệ thống đã tự động lọc trùng kết nối USB/Wifi và đồng bộ tên thật. Tên máy khi gõ lệnh (ví dụ: máy 10) tương ứng với máy nhãn S10 hiển thị trên phần mềm máy tính.*"
     )
     bot.reply_to(message, instructions, parse_mode="Markdown")
 
@@ -593,7 +683,6 @@ def handle_all_messages(message):
         bot.reply_to(message, "❓ Bot chưa hiểu câu lệnh này của bạn. Bạn gõ `/help` để xem danh sách các câu lệnh mẫu nhé.")
         return
 
-    # Lấy danh sách thiết bị
     devices = get_ordered_devices()
     if not devices:
         bot.reply_to(message, "❌ Không tìm thấy thiết bị điện thoại nào đang kết nối. Vui lòng kiểm tra lại dây cáp.")
@@ -602,10 +691,8 @@ def handle_all_messages(message):
     action = cmd["action"]
     device_idx = cmd.get("device_idx")
 
-    # Xác định các thiết bị sẽ chịu tác động của lệnh
     target_devices = []
     if device_idx is not None:
-        # Số thứ tự user nhập là 1-indexed (1-20)
         idx = device_idx - 1
         if 0 <= idx < len(devices):
             target_devices = [devices[idx]]
@@ -615,7 +702,6 @@ def handle_all_messages(message):
     else:
         target_devices = devices
 
-    # Thực hiện hành động cụ thể
     if action == "list_devices":
         response = f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI ({len(devices)} máy):**\n\n"
         for d in devices:
@@ -623,14 +709,10 @@ def handle_all_messages(message):
         bot.reply_to(message, response, parse_mode="Markdown")
 
     elif action == "screenshot":
-        # Hành động chụp ảnh màn hình (chỉ hỗ trợ từng máy một để tránh spam ảnh)
-        # Nếu user gõ "chụp ảnh" mà không nói máy nào, mặc định lấy máy 1
         tgt_dev = target_devices[0]
         tgt_name = get_device_name(tgt_dev)
-        
         status_msg = bot.reply_to(message, f"📸 Đang chụp màn hình máy {tgt_name}...")
         
-        # Tạo đường dẫn lưu ảnh tạm
         temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
         os.makedirs(temp_dir, exist_ok=True)
         local_path = os.path.join(temp_dir, f"screenshot_{tgt_name}.png")
@@ -641,7 +723,6 @@ def handle_all_messages(message):
             bot.delete_message(message.chat.id, status_msg.message_id)
             with open(local_path, 'rb') as photo:
                 bot.send_photo(message.chat.id, photo, caption=f"🖼️ Ảnh chụp màn hình **Máy {tgt_name}**")
-            # Xóa file tạm trên máy tính
             try:
                 os.remove(local_path)
             except Exception:
@@ -651,8 +732,6 @@ def handle_all_messages(message):
 
     elif action == "shopee_search":
         keywords = cmd["keywords"]
-        
-        # Sinh từ khóa phụ qua Gemini
         def gemini_status(msg):
             safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
         expanded_keywords = config.generate_keywords_via_gemini(
@@ -662,30 +741,32 @@ def handle_all_messages(message):
         )
         
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
+            tgt_dev = target_devices[0]
+            tgt_name = get_device_name(tgt_dev)
             current_keyword = random.choice(expanded_keywords)
-            status_msg = bot.reply_to(message, f"🛒 **Máy {tgt_name}**: Bắt đầu mở Shopee và tìm kiếm '{current_keyword}'...")
             
-            def cb(dev_id, msg):
-                pass
-                
-            success, err = adb.shopee_search_sequence(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled)
-            if success:
-                bot.edit_message_text(f"✅ **Máy {tgt_name}**: Đã hoàn thành tìm kiếm '{current_keyword}'.", message.chat.id, status_msg.message_id)
-            else:
-                bot.edit_message_text(f"❌ **Máy {tgt_name}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
+            tracker = TelegramRealtimeTracker(bot, message.chat.id)
+            tracker.start_dashboard(f"🛒 **Máy {tgt_name}**: Bắt đầu mở Shopee và tìm kiếm `{current_keyword}`...")
+            tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
+            
+            dev_start = time.time()
+            success, err = adb.shopee_search_sequence(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=is_cancelled)
+            duration = time.time() - dev_start
+            
+            tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm kiếm.")
+            send_device_finished_card(message.chat.id, tgt_name, tgt_dev, current_keyword, success, err, duration)
         else:
-            keyword_str = ", ".join(expanded_keywords)
-            # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-            status_msg = bot.reply_to(message, f"🚀 Đang khởi tạo tìm kiếm ngẫu nhiên từ khóa `{keyword_str}` trên {len(target_devices)} máy cùng lúc...", reply_markup=markup)
+            status_msg = bot.reply_to(message, f"🚀 Bắt đầu chạy song song trên {len(target_devices)} máy...", reply_markup=markup)
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
                 current_keyword = random.choice(expanded_keywords)
-                bot.send_message(message.chat.id, f"🔍 **Máy {dev_name}**: Bắt đầu tìm với từ khóa `{current_keyword}`...")
+                dev_start = time.time()
                 success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=is_cancelled)
+                dev_dur = time.time() - dev_start
+                send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
                 return dev_name, current_keyword, success, err
                 
             results = []
@@ -695,23 +776,13 @@ def handle_all_messages(message):
                     results.append(future.result())
             
             success_count = sum(1 for r in results if r[2])
-            fail_count = len(results) - success_count
-            
-            summary = f"🏁 **KẾT QUẢ TÌM KIẾM SHOPEE:**\n\n"
-            summary += f"✅ Thành công: **{success_count}/{len(target_devices)} máy**\n"
-            if fail_count > 0:
-                summary += f"❌ Thất bại: **{fail_count} máy**\n"
-                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
-                summary += f"⚠️ Các máy lỗi:\n" + "\n".join(fails_list)
-            
-            # Cập nhật kết quả đồng thời gỡ nút bấm Inline bằng reply_markup=None
-            bot.edit_message_text(summary, message.chat.id, status_msg.message_id, reply_markup=None)
+            summary = f"🏁 **HOÀN THÀNH TÌM KIẾM SONG SONG ({success_count}/{len(target_devices)} MÁY)**"
+            safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
 
     elif action == "shopee_search_lamdong":
         keywords = cmd["keywords"]
         click_first = cmd.get("click_first_item", False)
         
-        # Sinh từ khóa phụ qua Gemini
         def gemini_status(msg):
             safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
         expanded_keywords = config.generate_keywords_via_gemini(
@@ -721,46 +792,32 @@ def handle_all_messages(message):
         )
         
         if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
+            tgt_dev = target_devices[0]
+            tgt_name = get_device_name(tgt_dev)
             current_keyword = random.choice(expanded_keywords)
-            status_msg = bot.reply_to(message, f"🔍 **Máy {tgt_name}**: Đang tìm kiếm '{current_keyword}' và quét tìm shop ở Lâm Đồng...")
             
-            def cb(dev_id, msg):
-                bot.edit_message_text(f"🔍 **Máy {tgt_name}**: {msg}", message.chat.id, status_msg.message_id)
-                
-            success, err = adb.shopee_find_and_click_lamdong(target_devices[0], current_keyword, status_callback=cb, is_cancelled=is_cancelled, click_first_item=click_first)
-            if success:
-                bot.edit_message_text(f"🎉 **Máy {tgt_name}**: Đã hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa `{current_keyword}`!", message.chat.id, status_msg.message_id)
-            else:
-                bot.edit_message_text(f"❌ **Máy {tgt_name}**: Thất bại. Lỗi: {err}", message.chat.id, status_msg.message_id)
-                if "Captcha" in err or "bị chặn" in err.lower():
-                    temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
-                    os.makedirs(temp_dir, exist_ok=True)
-                    screenshot_path = os.path.join(temp_dir, f"captcha_alert_{tgt_name}.png")
-                    sc_success, _ = adb.take_screenshot(target_devices[0], screenshot_path)
-                    if sc_success:
-                        with open(screenshot_path, 'rb') as photo:
-                            bot.send_photo(
-                                message.chat.id, 
-                                photo, 
-                                caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {tgt_name}**\n\nHệ thống đã thử tự động giải bằng OpenCV nhưng thất bại. Vui lòng giải tay trên phần mềm xiaowei!"
-                            )
-                        try:
-                            os.remove(screenshot_path)
-                        except Exception:
-                            pass
+            tracker = TelegramRealtimeTracker(bot, message.chat.id)
+            tracker.start_dashboard(f"🔍 **Máy {tgt_name}**: Bắt đầu quét shop Lâm Đồng từ khóa `{current_keyword}`...")
+            tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
+            
+            dev_start = time.time()
+            success, err = adb.shopee_find_and_click_lamdong(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=is_cancelled, click_first_item=click_first)
+            duration = time.time() - dev_start
+            
+            tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm shop Lâm Đồng.")
+            send_device_finished_card(message.chat.id, tgt_name, tgt_dev, current_keyword, success, err, duration)
         else:
-            keyword_str = ", ".join(expanded_keywords)
-            # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng ngẫu nhiên từ khóa `{keyword_str}` trên tất cả {len(target_devices)} máy cùng lúc...", reply_markup=markup)
+            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng song song trên {len(target_devices)} máy...", reply_markup=markup)
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
                 current_keyword = random.choice(expanded_keywords)
-                bot.send_message(message.chat.id, f"🔍 **Máy {dev_name}**: Bắt đầu quét từ khóa `{current_keyword}`...")
+                dev_start = time.time()
                 success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first)
+                dev_dur = time.time() - dev_start
+                send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
                 return dev_name, current_keyword, success, err
                 
             results = []
@@ -770,17 +827,8 @@ def handle_all_messages(message):
                     results.append(future.result())
             
             success_count = sum(1 for r in results if r[2])
-            fail_count = len(results) - success_count
-            
-            summary = f"🏁 **KẾT QUẢ TÌM SHOP LÂM ĐỒNG:**\n\n"
-            summary += f"✅ Hoàn thành trọn vẹn quy trình: **{success_count}/{len(target_devices)} máy**\n"
-            if fail_count > 0:
-                summary += f"❌ Thất bại (không thấy/lỗi): **{fail_count} máy**\n"
-                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
-                summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
-            
-            # Cập nhật kết quả đồng thời gỡ nút bấm Inline bằng reply_markup=None
-            bot.edit_message_text(summary, message.chat.id, status_msg.message_id, reply_markup=None)
+            summary = f"🏁 **KẾT QUẢ QUÉT SHOP LÂM ĐỒNG SONG SONG ({success_count}/{len(target_devices)} MÁY THÀNH CÔNG)**"
+            safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
 
     elif action == "shopee_search_lamdong_sequential":
         keywords = cmd["keywords"]
@@ -800,9 +848,7 @@ def handle_all_messages(message):
         global cancel_sequential, cancel_flag
         cancel_sequential = True
         cancel_flag = True
-        # Gửi kèm ReplyKeyboardRemove để ẩn nút dừng ngay lập tức
-        markup_remove = telebot.types.ReplyKeyboardRemove(selective=False)
-        status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy và các luồng chạy...", reply_markup=markup_remove)
+        status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
         
         def reset_cancel_flags():
             time.sleep(3.5)
@@ -817,76 +863,42 @@ def handle_all_messages(message):
         threading.Thread(target=reset_cancel_flags).start()
 
     elif action == "open_shopee":
-        if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
-            adb.launch_app(target_devices[0], config.SHOPEE_PACKAGE)
-            bot.reply_to(message, f"✅ Đang mở Shopee trên **Máy {tgt_name}**.")
-        else:
-            for dev in target_devices:
-                adb.launch_app(dev, config.SHOPEE_PACKAGE)
-            bot.reply_to(message, f"✅ Đang mở Shopee trên tất cả {len(target_devices)} máy.")
+        for dev in target_devices:
+            adb.launch_app(dev, config.SHOPEE_PACKAGE)
+        bot.reply_to(message, f"✅ Đã mở Shopee trên {len(target_devices)} máy.")
 
     elif action == "close_shopee":
-        if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
-            adb.stop_app(target_devices[0], config.SHOPEE_PACKAGE)
-            bot.reply_to(message, f"✅ Đã buộc dừng Shopee trên **Máy {tgt_name}**.")
-        else:
-            for dev in target_devices:
-                adb.stop_app(dev, config.SHOPEE_PACKAGE)
-            bot.reply_to(message, f"✅ Đã buộc dừng Shopee trên tất cả {len(target_devices)} máy.")
+        for dev in target_devices:
+            adb.stop_app(dev, config.SHOPEE_PACKAGE)
+        bot.reply_to(message, f"✅ Đã buộc dừng Shopee trên {len(target_devices)} máy.")
 
     elif action == "back":
         for dev in target_devices:
             adb.keyevent(dev, 4)
-        if len(target_devices) == 1:
-            tgt_name = get_device_name(target_devices[0])
-            bot.reply_to(message, f"↩️ Đã gửi lệnh Quay lại trên **Máy {tgt_name}**.")
-        else:
-            bot.reply_to(message, f"↩️ Đã gửi lệnh Quay lại trên tất cả {len(target_devices)} máy.")
+        bot.reply_to(message, f"↩️ Đã gửi lệnh Quay lại trên {len(target_devices)} máy.")
 
     elif action == "home":
         for dev in target_devices:
             adb.keyevent(dev, 3)
-        if len(target_devices) == 1:
-            tgt_idx = devices.index(target_devices[0]) + 1
-            bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên **Máy {tgt_idx}**.")
-        else:
-            bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên tất cả {len(target_devices)} máy.")
+        bot.reply_to(message, f"🏠 Đã gửi lệnh màn hình chính trên {len(target_devices)} máy.")
 
     elif action == "click":
         x, y = cmd["x"], cmd["y"]
-        if len(target_devices) == 1:
-            tgt_idx = devices.index(target_devices[0]) + 1
-            adb.tap(target_devices[0], x, y)
-            bot.reply_to(message, f"👆 Đã click tọa độ ({x}, {y}) trên **Máy {tgt_idx}**.")
-        else:
-            for dev in target_devices:
-                adb.tap(dev, x, y)
-            bot.reply_to(message, f"👆 Đã click tọa độ ({x}, {y}) trên tất cả {len(target_devices)} máy.")
+        for dev in target_devices:
+            adb.tap(dev, x, y)
+        bot.reply_to(message, f"👆 Đã click tọa độ ({x}, {y}) trên {len(target_devices)} máy.")
 
     elif action == "input":
         text_val = cmd["text"]
-        if len(target_devices) == 1:
-            tgt_idx = devices.index(target_devices[0]) + 1
-            adb.input_text(target_devices[0], text_val)
-            bot.reply_to(message, f"✍️ Đã nhập '{text_val}' trên **Máy {tgt_idx}**.")
-        else:
-            for dev in target_devices:
-                adb.input_text(dev, text_val)
-            bot.reply_to(message, f"✍️ Đã nhập '{text_val}' trên tất cả {len(target_devices)} máy.")
+        for dev in target_devices:
+            adb.input_text(dev, text_val)
+        bot.reply_to(message, f"✍️ Đã nhập '{text_val}' trên {len(target_devices)} máy.")
 
     elif action == "disable_rotation":
-        if len(target_devices) == 1:
-            tgt_idx = devices.index(target_devices[0]) + 1
-            adb.execute_adb(target_devices[0], ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
-            adb.execute_adb(target_devices[0], ["shell", "settings", "put", "system", "user_rotation", "0"])
-            bot.reply_to(message, f"📴 Đã tắt xoay màn hình và khóa hướng dọc trên **Máy {tgt_idx}**.")
-        else:
-            for dev in target_devices:
-                adb.execute_adb(dev, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
-                adb.execute_adb(dev, ["shell", "settings", "put", "system", "user_rotation", "0"])
-            bot.reply_to(message, f"📴 Đã tắt xoay màn hình và khóa hướng dọc trên tất cả {len(target_devices)} máy.")
+        for dev in target_devices:
+            adb.execute_adb(dev, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
+            adb.execute_adb(dev, ["shell", "settings", "put", "system", "user_rotation", "0"])
+        bot.reply_to(message, f"📴 Đã tắt xoay màn hình trên {len(target_devices)} máy.")
 
 # Điểm khởi chạy của Bot
 if __name__ == "__main__":
