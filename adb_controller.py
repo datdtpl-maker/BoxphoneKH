@@ -983,18 +983,38 @@ class ADBController:
             try:
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
+                
+                # 0. Nếu lỡ rớt vào trang "Chi tiết Shop", bấm Back 1 lần để quay ra trang Shop chính
+                for elem in root.iter():
+                    text = elem.get('text', '')
+                    if "Chi tiết Shop" in text or "Tỉ lệ phản hồi" in text or "Mô tả Shop" in text:
+                        print(f"[Device {device_id[:6]}] Phát hiện đang ở trang Chi tiết Shop -> Nhấn Back để thoát ra trang chính của Shop.")
+                        self.keyevent(device_id, 4)
+                        time.sleep(1.2)
+                        break
+
+                keywords = [
+                    "tìm kiếm sản phẩm trong shop", "tìm trong shop", "tìm kiếm trong shop", 
+                    "tìm ở cửa hàng", "tìm kiếm trong cửa hàng", "tìm sản phẩm", 
+                    "search in shop", "search this shop", "search in store"
+                ]
                 for elem in root.iter():
                     text = elem.get('text', '')
                     desc = elem.get('content-desc', '')
-                    val = text or desc
-                    keywords = ["tìm trong shop", "tìm kiếm trong shop", "tìm ở cửa hàng", "tìm kiếm trong cửa hàng", "tìm sản phẩm", "search in shop", "search this shop", "search in store"]
-                    if val and any(k in val.lower() for k in keywords):
+                    res_id = elem.get('resource-id', '')
+                    val = (text or desc or res_id).lower()
+                    if val and any(k in val for k in keywords):
                         bounds = elem.get('bounds', '')
                         m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                         if m:
                             x1, y1, x2, y2 = map(int, m.groups())
-                            coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                            break
+                            cy = (y1 + y2) // 2
+                            cx = (x1 + x2) // 2
+                            # Ô tìm kiếm trong Shop luôn nằm ở vùng thanh tiêu đề đỉnh (y < 200)
+                            if 30 < cy < 200:
+                                coords = (cx, cy)
+                                print(f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm trong Shop tại ({cx}, {cy}).")
+                                break
             except Exception:
                 pass
             finally:
@@ -1141,12 +1161,15 @@ class ADBController:
             time.sleep(4.0) # Đợi trang Shop tải
             check_cancelled()
 
-            # 4. Tìm ô tìm kiếm trong Shop
+            # 4. Tìm ô tìm kiếm trong Shop (Ô kính lúp ở Đỉnh trang Shop: x=50% width, y=5.5% height)
             update_status("[Dự phòng] Tìm ô tìm kiếm trong Shop...")
+            shop_search_x = int(width * 0.5)
+            shop_search_y = int(height * 0.055)
+            
             shop_search_coords = self.find_shop_search_box(device_id)
             if not shop_search_coords:
-                update_status("[Dự phòng] Không tìm thấy ô tìm kiếm trong Shop qua XML, thử click tọa độ dự phòng...")
-                self.tap(device_id, int(width * 0.5), int(height * 0.14))
+                update_status(f"[Dự phòng] Click ô 'Tìm kiếm sản phẩm trong Shop' tại ({shop_search_x}, {shop_search_y})...")
+                self.tap(device_id, shop_search_x, shop_search_y)
             else:
                 update_status(f"[Dự phòng] Click ô tìm kiếm trong Shop tại {shop_search_coords}...")
                 self.tap(device_id, shop_search_coords[0], shop_search_coords[1])
@@ -1154,8 +1177,10 @@ class ADBController:
             time.sleep(1.5)
             check_cancelled()
             
-            # Click lại để chắc chắn hiện bàn phím
-            self.tap(device_id, int(width * 0.5), int(height * 0.14))
+            # Click lại vào chính ô search ở đỉnh trang để chắc chắn bàn phím xuất hiện (tuyệt đối KHÔNG click y=0.14)
+            self.tap(device_id, shop_search_x, shop_search_y)
+            time.sleep(1.0)
+            check_cancelled()
             time.sleep(1.0)
             check_cancelled()
 
