@@ -594,6 +594,7 @@ class ADBController:
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
+            cx = width // 2
             swipe_x = int(width * 0.25)
 
             # Dạo trang chủ Shopee ở dải lề trái tránh chạm các ô Video ở giữa
