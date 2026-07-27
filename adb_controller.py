@@ -818,7 +818,7 @@ class ADBController:
             update_status(f"Thất bại: {msg}")
             return False, msg
 
-    def find_and_click_view_shop(self, device_id):
+    def find_and_click_view_shop(self, device_id, shop_name=""):
         xml_file = f"/sdcard/dump_view_shop_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         code, _, _ = self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
@@ -831,19 +831,44 @@ class ADBController:
             try:
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
+                
+                # 0. Nếu lỡ dính bảng "Bộ lọc tìm kiếm", bấm Back để đóng ngay
+                for elem in root.iter():
+                    text = elem.get('text', '')
+                    if "Bộ lọc tìm kiếm" in text or "Thiết lập lại" in text:
+                        print(f"[Device {device_id[:6]}] Phát hiện bảng Bộ lọc tìm kiếm đang mở -> Nhấn Back để đóng.")
+                        self.keyevent(device_id, 4)
+                        time.sleep(1.0)
+                        break
+
+                # 1. Các từ khóa ưu tiên tìm nút hoặc thẻ đại diện Shop
+                keywords = [
+                    "thêm kết quả", "them ket qua", "xem shop", "xem cửa hàng", 
+                    "ghé shop", "view shop", "visit shop", "visit store", "khám phá"
+                ]
+                if shop_name:
+                    keywords.append(shop_name.lower())
+                    clean_sn = shop_name.replace(".", " ").replace("_", " ").lower()
+                    keywords.append(clean_sn)
+                
                 for elem in root.iter():
                     text = elem.get('text', '')
                     desc = elem.get('content-desc', '')
-                    val = text or desc
-                    if val and any(k in val.lower() for k in ["xem shop", "xem cửa hàng", "view shop", "visit shop"]):
+                    val = (text or desc).strip()
+                    if val and any(k in val.lower() for k in keywords):
                         bounds = elem.get('bounds', '')
                         m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                         if m:
                             x1, y1, x2, y2 = map(int, m.groups())
-                            coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                            break
-            except Exception:
-                pass
+                            cy = (y1 + y2) // 2
+                            cx = (x1 + x2) // 2
+                            # Đảm bảo vị trí nằm dưới header tìm kiếm (y > 200) và không chạm vùng phễu lọc góc trên bên phải
+                            if 200 < cy < 1600:
+                                coords = (cx, cy)
+                                print(f"[Device {device_id[:6]}] Tìm thấy nút/thẻ Shop '{val}' tại ({cx}, {cy}).")
+                                break
+            except Exception as e:
+                print(f"[Device {device_id[:6]}] Lỗi phân tích XML Shop: {e}")
             finally:
                 try:
                     os.remove(local_xml)
@@ -959,7 +984,7 @@ class ADBController:
         return coords
 
     def shopee_fallback_by_shop_name(self, device_id, keyword, status_callback=None, is_cancelled=None):
-        """Kịch bản dự phòng: Tìm kiếm tên shop, truy cập vào shop, tìm kiếm sản phẩm trong shop và lướt tương tác"""
+        """Kịch bản dự phòng: Tìm kiếm tên shop, truy cập vào shop qua thẻ shop / nút Thêm kết quả, và tìm sản phẩm"""
         def update_status(msg):
             if status_callback:
                 status_callback(device_id, msg)
@@ -1004,14 +1029,19 @@ class ADBController:
             time.sleep(3.5)
             check_cancelled()
 
-            # 3. Tìm nút "Xem Shop" trên trang kết quả
-            update_status("[Dự phòng] Tìm nút Xem Shop...")
-            view_shop_coords = self.find_and_click_view_shop(device_id)
+            # 3. Tìm nút "Xem Shop" / "Thêm kết quả >" / Thẻ đại diện Shop
+            update_status(f"[Dự phòng] Tìm nút Thêm kết quả / Xem Shop cho '{shop_name}'...")
+            view_shop_coords = self.find_and_click_view_shop(device_id, shop_name=shop_name)
+            
+            width, height = self.get_screen_size(device_id)
             if not view_shop_coords:
-                update_status("[Dự phòng] Không tìm thấy nút Xem Shop qua XML, thử click tọa độ dự phòng banner Shop...")
-                self.tap(device_id, 500, 380)
+                # Tọa độ dự phòng chuẩn xác vào khu vực nút 'Thêm kết quả >' bên phải Card Shop (x=72% width, y=28% height)
+                fallback_x = int(width * 0.72)
+                fallback_y = int(height * 0.28)
+                update_status(f"[Dự phòng] Click vùng nút 'Thêm kết quả' tại ({fallback_x}, {fallback_y})...")
+                self.tap(device_id, fallback_x, fallback_y)
             else:
-                update_status(f"[Dự phòng] Click vào Xem Shop tại {view_shop_coords}...")
+                update_status(f"[Dự phòng] Click nút/thẻ Shop tại {view_shop_coords}...")
                 self.tap(device_id, view_shop_coords[0], view_shop_coords[1])
             
             time.sleep(4.0) # Đợi trang Shop tải
@@ -1022,7 +1052,7 @@ class ADBController:
             shop_search_coords = self.find_shop_search_box(device_id)
             if not shop_search_coords:
                 update_status("[Dự phòng] Không tìm thấy ô tìm kiếm trong Shop qua XML, thử click tọa độ dự phòng...")
-                self.tap(device_id, 500, 140)
+                self.tap(device_id, int(width * 0.5), int(height * 0.14))
             else:
                 update_status(f"[Dự phòng] Click ô tìm kiếm trong Shop tại {shop_search_coords}...")
                 self.tap(device_id, shop_search_coords[0], shop_search_coords[1])
@@ -1031,7 +1061,7 @@ class ADBController:
             check_cancelled()
             
             # Click lại để chắc chắn hiện bàn phím
-            self.tap(device_id, 500, 140)
+            self.tap(device_id, int(width * 0.5), int(height * 0.14))
             time.sleep(1.0)
             check_cancelled()
 
