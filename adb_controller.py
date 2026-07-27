@@ -391,6 +391,103 @@ class ADBController:
                     pass
         return coords
 
+    def ensure_shopee_search_box_click(self, device_id, status_callback=None):
+        """
+        Tối ưu hóa hành động mở thanh tìm kiếm Shopee:
+        1. Kiểm tra nếu lỡ rớt vào màn hình Shopee Video / Live (có nút Kính Lúp top-right hoặc tab Home góc dưới)
+        2. Đưa về tab Trang chủ (Home Tab) chuẩn trước khi bấm ô tìm kiếm
+        3. Thử tìm ô tìm kiếm qua uiautomator XML (inputSearchBar, btn_search, search_text)
+        4. Nếu không tìm thấy qua XML, bấm biểu tượng Kính Lúp hoặc vị trí chuẩn trên Trang chủ
+        """
+        def update_status(msg):
+            if status_callback:
+                status_callback(device_id, msg)
+
+        width, height = self.get_screen_size(device_id)
+
+        # 1. Thử dump XML màn hình hiện tại
+        xml_file = f"/sdcard/dump_search_click_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_search_click_{device_id}.xml")
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        in_video_mode = False
+        search_coords = None
+
+        if pull_code == 0 and os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                
+                # Kiểm tra xem có đang rớt vào giao diện Shopee Video / Live không
+                for elem in root.iter():
+                    text = elem.get('text', '')
+                    desc = elem.get('content-desc', '')
+                    res_id = elem.get('resource-id', '')
+                    val = (text or desc or res_id).lower()
+                    if "video_" in val or "flash sale" in val or "chia sẻ" in val or "thêm vào giỏ" in val:
+                        in_video_mode = True
+                        break
+
+                # Nếu không ở video mode, tìm ô search trên trang chủ qua XML
+                if not in_video_mode:
+                    for elem in root.iter():
+                        res_id = elem.get('resource-id', '')
+                        text = elem.get('text', '')
+                        desc = elem.get('content-desc', '')
+                        val = (text or desc or res_id).lower()
+                        if any(k in val for k in ["inputsearchbar", "search_text", "btn_search", "search_bar"]):
+                            bounds = elem.get('bounds', '')
+                            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                            if m:
+                                x1, y1, x2, y2 = map(int, m.groups())
+                                cy = (y1 + y2) // 2
+                                cx = (x1 + x2) // 2
+                                if 30 < cy < 250:
+                                    search_coords = (cx, cy)
+                                    print(f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm Trang chủ tại ({cx}, {cy}).")
+                                    break
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+
+        # Nếu phát hiện bị lỡ rớt vào Shopee Video Mode (Hình 2 & 3)
+        if in_video_mode:
+            update_status("Phát hiện màn hình Shopee Video -> Click kính lúp / Thoát về Trang chủ...")
+            # Click biểu tượng Kính Lúp (Search Icon) góc trên bên phải của Shopee Video (x=83% width, y=5.5% height)
+            video_search_x = int(width * 0.83)
+            video_search_y = int(height * 0.055)
+            self.tap(device_id, video_search_x, video_search_y)
+            time.sleep(1.5)
+            return True
+
+        # Nếu tìm thấy ô search trang chủ qua XML
+        if search_coords:
+            self.tap(device_id, search_coords[0], search_coords[1])
+            time.sleep(1.0)
+            return True
+
+        # Dự phòng an toàn 100%: Nhấn vào Tab Home (nút Trang chủ màu đỏ ở góc dưới bên trái: x=10% width, y=95% height)
+        # Hành động này giúp tự động thoát khỏi mọi Video/Live và cuộn thẳng trang chủ lên Đỉnh!
+        update_status("Đưa trang chủ về Đỉnh (Tab Home) & Bấm ô tìm kiếm...")
+        home_tab_x = int(width * 0.10)
+        home_tab_y = int(height * 0.95)
+        self.tap(device_id, home_tab_x, home_tab_y)
+        time.sleep(1.2)
+
+        # Bấm vào ô tìm kiếm ở Đỉnh Trang chủ (x=45% width, y=5.5% height)
+        search_x = int(width * 0.45)
+        search_y = int(height * 0.055)
+        self.tap(device_id, search_x, search_y)
+        time.sleep(1.0)
+        return True
+
     def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
         def update_status(msg):
@@ -418,25 +515,24 @@ class ADBController:
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
-            cx = width // 2
+            swipe_x = int(width * 0.25)
 
-            # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
+            # Dạo trang chủ Shopee ở dải lề trái tránh chạm các ô Video ở giữa
             update_status("Dạo trang chủ Shopee...")
             for _ in range(random.randint(2, 3)):
                 check_cancelled()
                 y_start = int(height * 0.75) + random.randint(-50, 50)
                 y_end = int(height * 0.3) + random.randint(-50, 50)
-                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
+                self.swipe(device_id, swipe_x, y_start, swipe_x, y_end, duration=random.randint(600, 900))
                 time.sleep(random.uniform(2.0, 3.0))
             
             update_status("Bấm vào thanh tìm kiếm...")
-            # Click vào thanh search trên trang chủ
-            self.tap(device_id, SHOPEE_SEARCH_BOX_COORDS[0], SHOPEE_SEARCH_BOX_COORDS[1])
-            time.sleep(1.5)
+            self.ensure_shopee_search_box_click(device_id, status_callback=status_callback)
+            time.sleep(1.0)
             check_cancelled()
             
             # Click lại vào ô nhập liệu để chắc chắn bàn phím xuất hiện
-            self.tap(device_id, SHOPEE_INPUT_BOX_COORDS[0], SHOPEE_INPUT_BOX_COORDS[1])
+            self.tap(device_id, int(width * 0.45), int(height * 0.055))
             time.sleep(1.0)
             check_cancelled()
             
@@ -495,28 +591,25 @@ class ADBController:
             check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
-            
-            # Lọc popup xong, sẵn sàng tiếp tục các bước tìm kiếm
-            pass
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
-            cx = width // 2
+            swipe_x = int(width * 0.25)
 
-            # Dạo trang chủ Shopee trước khi tìm kiếm để tăng độ tự nhiên
+            # Dạo trang chủ Shopee ở dải lề trái tránh chạm các ô Video ở giữa
             update_status("Dạo trang chủ Shopee...")
             for _ in range(random.randint(2, 3)):
                 check_cancelled()
                 y_start = int(height * 0.75) + random.randint(-50, 50)
                 y_end = int(height * 0.3) + random.randint(-50, 50)
-                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
+                self.swipe(device_id, swipe_x, y_start, swipe_x, y_end, duration=random.randint(600, 900))
                 time.sleep(random.uniform(2.0, 3.0))
             
             check_cancelled()
             update_status("Bấm ô tìm kiếm...")
-            self.tap(device_id, SHOPEE_SEARCH_BOX_COORDS[0], SHOPEE_SEARCH_BOX_COORDS[1])
-            time.sleep(1.5)
-            self.tap(device_id, SHOPEE_INPUT_BOX_COORDS[0], SHOPEE_INPUT_BOX_COORDS[1])
+            self.ensure_shopee_search_box_click(device_id, status_callback=status_callback)
+            time.sleep(1.0)
+            self.tap(device_id, int(width * 0.45), int(height * 0.055))
             time.sleep(1.0)
             check_cancelled()
             
