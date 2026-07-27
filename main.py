@@ -732,21 +732,43 @@ def handle_slash_commands(message):
 def send_full_dashboard(message):
     shops_str = ", ".join(config.SHOPEE_SHOP_NAMES) if config.SHOPEE_SHOP_NAMES else "Chưa cấu hình"
     instructions = (
-        "🤖 **BOX PHONE CONTROL - DASHBOARD ĐIỀU KHIỂN RỜI** 🤖\n\n"
-        f"🏬 **Shop dự phòng hiện tại:** `{shops_str}`\n\n"
-        "📌 **1. SINH TỪ KHÓA BẰNG GEMINI AI**\n"
-        "• **Tầng 1 (SEO Expansion):** Gõ `/t1 Lotion Bôi Ghẻ` hoặc `sinh tầng 1 Lotion Bôi Ghẻ`\n"
-        "• **Tầng 2 (Bóc tách Tiêu đề thô CoT):** Gõ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab...` hoặc `sinh tầng 2 ...`\n\n"
-        
-        "📌 **2. LỆNH TÌM KIẾM & BƠM SẢN PHẨM**\n"
-        "• **Chạy TUẦN TỰ (Real-time):** `tìm tuần tự lâm đồng deriva, son môi`\n"
-        "• **Lướt bài top 1/Video:** `tìm tuần tự lâm đồng deriva video`\n"
-        "• **Chạy SONG SONG:** `tìm lâm đồng deriva`\n"
-        "• **Chạy MÁY CHỈ ĐỊNH:** `máy 10 tìm lâm đồng deriva`\n\n"
+        "🤖 **BOX PHONE CONTROL - SHOPEE KHẢI HOÀN (BẢNG ĐIỀU KHIỂN & HƯỚNG DẪN)** 🤖\n\n"
+        f"🏬 **Shop dự phòng hiện tại:** `{shops_str}`\n"
+        "----------------------------------------\n\n"
+        "📖 **HƯỚNG DẪN SỬ DỤNG CHI TIẾT TẤT CẢ LỆNH:**\n\n"
 
-        "⚙️ **3. CẤU HÌNH SHOP DỰ PHÒNG**\n"
-        "• **Đặt shop mới:** `/setshop shop1, shop2` hoặc `đặt shop shop1, shop2`\n"
-        "• **Xem danh sách shop:** `/shop`\n"
+        "🪄 **1. SINH TỪ KHÓA BẰNG GEMINI AI:**\n"
+        "• **Tầng 1 (SEO Expansion - Sinh từ khóa phụ):**\n"
+        "  Cú pháp: `/t1 <tên sản phẩm>` hoặc `sinh tầng 1 <tên sản phẩm>`\n"
+        "  _Ví dụ:_ `/t1 Lotion Bôi Ghẻ Ngứa Premiscab`\n\n"
+        "• **Tầng 2 (Bóc tách Tiêu đề thô CoT):**\n"
+        "  Cú pháp: `/t2 <tiêu đề 1>, <tiêu đề 2>` hoặc `sinh tầng 2 <tiêu đề>`\n"
+        "  _Ví dụ:_ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`\n"
+        "  *(Khi kết quả trả về, bạn chỉ cần bấm nút `▶️ Chạy Tuần Tự` hoặc `⚡ Chạy Song Song` ngay dưới tin nhắn để khởi chạy)*\n\n"
+
+        "🛒 **2. LỆNH TÌM KIẾM & TƯƠNG TÁC SHOPEE:**\n"
+        "• **Chạy Tuần Tự (Cập nhật Real-time 100%):**\n"
+        "  `tìm tuần tự lâm đồng deriva, son môi`\n"
+        "• **Chạy Lướt Top 1 / Shopee Video:**\n"
+        "  `tìm tuần tự lâm đồng deriva video`\n"
+        "• **Chạy Song Song Tất Cả Các Máy:**\n"
+        "  `tìm lâm đồng deriva`\n"
+        "• **Chạy Trên Một Máy Chỉ Định:**\n"
+        "  `máy 10 tìm lâm đồng deriva`\n\n"
+
+        "⚙️ **3. CẤU HÌNH SHOP DỰ PHÒNG:**\n"
+        "• **Cài đặt danh sách shop mới:**\n"
+        "  `/setshop khaihoanhealthcare.bt, nhathuockh.pharma` hoặc `đặt shop khaihoanhealthcare.bt, nhathuockh.pharma`\n"
+        "• **Xem danh sách shop đang lưu:**\n"
+        "  `/shop` hoặc `danh sách shop`\n\n"
+
+        "📊 **4. THIẾT BỊ & GIÁM SÁT MÀN HÌNH:**\n"
+        "• **Xem danh sách máy kết nối:** `danh sách máy` hoặc `trạng thái`\n"
+        "• **Chụp ảnh màn hình:** `chụp màn hình máy 1`\n"
+        "• **Điều khiển ứng dụng:** `mở shopee`, `đóng shopee`, `quay lại`, `trang chủ`\n\n"
+
+        "🛑 **5. DỪNG TÁC VỤ KHẨN CẤP:**\n"
+        "• Nhắn `dừng` / `stop` hoặc bấm nút **`🛑 DỪNG KHẨN CẤP`** bên dưới.\n"
     )
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     markup.add(
