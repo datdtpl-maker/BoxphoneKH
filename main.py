@@ -513,63 +513,116 @@ def check_auth(message):
         
     return True
 
+# Cập nhật cấu hình Shop dự phòng vào file .env
+def save_env_shop_names(shop_names_list):
+    """Cập nhật danh sách shop vào config và lưu xuống file .env"""
+    shop_str = ", ".join(shop_names_list)
+    config.SHOPEE_SHOP_NAMES = shop_names_list
+    config.SHOPEE_SHOP_NAMES_RAW = shop_str
+    
+    env_path = config.BASE_DIR / ".env"
+    if env_path.exists():
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            new_lines = []
+            found = False
+            for line in lines:
+                if line.startswith("SHOPEE_SHOP_NAMES="):
+                    new_lines.append(f'SHOPEE_SHOP_NAMES="{shop_str}"')
+                    found = True
+                else:
+                    new_lines.append(line)
+            if not found:
+                new_lines.append(f'SHOPEE_SHOP_NAMES="{shop_str}"')
+            env_path.write_text("\n".join(new_lines), encoding="utf-8")
+        except Exception as e:
+            print(f"[ERROR] Không thể lưu file .env: {e}")
+    else:
+        try:
+            env_path.write_text(f'SHOPEE_SHOP_NAMES="{shop_str}"\n', encoding="utf-8")
+        except Exception as e:
+            print(f"[ERROR] Không thể tạo file .env: {e}")
+
+# Lưu trữ tạm thời các phiên sinh từ khóa AI để chạy bằng Inline Button
+ai_keyword_jobs = {}
+
+def create_job_id():
+    return str(int(time.time() * 1000))[-6:]
+
 # Hàm phân tích lệnh từ ngôn ngữ tự nhiên tiếng Việt
 def parse_natural_command(text):
-    text = text.lower().strip()
+    text_lower = text.lower().strip()
     
+    # 0. Lệnh Sinh từ khóa Tầng 1 / Tầng 2
+    if text_lower.startswith("/t1 ") or text_lower.startswith("sinh tầng 1 ") or text_lower.startswith("tầng 1 "):
+        kw_text = re.sub(r"^(?:/t1|sinh tầng 1|tầng 1)\s+", "", text, flags=re.IGNORECASE).strip()
+        return {"action": "generate_t1", "raw_text": kw_text}
+
+    if text_lower.startswith("/t2 ") or text_lower.startswith("sinh tầng 2 ") or text_lower.startswith("tầng 2 "):
+        kw_text = re.sub(r"^(?:/t2|sinh tầng 2|tầng 2)\s+", "", text, flags=re.IGNORECASE).strip()
+        return {"action": "generate_t2", "raw_text": kw_text}
+
+    # Lệnh Cấu hình Shop dự phòng
+    if text_lower.startswith("/setshop ") or text_lower.startswith("cấu hình shop ") or text_lower.startswith("đặt shop ") or text_lower.startswith("set shop "):
+        shops_raw = re.sub(r"^(?:/setshop|cấu hình shop|đặt shop|set shop)\s+", "", text, flags=re.IGNORECASE).strip()
+        return {"action": "set_shop", "shops_raw": shops_raw}
+
+    if text_lower in ["/shop", "danh sách shop", "xem shop", "shop"]:
+        return {"action": "get_shop"}
+
     # 1. Trạng thái / Danh sách máy
-    if any(k in text for k in ["danh sách", "liệt kê", "trạng thái", "devices", "status", "list"]):
+    if any(k in text_lower for k in ["danh sách máy", "liệt kê", "trạng thái", "devices", "status", "list"]):
         return {"action": "list_devices"}
         
     # 2. Chụp màn hình điện thoại
-    m_screenshot = re.search(r"(?:chụp màn hình|chụp ảnh|chụp)\s*(?:máy|máy số|số|device)?\s*(\d+)", text)
+    m_screenshot = re.search(r"(?:chụp màn hình|chụp ảnh|chụp)\s*(?:máy|máy số|số|device)?\s*(\d+)", text_lower)
     if m_screenshot:
         return {"action": "screenshot", "device_idx": int(m_screenshot.group(1))}
         
     # 3. Phím Quay lại (Back)
-    if any(k in text for k in ["quay lại", "nút quay lại", "back", "trở về"]):
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if any(k in text_lower for k in ["quay lại", "nút quay lại", "back", "trở về"]):
+        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m.group(1)) if m else None
         return {"action": "back", "device_idx": device_idx}
         
     # 4. Phím Trang chủ (Home)
-    if any(k in text for k in ["trang chủ", "nút home", "home", "màn hình chính"]):
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if any(k in text_lower for k in ["trang chủ", "nút home", "home", "màn hình chính"]):
+        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m.group(1)) if m else None
         return {"action": "home", "device_idx": device_idx}
         
     # 5. Mở ứng dụng Shopee
-    if "mở shopee" in text or "mở ứng dụng shopee" in text or "chạy shopee" in text:
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if "mở shopee" in text_lower or "mở ứng dụng shopee" in text_lower or "chạy shopee" in text_lower:
+        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m.group(1)) if m else None
         return {"action": "open_shopee", "device_idx": device_idx}
         
     # 6. Đóng ứng dụng Shopee
-    if "đóng shopee" in text or "tắt shopee" in text or "đóng ứng dụng shopee" in text:
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if "đóng shopee" in text_lower or "tắt shopee" in text_lower or "đóng ứng dụng shopee" in text_lower:
+        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m.group(1)) if m else None
         return {"action": "close_shopee", "device_idx": device_idx}
 
     # 7. Tìm kiếm sản phẩm trên Shopee
     shopee_keywords = ["shopee", "tìm", "tìm kiếm"]
-    if any(k in text for k in shopee_keywords):
-        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if any(k in text_lower for k in shopee_keywords):
+        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m_device.group(1)) if m_device else None
         
         keyword = ""
-        m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+?)\s+(?:trên|ở)\s+shopee", text)
+        m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+?)\s+(?:trên|ở)\s+shopee", text_lower)
         if m_search:
             keyword = m_search.group(1)
         else:
-            m_search = re.search(r"shopee\s+(?:tìm kiếm|tìm)\s+(.+)", text)
+            m_search = re.search(r"shopee\s+(?:tìm kiếm|tìm)\s+(.+)", text_lower)
             if m_search:
                 keyword = m_search.group(1)
             else:
-                m_search = re.search(r"(?:tìm kiếm|tìm)\s+shopee\s+(.+)", text)
+                m_search = re.search(r"(?:tìm kiếm|tìm)\s+shopee\s+(.+)", text_lower)
                 if m_search:
                     keyword = m_search.group(1)
                 else:
-                    m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+)", text)
+                    m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+)", text_lower)
                     if m_search:
                         keyword = m_search.group(1)
         
@@ -577,10 +630,10 @@ def parse_natural_command(text):
             keyword = re.sub(r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+", "", keyword)
             keyword = keyword.strip()
             
-            if "lâm đồng" in text or "lam dong" in text:
+            if "lâm đồng" in text_lower or "lam dong" in text_lower:
                 click_first_item = False
                 first_item_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-                if any(ind in text for ind in first_item_indicators):
+                if any(ind in text_lower for ind in first_item_indicators):
                     click_first_item = True
                 
                 keyword_clean = re.sub(r"(?:tỉnh\s+)?(?:lâm\s+đồng|lam\s+dong)", "", keyword, flags=re.IGNORECASE)
@@ -595,7 +648,7 @@ def parse_natural_command(text):
                 if not keywords:
                     keywords = [keyword_clean]
                 
-                if any(k in text for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
+                if any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
                     return {
                         "action": "shopee_search_lamdong_sequential", 
                         "keywords": keywords, 
@@ -615,60 +668,305 @@ def parse_natural_command(text):
             return {"action": "shopee_search", "keywords": keywords, "device_idx": device_idx}
             
     # 8. Lệnh Click tọa độ thủ công
-    m_click = re.search(r"click\s+(\d+)\s+(\d+)(?:\s+(?:máy|máy số|số|device)?\s*(\d+))?", text)
+    m_click = re.search(r"click\s+(\d+)\s+(\d+)(?:\s+(?:máy|máy số|số|device)?\s*(\d+))?", text_lower)
     if m_click:
         x, y = int(m_click.group(1)), int(m_click.group(2))
         device_idx = int(m_click.group(3)) if m_click.group(3) else None
         return {"action": "click", "x": x, "y": y, "device_idx": device_idx}
 
     # 9. Lệnh Nhập text thủ công
-    m_input = re.search(r"nhập\s+(.+?)(?:\s+(?:máy|máy số|số|device)\s*(\d+))?$", text)
+    m_input = re.search(r"nhập\s+(.+?)(?:\s+(?:máy|máy số|số|device)\s*(\d+))?$", text_lower)
     if m_input:
         input_text_val = m_input.group(1).strip()
         device_idx = int(m_input.group(2)) if m_input.group(2) else None
         return {"action": "input", "text": input_text_val, "device_idx": device_idx}
 
     # Lệnh Dừng tất cả các tác vụ đang chạy
-    if any(k in text for k in ["dừng chạy", "dừng tất cả", "dừng", "hủy chạy", "dung chay", "huy chay", "stop"]):
+    if any(k in text_lower for k in ["dừng chạy", "dừng tất cả", "dừng", "hủy chạy", "dung chay", "huy chay", "stop"]):
         return {"action": "stop_all"}
 
     # 10. Tắt xoay màn hình
-    if any(k in text for k in ["tắt xoay màn hình", "tắt xoay", "tắt tự động xoay", "khóa màn hình dọc"]):
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text)
+    if any(k in text_lower for k in ["tắt xoay màn hình", "tắt xoay", "tắt tự động xoay", "khóa màn hình dọc"]):
+        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
         device_idx = int(m.group(1)) if m else None
         return {"action": "disable_rotation", "device_idx": device_idx}
 
     return None
 
-# Xử lý lệnh /start và /help
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
+# Xử lý lệnh /start, /help và /menu
+@bot.message_handler(commands=['start', 'help', 'menu', 't1', 't2', 'setshop', 'shop'])
+def handle_slash_commands(message):
     if not check_auth(message):
         return
 
+    cmd = message.text.strip()
+    cmd_lower = cmd.lower()
+
+    if cmd_lower.startswith("/t1"):
+        kw_text = cmd[3:].strip()
+        if not kw_text:
+            bot.reply_to(message, "⚠️ Vui lòng nhập từ khóa chính sau lệnh `/t1`, ví dụ:\n`/t1 Lotion Bôi Ghẻ Ngứa`", parse_mode="Markdown")
+            return
+        handle_t1_generation(message, kw_text)
+
+    elif cmd_lower.startswith("/t2"):
+        kw_text = cmd[3:].strip()
+        if not kw_text:
+            bot.reply_to(message, "⚠️ Vui lòng nhập tiêu đề thô sau lệnh `/t2`, ví dụ:\n`/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`", parse_mode="Markdown")
+            return
+        handle_t2_generation(message, kw_text)
+
+    elif cmd_lower.startswith("/setshop"):
+        shops_raw = cmd[8:].strip()
+        if not shops_raw:
+            bot.reply_to(message, "⚠️ Vui lòng nhập danh sách shop sau lệnh `/setshop`, ví dụ:\n`/setshop khaihoanhealthcare.bt, nhathuockh.pharma`", parse_mode="Markdown")
+            return
+        handle_set_shop(message, shops_raw)
+
+    elif cmd_lower.startswith("/shop"):
+        handle_get_shop(message)
+
+    elif cmd_lower in ["/start", "/help", "/menu"]:
+        send_full_dashboard(message)
+
+def send_full_dashboard(message):
+    shops_str = ", ".join(config.SHOPEE_SHOP_NAMES) if config.SHOPEE_SHOP_NAMES else "Chưa cấu hình"
     instructions = (
-        "🤖 **BOX PHONE CONTROL - SHOPEE KHẢI HOÀN** 🤖\n\n"
-        "Chào mừng Admin! Dưới đây là bảng hướng dẫn điều khiển hệ thống Box Phone tự động:\n\n"
+        "🤖 **BOX PHONE CONTROL - DASHBOARD ĐIỀU KHIỂN RỜI** 🤖\n\n"
+        f"🏬 **Shop dự phòng hiện tại:** `{shops_str}`\n\n"
+        "📌 **1. SINH TỪ KHÓA BẰNG GEMINI AI**\n"
+        "• **Tầng 1 (SEO Expansion):** Gõ `/t1 Lotion Bôi Ghẻ` hoặc `sinh tầng 1 Lotion Bôi Ghẻ`\n"
+        "• **Tầng 2 (Bóc tách Tiêu đề thô CoT):** Gõ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab...` hoặc `sinh tầng 2 ...`\n\n"
         
-        "📌 **1. LỆNH TÌM KIẾM & BƠM SẢN PHẨM**\n"
-        "👉 **Chạy TUẦN TỰ (Cập nhật Real-time 100%):**\n"
-        "• Lướt tìm shop Lâm Đồng: `tìm tuần tự lâm đồng deriva, son môi`\n"
-        "• Lướt thẳng bài top 1/Video: `tìm tuần tự lâm đồng deriva video`\n"
-        "👉 **Chạy SONG SONG:**\n"
-        "• Lướt tìm shop Lâm Đồng: `tìm lâm đồng deriva`\n"
-        "👉 **Chạy trên MỘT MÁY chỉ định (Máy S10):**\n"
-        "• Lướt tìm shop Lâm Đồng: `máy 10 tìm lâm đồng deriva`\n\n"
-        
-        "🛑 **DỪNG CHẠY KHẨN CẤP:**\n"
-        "• Bấm nút `🛑 DỪNG CHẠY KHẨN CẤP` hoặc gõ `dừng`, `stop`.\n\n"
-        
-        "📸 **2. CHỤP ẢNH MÀN HÌNH GIÁM SÁT**\n"
-        "• Xem màn hình máy cụ thể: `chụp màn hình máy 16`\n\n"
-        
-        "📊 **3. TRẠNG THÁI HỆ THỐNG**\n"
-        "• Xem danh sách kết nối: `trạng thái` hoặc `danh sách máy`\n"
+        "📌 **2. LỆNH TÌM KIẾM & BƠM SẢN PHẨM**\n"
+        "• **Chạy TUẦN TỰ (Real-time):** `tìm tuần tự lâm đồng deriva, son môi`\n"
+        "• **Lướt bài top 1/Video:** `tìm tuần tự lâm đồng deriva video`\n"
+        "• **Chạy SONG SONG:** `tìm lâm đồng deriva`\n"
+        "• **Chạy MÁY CHỈ ĐỊNH:** `máy 10 tìm lâm đồng deriva`\n\n"
+
+        "⚙️ **3. CẤU HÌNH SHOP DỰ PHÒNG**\n"
+        "• **Đặt shop mới:** `/setshop shop1, shop2` hoặc `đặt shop shop1, shop2`\n"
+        "• **Xem danh sách shop:** `/shop`\n"
     )
-    bot.reply_to(message, instructions, parse_mode="Markdown")
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("🪄 Sinh Tầng 1 (SEO)", callback_data="btn_t1_prompt"),
+        telebot.types.InlineKeyboardButton("🧠 Sinh Tầng 2 (Tiêu đề)", callback_data="btn_t2_prompt"),
+        telebot.types.InlineKeyboardButton("🏬 Danh sách Shop", callback_data="btn_shop"),
+        telebot.types.InlineKeyboardButton("📊 Danh sách Máy", callback_data="btn_list"),
+        telebot.types.InlineKeyboardButton("📸 Chụp màn hình S1", callback_data="btn_screenshot_1"),
+        telebot.types.InlineKeyboardButton("🛑 DỪNG KHẨN CẤP", callback_data="stop_all")
+    )
+    bot.reply_to(message, instructions, parse_mode="Markdown", reply_markup=markup)
+
+def handle_t1_generation(message, kw_text):
+    status_msg = bot.reply_to(message, f"🪄 [Gemini AI] Đang bóc tách & sinh từ khóa **Tầng 1 (SEO)** cho: `{kw_text}`...", parse_mode="Markdown")
+    
+    titles = [k.strip() for k in re.split(r'[,;\n|]', kw_text) if k.strip()]
+    generated_kws = config.generate_keywords_via_gemini(config.GEMINI_API_KEY, titles)
+    
+    if not generated_kws:
+        safe_edit_message("❌ Gemini AI không sinh được từ khóa Tầng 1. Vui lòng kiểm tra lại GEMINI_API_KEY.", message.chat.id, status_msg.message_id)
+        return
+
+    job_id = create_job_id()
+    ai_keyword_jobs[job_id] = {
+        "tier": 1,
+        "keywords": generated_kws,
+        "raw_text": kw_text
+    }
+
+    kw_list_str = "\n".join([f"{idx+1}. `{kw}`" for idx, kw in enumerate(generated_kws[:15])])
+    if len(generated_kws) > 15:
+        kw_list_str += f"\n_... và {len(generated_kws) - 15} từ khóa khác._"
+
+    res_text = (
+        f"✅ **ĐÃ SINH {len(generated_kws)} TỪ KHÓA TẦNG 1 (SEO EXPANSION)**\n\n"
+        f"{kw_list_str}\n\n"
+        f"👇 **Bấm nút dưới đây để khởi chạy ngay trên Box Phone:**"
+    )
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("▶️ Chạy Tuần Tự (Tầng 1)", callback_data=f"t1_seq:{job_id}"),
+        telebot.types.InlineKeyboardButton("⚡ Chạy Song Song (Tầng 1)", callback_data=f"t1_par:{job_id}")
+    )
+    safe_edit_message(res_text, message.chat.id, status_msg.message_id, reply_markup=markup, parse_mode="Markdown")
+
+def handle_t2_generation(message, kw_text):
+    status_msg = bot.reply_to(message, f"🧠 [Gemini AI] Đang phân tích CoT & sinh từ khóa **Tầng 2 (Bóc tách Tiêu đề)** cho:\n`{kw_text}`...", parse_mode="Markdown")
+    
+    titles = [k.strip() for k in re.split(r'[\n;]', kw_text) if k.strip()]
+    if len(titles) == 1 and "," in kw_text:
+        titles = [k.strip() for k in kw_text.split(",") if k.strip()]
+
+    generated_kws = config.generate_keywords_tier2_via_gemini(config.GEMINI_API_KEY, titles)
+    
+    if not generated_kws:
+        safe_edit_message("❌ Gemini AI không sinh được từ khóa Tầng 2. Vui lòng kiểm tra lại GEMINI_API_KEY.", message.chat.id, status_msg.message_id)
+        return
+
+    job_id = create_job_id()
+    ai_keyword_jobs[job_id] = {
+        "tier": 2,
+        "keywords": generated_kws,
+        "raw_text": kw_text
+    }
+
+    kw_list_str = "\n".join([f"{idx+1}. `{kw}`" for idx, kw in enumerate(generated_kws[:15])])
+    if len(generated_kws) > 15:
+        kw_list_str += f"\n_... và {len(generated_kws) - 15} từ khóa khác._"
+
+    res_text = (
+        f"✅ **ĐÃ SINH {len(generated_kws)} TỪ KHÓA TẦNG 2 (BÓC TÁCH TIÊU ĐỀ)**\n\n"
+        f"{kw_list_str}\n\n"
+        f"👇 **Bấm nút dưới đây để khởi chạy ngay trên Box Phone:**"
+    )
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("▶️ Chạy Tuần Tự (Tầng 2)", callback_data=f"t2_seq:{job_id}"),
+        telebot.types.InlineKeyboardButton("⚡ Chạy Song Song (Tầng 2)", callback_data=f"t2_par:{job_id}")
+    )
+    safe_edit_message(res_text, message.chat.id, status_msg.message_id, reply_markup=markup, parse_mode="Markdown")
+
+def handle_set_shop(message, shops_raw):
+    shop_list = [s.strip() for s in re.split(r'[,;\n|]', shops_raw) if s.strip()]
+    if not shop_list:
+        bot.reply_to(message, "❌ Danh sách shop không hợp lệ.")
+        return
+    save_env_shop_names(shop_list)
+    shops_str = ", ".join(shop_list)
+    bot.reply_to(message, f"✅ **ĐÃ CẬP NHẬT DANH SÁCH SHOP DỰ PHÒNG!**\n\n🏬 Danh sách shop mới: `{shops_str}`\n\n_Đã lưu trực tiếp vào cấu hình hệ thống & file .env._", parse_mode="Markdown")
+
+def handle_get_shop(message):
+    if not config.SHOPEE_SHOP_NAMES:
+        bot.reply_to(message, "⚠️ Chưa có shop dự phòng nào được cấu hình. Sử dụng `/setshop shop1, shop2` để thêm shop.", parse_mode="Markdown")
+        return
+    shops_str = "\n".join([f"• `{s}`" for s in config.SHOPEE_SHOP_NAMES])
+    bot.reply_to(message, f"🏬 **DANH SÁCH SHOP DỰ PHÒNG HIỆN TẠI ({len(config.SHOPEE_SHOP_NAMES)} Shop):**\n\n{shops_str}", parse_mode="Markdown")
+
+# Xử lý tất cả Inline Keyboard Callbacks
+@bot.callback_query_handler(func=lambda call: True)
+def handle_inline_callbacks(call):
+    data = call.data
+    chat_id = call.message.chat.id
+    
+    if data == "btn_t1_prompt":
+        bot.answer_callback_query(call.id)
+        safe_send_message(chat_id, "💡 **HƯỚNG DẪN SINH TỪ KHÓA TẦNG 1:**\n\nGõ theo cú pháp: `/t1 <tên sản phẩm>` hoặc `sinh tầng 1 <tên sản phẩm>`\n\n_Ví dụ:_ `/t1 Lotion Bôi Ghẻ Ngứa Premiscab`", parse_mode="Markdown")
+
+    elif data == "btn_t2_prompt":
+        bot.answer_callback_query(call.id)
+        safe_send_message(chat_id, "💡 **HƯỚNG DẪN SINH TỪ KHÓA TẦNG 2:**\n\nGõ theo cú pháp: `/t2 <tiêu đề 1>, <tiêu đề 2>` hoặc `sinh tầng 2 <tiêu đề>`\n\n_Ví dụ:_ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`", parse_mode="Markdown")
+
+    elif data == "btn_shop":
+        bot.answer_callback_query(call.id)
+        handle_get_shop(call.message)
+
+    elif data == "btn_list":
+        bot.answer_callback_query(call.id)
+        devices = get_ordered_devices()
+        res = f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI ({len(devices)} máy):**\n\n"
+        for d in devices:
+            res += f"📱 **Máy {get_device_name(d)}**: ID: `{d}`\n"
+        safe_send_message(chat_id, res, parse_mode="Markdown")
+
+    elif data == "btn_screenshot_1":
+        bot.answer_callback_query(call.id)
+        devices = get_ordered_devices()
+        if not devices:
+            safe_send_message(chat_id, "❌ Không có máy nào đang kết nối.")
+            return
+        tgt_dev = devices[0]
+        tgt_name = get_device_name(tgt_dev)
+        temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, f"screenshot_{tgt_name}.png")
+        success, result = adb.take_screenshot(tgt_dev, local_path)
+        if success:
+            with open(local_path, 'rb') as photo:
+                bot.send_photo(chat_id, photo, caption=f"🖼️ Ảnh chụp màn hình **Máy {tgt_name}**")
+            try:
+                os.remove(local_path)
+            except Exception:
+                pass
+
+    elif data.startswith("t1_seq:") or data.startswith("t2_seq:"):
+        bot.answer_callback_query(call.id)
+        job_id = data.split(":")[1]
+        if job_id not in ai_keyword_jobs:
+            safe_send_message(chat_id, "⚠️ Phiên sinh từ khóa này đã hết hạn. Vui lòng gõ `/t1` hoặc `/t2` để sinh từ khóa mới.")
+            return
+        job = ai_keyword_jobs[job_id]
+        kws = job["keywords"]
+        tier_label = f"Tầng {job['tier']}"
+        devices = get_ordered_devices()
+        
+        global sequential_thread
+        if sequential_thread and sequential_thread.is_alive():
+            safe_send_message(chat_id, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng gõ 'dừng' trước.")
+        else:
+            safe_send_message(chat_id, f"🚀 **KHỞI CHẠY TUẦN TỰ {tier_label.upper()}**\n\nĐang quét trên {len(devices)} máy với {len(kws)} từ khóa AI...", parse_mode="Markdown")
+            sequential_thread = threading.Thread(
+                target=run_sequential_shopee_search, 
+                args=(call.message, kws, devices, False)
+            )
+            sequential_thread.daemon = True
+            sequential_thread.start()
+
+    elif data.startswith("t1_par:") or data.startswith("t2_par:"):
+        bot.answer_callback_query(call.id)
+        job_id = data.split(":")[1]
+        if job_id not in ai_keyword_jobs:
+            safe_send_message(chat_id, "⚠️ Phiên sinh từ khóa này đã hết hạn. Vui lòng gõ `/t1` hoặc `/t2` để sinh từ khóa mới.")
+            return
+        job = ai_keyword_jobs[job_id]
+        kws = job["keywords"]
+        tier_label = f"Tầng {job['tier']}"
+        devices = get_ordered_devices()
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
+        status_msg = safe_send_message(chat_id, f"🚀 **KHỞI CHẠY SONG SONG {tier_label.upper()}**\n\nĐang chạy song song trên {len(devices)} máy với {len(kws)} từ khóa AI...", parse_mode="Markdown", reply_markup=markup)
+        
+        def run_search_parallel(device_id):
+            dev_name = get_device_name(device_id)
+            current_keyword = random.choice(kws)
+            dev_start = time.time()
+            success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=False)
+            dev_dur = time.time() - dev_start
+            send_device_finished_card(chat_id, dev_name, device_id, current_keyword, success, err, dev_dur)
+            return dev_name, current_keyword, success, err
+
+        def run_par_bg():
+            results = []
+            with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+                futures = [executor.submit(run_search_parallel, dev) for dev in devices]
+                for future in futures:
+                    results.append(future.result())
+            success_count = sum(1 for r in results if r[2])
+            summary = f"🏁 **HOÀN THÀNH CHẠY SONG SONG {tier_label.upper()} ({success_count}/{len(devices)} MÁY THÀNH CÔNG)**"
+            safe_edit_message(summary, chat_id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
+
+        threading.Thread(target=run_par_bg, daemon=True).start()
+
+    elif data == "stop_all":
+        bot.answer_callback_query(call.id)
+        global cancel_sequential, cancel_flag
+        cancel_sequential = True
+        cancel_flag = True
+        status_msg = safe_send_message(chat_id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
+        
+        def reset_cancel_flags():
+            time.sleep(3.5)
+            global cancel_sequential, cancel_flag
+            cancel_sequential = False
+            cancel_flag = False
+            try:
+                safe_edit_message("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", chat_id, status_msg.message_id)
+            except Exception:
+                pass
+                
+        threading.Thread(target=reset_cancel_flags, daemon=True).start()
 
 # Xử lý tất cả tin nhắn văn bản (Ngôn ngữ tự nhiên)
 @bot.message_handler(func=lambda message: True)
@@ -680,7 +978,25 @@ def handle_all_messages(message):
     cmd = parse_natural_command(text)
     
     if not cmd:
-        bot.reply_to(message, "❓ Bot chưa hiểu câu lệnh này của bạn. Bạn gõ `/help` để xem danh sách các câu lệnh mẫu nhé.")
+        bot.reply_to(message, "❓ Bot chưa hiểu câu lệnh này. Bạn gõ `/menu` hoặc `/help` để xem danh sách các câu lệnh nhé.")
+        return
+
+    action = cmd["action"]
+
+    if action == "generate_t1":
+        handle_t1_generation(message, cmd["raw_text"])
+        return
+
+    if action == "generate_t2":
+        handle_t2_generation(message, cmd["raw_text"])
+        return
+
+    if action == "set_shop":
+        handle_set_shop(message, cmd["shops_raw"])
+        return
+
+    if action == "get_shop":
+        handle_get_shop(message)
         return
 
     devices = get_ordered_devices()
@@ -688,7 +1004,6 @@ def handle_all_messages(message):
         bot.reply_to(message, "❌ Không tìm thấy thiết bị điện thoại nào đang kết nối. Vui lòng kiểm tra lại dây cáp.")
         return
 
-    action = cmd["action"]
     device_idx = cmd.get("device_idx")
 
     target_devices = []
