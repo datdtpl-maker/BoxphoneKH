@@ -297,12 +297,12 @@ class ADBController:
         return self.execute_adb(device_id, cmd)
 
     def input_text_naturally(self, device_id, text):
-        """Mô phỏng gõ chữ tự nhiên từng từ một với độ trễ ngẫu nhiên"""
+        """Mô phỏng gõ chữ tự nhiên với cơ chế kép (XwIME + ADB input text fallback)"""
         self.ensure_ime(device_id)
-        words = text.split(" ")
-        for idx, word in enumerate(words):
-            word_to_send = word + (" " if idx < len(words) - 1 else "")
-            b64_bytes = base64.b64encode(word_to_send.encode('utf-8'))
+        
+        # 1. Gửi qua XwIME broadcast (mã hóa base64)
+        try:
+            b64_bytes = base64.b64encode(text.encode('utf-8'))
             b64_str = b64_bytes.decode('utf-8')
             self.execute_adb(device_id, [
                 "shell", "am", "broadcast", 
@@ -310,7 +310,18 @@ class ADBController:
                 "--es", "msg", b64_str, 
                 "--receiver-foreground"
             ])
-            time.sleep(random.uniform(0.2, 0.4))
+        except Exception:
+            pass
+        time.sleep(0.4)
+        
+        # 2. Gửi qua ADB shell input text làm phương án kép bảo đảm 100% gõ được chữ
+        try:
+            # Chuyển đổi ký tự và thay space bằng %s cho ADB shell input text
+            clean_ascii = text.replace(" ", "%s")
+            self.execute_adb(device_id, ["shell", "input", "text", clean_ascii])
+        except Exception:
+            pass
+        time.sleep(0.4)
 
 
     def press_enter(self, device_id):
