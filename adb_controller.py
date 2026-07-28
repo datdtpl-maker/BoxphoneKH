@@ -1291,15 +1291,86 @@ class ADBController:
             return False, f"Lỗi dự phòng: {str(e)}"
 
     # ================= AUTOMATION BƠM TIKTOK 3 BƯỚC =================
+    def dismiss_tiktok_location_popup(self, device_id):
+        """
+        Tự động phát hiện và xử lý Bảng thông báo Quyền Truy Cập Vị Trí của Android/TikTok:
+        1. Bấm checkbox "Không hỏi lại" (Don't ask again).
+        2. Bấm nút "Từ chối" (Deny / Don't allow).
+        """
+        width, height = self.get_screen_size(device_id)
+        xml_file = f"/sdcard/dump_loc_popup_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_loc_popup_{device_id}.xml")
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        found_popup = False
+        dont_ask_coords = None
+        deny_coords = None
+        
+        if pull_code == 0 and os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                
+                # Kiểm tra xem có popup hỏi quyền vị trí không
+                for elem in root.iter():
+                    text = (elem.get('text', '') or elem.get('content-desc', '')).lower()
+                    if any(k in text for k in ["vị trí", "location", "truy cập vào vị trí", "thiết bị này"]):
+                        found_popup = True
+                    
+                    if any(k in text for k in ["không hỏi lại", "don't ask again", "remember choice"]):
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            dont_ask_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+                    if any(k in text for k in ["từ chối", "deny", "don't allow"]):
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            deny_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+
+        if found_popup or dont_ask_coords or deny_coords:
+            print(f"[Device {device_id[:6]}] Phát hiện Popup hỏi quyền Vị trí! Tiến hành Từ chối...")
+            # 1. Bấm Không hỏi lại
+            if not dont_ask_coords:
+                dont_ask_coords = (int(width * 0.25), int(height * 0.54))
+            self.tap(device_id, dont_ask_coords[0], dont_ask_coords[1])
+            time.sleep(0.5)
+
+            # 2. Bấm Từ chối
+            if not deny_coords:
+                deny_coords = (int(width * 0.58), int(height * 0.60))
+            self.tap(device_id, deny_coords[0], deny_coords[1])
+            time.sleep(1.0)
+            return True
+        return False
+
     def launch_tiktok(self, device_id):
         """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
         code, stdout, stderr = self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"])
         if code != 0 or "Error" in stdout:
             self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE_ALT, "-c", "android.intent.category.LAUNCHER", "1"])
-        time.sleep(4.0)
+        time.sleep(3.5)
+        # Tự động từ chối popup vị trí nếu hiển thị lúc mở app
+        self.dismiss_tiktok_location_popup(device_id)
 
     def find_and_click_tiktok_search(self, device_id):
         """Tìm và bấm vào biểu tượng Kính Lúp (Search Icon) trên TikTok"""
+        # Kiểm tra xử lý popup vị trí trước khi click search
+        self.dismiss_tiktok_location_popup(device_id)
+        
         width, height = self.get_screen_size(device_id)
         xml_file = f"/sdcard/dump_tiktok_search_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
