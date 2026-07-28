@@ -1413,6 +1413,58 @@ class ADBController:
         self.tap(device_id, int(width * 0.45), int(height * 0.055))
         time.sleep(1.0)
 
+    def clear_tiktok_search_input(self, device_id):
+        """
+        Bấm nút (X) để xóa sạch toàn bộ từ khóa cũ trong ô tìm kiếm TikTok trước khi nhập từ khóa mới.
+        """
+        width, height = self.get_screen_size(device_id)
+        
+        # 1. Bấm vào ô tìm kiếm để active
+        self.tap(device_id, int(width * 0.50), int(height * 0.055))
+        time.sleep(0.8)
+
+        # 2. Bấm nút (X) xóa từ khóa ở góc phải ô tìm kiếm (x ~ 81% width, y ~ 5.5% height)
+        clear_x = int(width * 0.81)
+        clear_y = int(height * 0.055)
+        
+        # Thử tìm nút (X) qua XML UI Dump trước
+        xml_file = f"/sdcard/dump_clear_btn_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_clear_{device_id}.xml")
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        if pull_code == 0 and os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    res_id = (elem.get('resource-id', '') or elem.get('content-desc', '')).lower()
+                    if any(k in res_id for k in ["clear", "close", "delete", "remove", "clean"]):
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            if (y1 + y2) // 2 < 250:
+                                clear_x = (x1 + x2) // 2
+                                clear_y = (y1 + y2) // 2
+                                break
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+
+        # Click nút (X) để xóa sạch ô nhập
+        self.tap(device_id, clear_x, clear_y)
+        time.sleep(0.8)
+        
+        # Xóa thêm bằng ADB Keyevent Delete dự phòng
+        self.clear_input_field(device_id)
+        time.sleep(0.5)
+
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Phân tích kết quả tìm kiếm TikTok và click vào Thẻ Người dùng / Kênh Khải Hoàn Skincare"""
         width, height = self.get_screen_size(device_id)
@@ -1528,7 +1580,7 @@ class ADBController:
             check_cancelled()
 
             # Nhập từ khóa mồi
-            self.clear_input_field(device_id)
+            self.clear_tiktok_search_input(device_id)
             self.input_text_naturally(device_id, seed_kw)
             time.sleep(1.0)
             self.press_enter(device_id)
@@ -1547,13 +1599,12 @@ class ADBController:
 
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU (KHẢI HOÀN SKINCARE) =================
             check_cancelled()
-            update_status(f"[TikTok B3] Tìm kiếm Kênh mục tiêu '{target_channel}'...")
+            update_status(f"[TikTok B3] Xóa từ khóa mồi cũ & Tìm Kênh mục tiêu '{target_channel}'...")
             
-            # Click lại ô tìm kiếm ở trên đỉnh trang search
-            self.tap(device_id, int(width * 0.45), int(height * 0.055))
-            time.sleep(1.0)
+            # Bấm nút (X) để xóa sạch từ khóa mồi cũ trước khi gõ tên kênh
+            self.clear_tiktok_search_input(device_id)
+            check_cancelled()
 
-            self.clear_input_field(device_id)
             self.input_text_naturally(device_id, target_channel)
             time.sleep(1.0)
             self.press_enter(device_id)
