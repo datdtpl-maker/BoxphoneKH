@@ -70,10 +70,8 @@ Hệ thống tự động hóa điều khiển hàng loạt điện thoại Andr
 
 Gửi lệnh `/start` hoặc `/help` trong bot Telegram để lấy hướng dẫn sử dụng nhanh:
 
-### 🎯 1. Quy Trình Quét Shop Lâm Đồng
+### 🎯 1. Quy Trình Quét Shop
 - **Chạy lần lượt từng máy (Nghỉ 60-90s giữa các máy - Rất khuyên dùng để an toàn IP):**
-  - Lệnh: `tìm tuần tự lâm đồng [từ khóa 1, từ khóa 2, ...]` (phân cách bằng dấu phẩy `,`, `;` hoặc `|`).
-  - *Ví dụ:* `tìm tuần tự lâm đồng deriva, son môi, kem chống nắng`.
 - **Chạy song song tất cả các máy cùng lúc:**
   - Lệnh: `tìm lâm đồng [từ khóa 1, từ khóa 2, ...]`
 - **Chạy trên 1 máy cụ thể (ví dụ máy 5):**
