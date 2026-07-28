@@ -1290,6 +1290,245 @@ class ADBController:
         except Exception as e:
             return False, f"Lỗi dự phòng: {str(e)}"
 
+    # ================= AUTOMATION BƠM TIKTOK 3 BƯỚC =================
+    def launch_tiktok(self, device_id):
+        """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
+        code, stdout, stderr = self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"])
+        if code != 0 or "Error" in stdout:
+            self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE_ALT, "-c", "android.intent.category.LAUNCHER", "1"])
+        time.sleep(4.0)
+
+    def find_and_click_tiktok_search(self, device_id):
+        """Tìm và bấm vào biểu tượng Kính Lúp (Search Icon) trên TikTok"""
+        width, height = self.get_screen_size(device_id)
+        xml_file = f"/sdcard/dump_tiktok_search_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_tt_search_{device_id}.xml")
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        coords = None
+        if pull_code == 0 and os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    desc = (elem.get('content-desc', '') or elem.get('text', '') or elem.get('resource-id', '')).lower()
+                    if any(k in desc for k in ["search", "tìm kiếm", "et_search", "search_btn", "img_search"]):
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            cy = (y1 + y2) // 2
+                            cx = (x1 + x2) // 2
+                            if cy < 300:
+                                coords = (cx, cy)
+                                break
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+        if not coords:
+            # Tọa độ dự phòng góc Kính Lúp TikTok (x=90% width, y=5.5% height)
+            coords = (int(width * 0.90), int(height * 0.055))
+            
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(1.5)
+
+    def find_and_click_tiktok_channel(self, device_id, channel_name):
+        """Phân tích kết quả tìm kiếm TikTok và click vào Thẻ Người dùng / Kênh Khải Hoàn Skincare"""
+        width, height = self.get_screen_size(device_id)
+        xml_file = f"/sdcard/dump_tt_channel_{device_id}.xml"
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        
+        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_tt_channel_{device_id}.xml")
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        
+        coords = None
+        clean_ch = channel_name.lower().strip()
+        words = [w for w in clean_ch.split() if len(w) > 1]
+        
+        if pull_code == 0 and os.path.exists(local_xml):
+            try:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                
+                # Tìm element text hoặc desc chứa tên kênh Khải Hoàn Skincare
+                for elem in root.iter():
+                    text = (elem.get('text', '') or elem.get('content-desc', '')).lower()
+                    if words and any(w in text for w in words):
+                        bounds = elem.get('bounds', '')
+                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            cy = (y1 + y2) // 2
+                            cx = (x1 + x2) // 2
+                            if 200 < cy < 1600:
+                                coords = (cx, cy)
+                                print(f"[Device {device_id[:6]}] Tìm thấy Kênh TikTok '{text[:25]}' tại ({cx}, {cy}).")
+                                break
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+
+        if not coords:
+            # Tọa độ dự phòng Thẻ Kênh Người dùng đầu tiên (x=45% width, y=30% height)
+            coords = (int(width * 0.45), int(height * 0.30))
+            
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(3.5)
+
+    def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
+        """
+        Quy trình tự động hóa Bơm TikTok 3 Bước chuẩn chuyên nghiệp:
+        Bước 1: Dạo Trang chủ (For You), lướt 1-10 video, dừng ngẫu nhiên 1-3 video (nghỉ min_delay - max_delay s)
+        Bước 2: Bấm Kính lúp, gõ từ khóa mồi (seed keywords), lướt feed kết quả 15-30s mồi kênh
+        Bước 3: Tìm tên kênh mục tiêu (Khải Hoàn Skincare PT), click vào Kênh, chọn 1-2 video trong lưới để lướt xem
+        """
+        def update_status(msg):
+            if status_callback:
+                status_callback(device_id, msg)
+
+        def check_cancelled():
+            if is_cancelled and is_cancelled():
+                raise Exception("Bị dừng bởi người dùng")
+
+        if not seed_keywords:
+            seed_keywords = [k.strip() for k in config.TIKTOK_SEED_KEYWORDS_DEFAULT.split(",") if k.strip()]
+        elif isinstance(seed_keywords, str):
+            seed_keywords = [k.strip() for k in seed_keywords.split(",") if k.strip()]
+
+        if not target_channel:
+            target_channel = config.TIKTOK_TARGET_CHANNEL_DEFAULT
+
+        try:
+            check_cancelled()
+            width, height = self.get_screen_size(device_id)
+            cx = width // 2
+
+            # Dam bao tat xoay man hinh
+            self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
+            self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
+
+            # ================= BƯỚC 1: DẠO TRANG CHỦ TIKTOK =================
+            update_status("[TikTok B1] Mở ứng dụng TikTok...")
+            self.launch_tiktok(device_id)
+            check_cancelled()
+
+            update_status(f"[TikTok B1] Dạo Trang chủ (Nghỉ {min_delay}-{max_delay}s per video)...")
+            total_swipes = random.randint(3, 6)
+            videos_to_watch = random.randint(1, 3)
+            watch_indices = random.sample(range(total_swipes), min(videos_to_watch, total_swipes))
+
+            for idx in range(total_swipes):
+                check_cancelled()
+                if idx in watch_indices:
+                    dwell = random.randint(int(min_delay), int(max_delay))
+                    update_status(f"[TikTok B1] Xem video {idx+1}/{total_swipes} (Dừng {dwell}s)...")
+                    for s in range(dwell):
+                        time.sleep(1.0)
+                        check_cancelled()
+                else:
+                    time.sleep(random.uniform(1.0, 2.0))
+
+                y_start = int(height * 0.80) + random.randint(-30, 30)
+                y_end = int(height * 0.25) + random.randint(-30, 30)
+                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(400, 700))
+
+            # ================= BƯỚC 2: TÌM TỪ KHÓA NHIỆM VỤ / MỒI KÊNH =================
+            check_cancelled()
+            seed_kw = random.choice(seed_keywords)
+            update_status(f"[TikTok B2] Mở Kính lúp & Tìm từ khóa mồi '{seed_kw}'...")
+            
+            self.find_and_click_tiktok_search(device_id)
+            check_cancelled()
+
+            # Nhập từ khóa mồi
+            self.clear_input_field(device_id)
+            self.input_text_naturally(device_id, seed_kw)
+            time.sleep(1.0)
+            self.press_enter(device_id)
+            time.sleep(3.5)
+            check_cancelled()
+
+            # Lướt danh sách kết quả mồi kênh (15 - 25s)
+            update_status(f"[TikTok B2] Lướt feed mồi ngữ cảnh từ khóa '{seed_kw}'...")
+            for _ in range(random.randint(3, 5)):
+                check_cancelled()
+                y_start = int(height * 0.75) + random.randint(-40, 40)
+                y_end = int(height * 0.30) + random.randint(-40, 40)
+                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
+                time.sleep(random.uniform(3.0, 5.0))
+
+            # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU (KHẢI HOÀN SKINCARE) =================
+            check_cancelled()
+            update_status(f"[TikTok B3] Tìm kiếm Kênh mục tiêu '{target_channel}'...")
+            
+            # Click lại Kính Lúp ở trang search
+            self.tap(device_id, int(width * 0.90), int(height * 0.055))
+            time.sleep(1.0)
+            self.tap(device_id, int(width * 0.45), int(height * 0.055))
+            time.sleep(1.0)
+
+            self.clear_input_field(device_id)
+            self.input_text_naturally(device_id, target_channel)
+            time.sleep(1.0)
+            self.press_enter(device_id)
+            time.sleep(3.5)
+            check_cancelled()
+
+            # Click vào Card Kênh (Khải Hoàn Skincare PT)
+            update_status(f"[TikTok B3] Click vào Kênh '{target_channel}'...")
+            self.find_and_click_tiktok_channel(device_id, target_channel)
+            check_cancelled()
+
+            # Vào Trang Cá Nhân Kênh -> Chọn 1-2 video trong lưới để lướt xem
+            update_status(f"[TikTok B3] Đã vào Trang cá nhân -> Chọn video xem tương tác...")
+            
+            # Tọa độ ngẫu nhiên của 1 trong các video trong lưới (Hàng 1 trong Grid)
+            grid_cols = [int(width * 0.20), int(width * 0.50), int(width * 0.80)]
+            grid_row_y = int(height * 0.70)
+            
+            vid_x = random.choice(grid_cols)
+            vid_y = grid_row_y + random.randint(-30, 30)
+            
+            self.tap(device_id, vid_x, vid_y)
+            time.sleep(2.5)
+            check_cancelled()
+
+            # Xem video chi tiết trên kênh mục tiêu
+            watch_duration = random.randint(15, 30)
+            update_status(f"[TikTok B3] Đang xem video trên Kênh ({watch_duration}s)...")
+            for _ in range(watch_duration):
+                time.sleep(1.0)
+                check_cancelled()
+
+            # Lướt sang video thứ 2 của kênh
+            update_status("[TikTok B3] Lướt xem video thứ 2 của Kênh...")
+            self.swipe(device_id, cx, int(height * 0.80), cx, int(height * 0.25), duration=500)
+            
+            watch_duration_2 = random.randint(12, 25)
+            for _ in range(watch_duration_2):
+                time.sleep(1.0)
+                check_cancelled()
+
+            update_status("Hoàn thành tác vụ Bơm TikTok!")
+            return True, "Thành công"
+
+        except Exception as e:
+            msg = str(e)
+            update_status(f"Lỗi TikTok: {msg}")
+            return False, msg
+
 
 
 

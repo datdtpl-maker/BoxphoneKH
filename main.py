@@ -570,6 +570,27 @@ def parse_natural_command(text):
     if text_lower in ["/shop", "danh sách shop", "xem shop", "shop"]:
         return {"action": "get_shop"}
 
+    # Lệnh Bơm TikTok 3 Bước
+    if any(k in text_lower for k in ["/tiktok", "bơm tiktok", "chạy tiktok", "tiktok"]):
+        is_seq = any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt"])
+        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
+        device_idx = int(m_device.group(1)) if m_device else None
+        
+        raw = re.sub(r"^(?:/tiktok_seq|/tiktok|bơm tiktok tuần tự|bơm tiktok|chạy tiktok tuần tự|chạy tiktok)\s*", "", text, flags=re.IGNORECASE).strip()
+        raw = re.sub(r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+", "", raw, flags=re.IGNORECASE).strip()
+        
+        parts = [p.strip() for p in raw.split("|") if p.strip()]
+        seed_kws = parts[0] if parts else config.TIKTOK_SEED_KEYWORDS_DEFAULT
+        target_ch = parts[1] if len(parts) > 1 else config.TIKTOK_TARGET_CHANNEL_DEFAULT
+        
+        return {
+            "action": "tiktok_automation",
+            "is_sequential": is_seq,
+            "seed_keywords": seed_kws,
+            "target_channel": target_ch,
+            "device_idx": device_idx
+        }
+
     # 1. Trạng thái / Danh sách máy
     if any(k in text_lower for k in ["danh sách máy", "liệt kê", "trạng thái", "devices", "status", "list"]):
         return {"action": "list_devices"}
@@ -1038,6 +1059,70 @@ def handle_all_messages(message):
             return
     else:
         target_devices = devices
+
+    if action == "tiktok_automation":
+        is_seq = cmd.get("is_sequential", False)
+        seed_kws = cmd.get("seed_keywords")
+        target_ch = cmd.get("target_channel")
+        
+        if is_seq or len(target_devices) == 1:
+            def run_seq_tt_thread():
+                global cancel_sequential, cancel_flag
+                cancel_sequential = False
+                cancel_flag = False
+                
+                tracker = TelegramRealtimeTracker(bot, message.chat.id)
+                tracker.start_dashboard(f"🎵 **BƠM TIKTOK TUẦN TỰ**\nKênh mục tiêu: `{target_ch}`\nĐang quét trên {len(target_devices)} máy...")
+                
+                for idx, dev in enumerate(target_devices):
+                    if is_cancelled():
+                        break
+                    dev_name = get_device_name(dev)
+                    tracker.set_active_device(dev_name, dev, f"TikTok: {target_ch}", idx+1, len(target_devices))
+                    dev_start = time.time()
+                    success, err = adb.tiktok_automation_workflow(
+                        dev,
+                        seed_keywords=seed_kws,
+                        target_channel=target_ch,
+                        status_callback=tracker.status_callback,
+                        is_cancelled=is_cancelled
+                    )
+                    dev_dur = time.time() - dev_start
+                    send_device_finished_card(message.chat.id, dev_name, dev, f"TikTok: {target_ch}", success, err, dev_dur)
+                    
+                tracker.finish_dashboard("🏁 Hoàn tất tiến trình Bơm TikTok Tuần Tự!")
+
+            threading.Thread(target=run_seq_tt_thread, daemon=True).start()
+        else:
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
+            status_msg = bot.reply_to(message, f"🎵 **BƠM TIKTOK SONG SONG** trên {len(target_devices)} máy...\nKênh mục tiêu: `{target_ch}`", reply_markup=markup)
+            
+            def run_tt_parallel(device_id):
+                dev_name = get_device_name(device_id)
+                dev_start = time.time()
+                success, err = adb.tiktok_automation_workflow(
+                    device_id,
+                    seed_keywords=seed_kws,
+                    target_channel=target_ch,
+                    is_cancelled=is_cancelled
+                )
+                dev_dur = time.time() - dev_start
+                send_device_finished_card(message.chat.id, dev_name, device_id, f"TikTok: {target_ch}", success, err, dev_dur)
+                return dev_name, success, err
+                
+            def run_par_tt_bg():
+                results = []
+                with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
+                    futures = [executor.submit(run_tt_parallel, dev) for dev in target_devices]
+                    for future in futures:
+                        results.append(future.result())
+                success_count = sum(1 for r in results if r[1])
+                summary = f"🏁 **HOÀN THÀNH BƠM TIKTOK SONG SONG ({success_count}/{len(target_devices)} MÁY THÀNH CÔNG)**"
+                safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
+
+            threading.Thread(target=run_par_tt_bg, daemon=True).start()
+        return
 
     if action == "list_devices":
         response = f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI ({len(devices)} máy):**\n\n"

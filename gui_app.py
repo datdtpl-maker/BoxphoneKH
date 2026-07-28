@@ -346,6 +346,122 @@ class GUIApp(ctk.CTk):
             command=self.stop_all
         )
         self.btn_stop.pack(fill="x", padx=16, pady=(0, 12))
+
+        # Phân đoạn 2.5: Bảng điều khiển tác vụ Bơm TikTok 3 Bước
+        self.tiktok_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
+        self.tiktok_card.pack(fill="x", padx=16, pady=6)
+        
+        self.lbl_tiktok_title = ctk.CTkLabel(
+            self.tiktok_card, 
+            text="🎵 Điều khiển Tác vụ Bơm TikTok 3 Bước", 
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#0f172a"
+        )
+        self.lbl_tiktok_title.pack(pady=(10, 4), padx=16, anchor="w")
+
+        self.lbl_tt_seed = ctk.CTkLabel(
+            self.tiktok_card,
+            text="📌 Từ khóa nhiệm vụ (Mồi kênh - Phẩy cách):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#334155"
+        )
+        self.lbl_tt_seed.pack(padx=16, pady=(2, 0), anchor="w")
+
+        self.ent_tt_seed = ctk.CTkEntry(
+            self.tiktok_card,
+            placeholder_text="skincare, trị mụn, nặn mụn, chăm sóc da",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
+            corner_radius=8,
+            height=32
+        )
+        self.ent_tt_seed.insert(0, config.TIKTOK_SEED_KEYWORDS_DEFAULT)
+        self.ent_tt_seed.pack(fill="x", padx=16, pady=3)
+
+        self.lbl_tt_channel = ctk.CTkLabel(
+            self.tiktok_card,
+            text="🎯 Tên Kênh TikTok mục tiêu:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#334155"
+        )
+        self.lbl_tt_channel.pack(padx=16, pady=(4, 0), anchor="w")
+
+        self.ent_tt_channel = ctk.CTkEntry(
+            self.tiktok_card,
+            placeholder_text="Khải Hoàn Skincare PT",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
+            corner_radius=8,
+            height=32
+        )
+        self.ent_tt_channel.insert(0, config.TIKTOK_TARGET_CHANNEL_DEFAULT)
+        self.ent_tt_channel.pack(fill="x", padx=16, pady=3)
+
+        # Cài đặt thời gian dừng xem video (Min - Max)
+        self.delay_frame = ctk.CTkFrame(self.tiktok_card, fg_color="transparent")
+        self.delay_frame.pack(fill="x", padx=16, pady=4)
+        self.delay_frame.columnconfigure(0, weight=1)
+        self.delay_frame.columnconfigure(1, weight=1)
+
+        self.ent_tt_min_delay = ctk.CTkEntry(
+            self.delay_frame,
+            placeholder_text="Min (giây)",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            corner_radius=8,
+            height=30
+        )
+        self.ent_tt_min_delay.insert(0, str(config.TIKTOK_WATCH_TIME_MIN_DEFAULT))
+        self.ent_tt_min_delay.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+
+        self.ent_tt_max_delay = ctk.CTkEntry(
+            self.delay_frame,
+            placeholder_text="Max (giây)",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            corner_radius=8,
+            height=30
+        )
+        self.ent_tt_max_delay.insert(0, str(config.TIKTOK_WATCH_TIME_MAX_DEFAULT))
+        self.ent_tt_max_delay.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+
+        # Nút bấm chạy TikTok Tuần tự / Song song
+        self.tt_btn_grid = ctk.CTkFrame(self.tiktok_card, fg_color="transparent")
+        self.tt_btn_grid.pack(fill="x", padx=16, pady=(6, 10))
+        self.tt_btn_grid.columnconfigure(0, weight=1)
+        self.tt_btn_grid.columnconfigure(1, weight=1)
+
+        self.btn_tt_seq = ctk.CTkButton(
+            self.tt_btn_grid,
+            text="▶️ Chạy TikTok Tuần Tự",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#059669",
+            hover_color="#047857",
+            text_color="#ffffff",
+            corner_radius=8,
+            height=34,
+            command=self.run_seq_tiktok
+        )
+        self.btn_tt_seq.grid(row=0, column=0, padx=(0, 3), sticky="ew")
+
+        self.btn_tt_par = ctk.CTkButton(
+            self.tt_btn_grid,
+            text="⚡ Chạy TikTok Song Song",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            text_color="#ffffff",
+            corner_radius=8,
+            height=34,
+            command=self.run_par_tiktok
+        )
+        self.btn_tt_par.grid(row=0, column=1, padx=(3, 0), sticky="ew")
         
         # Phân đoạn 3: Bảng điều khiển hàng loạt thủ công
         self.bulk_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
@@ -1216,6 +1332,80 @@ class GUIApp(ctk.CTk):
                 except Exception:
                     pass
             
+        self.run_in_thread(action)
+
+    # ================= CÁC TÁC VỤ BƠM TIKTOK =================
+    def run_seq_tiktok(self):
+        target_devices = self.parse_targets()
+        if not target_devices:
+            return
+        seed_raw = self.ent_tt_seed.get().strip()
+        channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
+        try:
+            min_d = int(self.ent_tt_min_delay.get().strip() or "5")
+            max_d = int(self.ent_tt_max_delay.get().strip() or "10")
+        except ValueError:
+            min_d, max_d = 5, 10
+
+        self.bulk_disable_rotation(target_devices=target_devices)
+        main.cancel_flag = False
+        main.cancel_sequential = False
+
+        print(f"[GUI] Bắt đầu chạy TikTok Tuần Tự trên {len(target_devices)} máy...")
+
+        def action():
+            for idx, dev in enumerate(target_devices):
+                if main.is_cancelled():
+                    print("[GUI] ⏹️ Tiến trình TikTok đã bị dừng.")
+                    break
+                dev_name = main.get_device_name(dev)
+                print(f"[GUI] TikTok -> Máy {dev_name} ({idx+1}/{len(target_devices)})")
+                main.adb.tiktok_automation_workflow(
+                    dev, 
+                    seed_keywords=seed_raw, 
+                    target_channel=channel, 
+                    min_delay=min_d, 
+                    max_delay=max_d, 
+                    is_cancelled=main.is_cancelled
+                )
+            print("[GUI] 🏁 Hoàn tất tiến trình chạy TikTok Tuần Tự!")
+
+        self.run_in_thread(action)
+
+    def run_par_tiktok(self):
+        target_devices = self.parse_targets()
+        if not target_devices:
+            return
+        seed_raw = self.ent_tt_seed.get().strip()
+        channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
+        try:
+            min_d = int(self.ent_tt_min_delay.get().strip() or "5")
+            max_d = int(self.ent_tt_max_delay.get().strip() or "10")
+        except ValueError:
+            min_d, max_d = 5, 10
+
+        self.bulk_disable_rotation(target_devices=target_devices)
+        main.cancel_flag = False
+        main.cancel_sequential = False
+
+        print(f"[GUI] Bắt đầu chạy TikTok Song Song trên {len(target_devices)} máy...")
+
+        def run_parallel_tt(device_id):
+            main.adb.tiktok_automation_workflow(
+                device_id, 
+                seed_keywords=seed_raw, 
+                target_channel=channel, 
+                min_delay=min_d, 
+                max_delay=max_d, 
+                is_cancelled=main.is_cancelled
+            )
+
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
+                executor.map(run_parallel_tt, target_devices)
+            print("[GUI] 🏁 Hoàn tất tiến trình chạy TikTok Song Song!")
+
         self.run_in_thread(action)
 
     def log_message(self, msg):

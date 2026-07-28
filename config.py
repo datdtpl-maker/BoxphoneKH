@@ -37,6 +37,16 @@ SHOPEE_ACTIVITY = "com.shopee.app.home.HomeActivity"
 SHOPEE_SHOP_NAMES_RAW = os.getenv("SHOPEE_SHOP_NAMES", "")
 SHOPEE_SHOP_NAMES = [s.strip() for s in SHOPEE_SHOP_NAMES_RAW.split(",") if s.strip()]
 
+# Tên gói ứng dụng (package) của TikTok
+TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
+TIKTOK_PACKAGE_ALT = "com.zhiliaoapp.musically"
+
+# Cấu hình mặc định cho tự động hóa Bơm TikTok
+TIKTOK_TARGET_CHANNEL_DEFAULT = "Khải Hoàn Skincare PT"
+TIKTOK_SEED_KEYWORDS_DEFAULT = "skincare, trị mụn, nặn mụn, chăm sóc da"
+TIKTOK_WATCH_TIME_MIN_DEFAULT = 5
+TIKTOK_WATCH_TIME_MAX_DEFAULT = 10
+
 # API Key Gemini dùng để sinh từ khóa
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
