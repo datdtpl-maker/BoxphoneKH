@@ -21,7 +21,7 @@ ctk.set_default_color_theme("blue")
 class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("🤖 KHẢI HOÁN SYSTEM - PRO AUTOMATION CONTROL CENTER 📱")
+        self.title("🤖 KHẢI HOÀN SYSTEM - PRO AUTOMATION CONTROL CENTER 📱")
         self.geometry("1340x920")
         self.configure(fg_color="#f1f5f9") # Soft Slate Light Background
         
@@ -52,7 +52,7 @@ class GUIApp(ctk.CTk):
         
         self.lbl_brand = ctk.CTkLabel(
             self.brand_badge, 
-            text="⚡ KHẢI HOÁN AUTOMATION SYSTEM ⚡", 
+            text="⚡ KHẢI HOÀN AUTOMATION SYSTEM ⚡", 
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
             text_color="#1d4ed8"
         )
