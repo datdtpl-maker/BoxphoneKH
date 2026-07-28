@@ -5,6 +5,7 @@ import os
 import xml.etree.ElementTree as ET
 import re
 import random
+import unicodedata
 import config
 from concurrent.futures import ThreadPoolExecutor
 from config import ADB_PATH, SHOPEE_PACKAGE, SHOPEE_SEARCH_BOX_COORDS, SHOPEE_INPUT_BOX_COORDS, SHOPEE_SEARCH_BTN_COORDS
@@ -360,6 +361,32 @@ class ADBController:
         except Exception:
             pass
 
+    def replace_shopee_search_text(self, device_id, text):
+        """Xóa sạch ô tìm kiếm Shopee rồi nhập đúng một từ khóa đúng một lần."""
+        clear_code, _, _ = self.execute_adb(
+            device_id,
+            [
+                "shell", "am", "broadcast",
+                "-a", "XW_CLEAR_TEXT",
+                "--receiver-foreground",
+            ],
+        )
+        if clear_code != 0:
+            return False
+        time.sleep(0.3)
+
+        b64_text = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        input_code, _, _ = self.execute_adb(
+            device_id,
+            [
+                "shell", "am", "broadcast",
+                "-a", "XW_INPUT_B64",
+                "--es", "msg", b64_text,
+                "--receiver-foreground",
+            ],
+        )
+        return input_code == 0
+
     def take_screenshot(self, device_id, local_path):
         """Chụp màn hình điện thoại và tải về máy tính"""
         remote_path = f"/sdcard/screen_{device_id}.png"
@@ -424,11 +451,12 @@ class ADBController:
 
     def ensure_shopee_search_box_click(self, device_id, status_callback=None):
         """
-        Tối ưu hóa hành động mở thanh tìm kiếm Shopee:
-        1. Kiểm tra nếu lỡ rớt vào màn hình Shopee Video / Live (có nút Kính Lúp top-right hoặc tab Home góc dưới)
-        2. Đưa về tab Trang chủ (Home Tab) chuẩn trước khi bấm ô tìm kiếm
-        3. Thử tìm ô tìm kiếm qua uiautomator XML (inputSearchBar, btn_search, search_text)
-        4. Nếu không tìm thấy qua XML, bấm biểu tượng Kính Lúp hoặc vị trí chuẩn trên Trang chủ
+        Mở tìm kiếm Shopee an toàn ở cả Trang chủ và trang chi tiết:
+        1. Ưu tiên ô tìm kiếm thật trên Trang chủ.
+        2. Nếu đang ở trang chi tiết, bấm đúng kính lúp trên header.
+        3. Nếu không thấy kính lúp, Back ra ngoài rồi quét lại ô tìm kiếm.
+
+        Tuyệt đối không bấm mù vùng Home/giỏ hàng.
         """
         def update_status(msg):
             if status_callback:
@@ -436,50 +464,89 @@ class ADBController:
 
         width, height = self.get_screen_size(device_id)
 
-        # 1. Thử dump XML màn hình hiện tại
-        xml_file = f"/sdcard/dump_search_click_{device_id}.xml"
-        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
-        
-        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_search_click_{device_id}.xml")
-        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
-        
-        in_video_mode = False
-        search_coords = None
+        def scan_search_targets():
+            xml_file = f"/sdcard/dump_search_click_{device_id}.xml"
+            local_xml = os.path.join(
+                os.path.dirname(__file__),
+                f"temp_dump_search_click_{device_id}.xml",
+            )
+            self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+            dump_code, _, _ = self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file]
+            )
+            if dump_code != 0:
+                return None, None
 
-        if pull_code == 0 and os.path.exists(local_xml):
+            pull_code, _, _ = self.execute_adb(
+                device_id, ["pull", xml_file, local_xml]
+            )
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return None, None
+
+            home_search_coords = None
+            header_search_coords = None
             try:
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
-                
-                # Kiểm tra xem có đang rớt vào giao diện Shopee Video / Live không
+
                 for elem in root.iter():
+                    res_id = elem.get('resource-id', '')
                     text = elem.get('text', '')
                     desc = elem.get('content-desc', '')
-                    res_id = elem.get('resource-id', '')
-                    val = (text or desc or res_id).lower()
-                    if "video_" in val or "flash sale" in val or "chia sẻ" in val or "thêm vào giỏ" in val:
-                        in_video_mode = True
-                        break
+                    val = " ".join((res_id, text, desc)).lower()
+                    bounds = elem.get('bounds', '')
+                    match = re.match(
+                        r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',
+                        bounds,
+                    )
+                    if not match:
+                        continue
 
-                # Nếu không ở video mode, tìm ô search trên trang chủ qua XML
-                if not in_video_mode:
-                    for elem in root.iter():
-                        res_id = elem.get('resource-id', '')
-                        text = elem.get('text', '')
-                        desc = elem.get('content-desc', '')
-                        val = (text or desc or res_id).lower()
-                        if any(k in val for k in ["inputsearchbar", "search_text", "btn_search", "search_bar"]):
-                            bounds = elem.get('bounds', '')
-                            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                            if m:
-                                x1, y1, x2, y2 = map(int, m.groups())
-                                cy = (y1 + y2) // 2
-                                cx = (x1 + x2) // 2
-                                if 30 < cy < 250:
-                                    search_coords = (cx, cy)
-                                    print(f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm Trang chủ tại ({cx}, {cy}).")
-                                    break
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
+                    if not (30 < cy < 250):
+                        continue
+
+                    home_markers = (
+                        "inputsearchbar",
+                        "search_text",
+                        "search_bar",
+                        "search_prefill_click",
+                        "pre_search_label",
+                    )
+                    if any(marker in val for marker in home_markers):
+                        home_search_coords = (cx, cy)
+                        continue
+
+                    header_markers = (
+                        "search_icon",
+                        "search_btn",
+                        "btn_search",
+                        "action_search",
+                        "iv_search",
+                    )
+                    excluded_markers = (
+                        "cart",
+                        "giỏ",
+                        "chat",
+                        "share",
+                        "filter",
+                        "more",
+                    )
+                    desc_is_search = desc.strip().casefold() in {
+                        "search",
+                        "tìm kiếm",
+                    }
+                    if (
+                        (
+                            any(marker in val for marker in header_markers)
+                            or desc_is_search
+                        )
+                        and not any(marker in val for marker in excluded_markers)
+                        and int(width * 0.55) < cx < int(width * 0.90)
+                    ):
+                        header_search_coords = (cx, cy)
             except Exception:
                 pass
             finally:
@@ -487,37 +554,43 @@ class ADBController:
                     os.remove(local_xml)
                 except Exception:
                     pass
+                self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+            return home_search_coords, header_search_coords
 
-        # Nếu phát hiện bị lỡ rớt vào Shopee Video Mode (Hình 2 & 3)
-        if in_video_mode:
-            update_status("Phát hiện màn hình Shopee Video -> Click kính lúp / Thoát về Trang chủ...")
-            # Click biểu tượng Kính Lúp (Search Icon) góc trên bên phải của Shopee Video (x=83% width, y=5.5% height)
-            video_search_x = int(width * 0.83)
-            video_search_y = int(height * 0.055)
-            self.tap(device_id, video_search_x, video_search_y)
-            time.sleep(1.5)
-            return True
-
-        # Nếu tìm thấy ô search trang chủ qua XML
-        if search_coords:
-            self.tap(device_id, search_coords[0], search_coords[1])
+        home_coords, header_coords = scan_search_targets()
+        if home_coords:
+            print(
+                f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm Trang chủ "
+                f"tại ({home_coords[0]}, {home_coords[1]})."
+            )
+            self.tap(device_id, home_coords[0], home_coords[1])
             time.sleep(1.0)
             return True
 
-        # Dự phòng an toàn 100%: Nhấn vào Tab Home (nút Trang chủ màu đỏ ở góc dưới bên trái: x=10% width, y=95% height)
-        # Hành động này giúp tự động thoát khỏi mọi Video/Live và cuộn thẳng trang chủ lên Đỉnh!
-        update_status("Đưa trang chủ về Đỉnh (Tab Home) & Bấm ô tìm kiếm...")
-        home_tab_x = int(width * 0.10)
-        home_tab_y = int(height * 0.95)
-        self.tap(device_id, home_tab_x, home_tab_y)
-        time.sleep(1.2)
+        if header_coords:
+            update_status("Đang ở trang chi tiết • bấm kính lúp trên header...")
+            self.tap(device_id, header_coords[0], header_coords[1])
+            time.sleep(1.0)
+            return True
 
-        # Bấm vào ô tìm kiếm ở Đỉnh Trang chủ (x=45% width, y=5.5% height)
-        search_x = int(width * 0.45)
-        search_y = int(height * 0.055)
-        self.tap(device_id, search_x, search_y)
-        time.sleep(1.0)
-        return True
+        # Không có mục tiêu chắc chắn: dùng Back để thoát trang chi tiết,
+        # tuyệt đối không chạm vào vùng nút mua hàng ở cuối màn hình.
+        for attempt in range(2):
+            update_status(
+                f"Không thấy kính lúp • thoát trang chi tiết "
+                f"({attempt + 1}/2) rồi tìm lại..."
+            )
+            self.keyevent(device_id, 4)
+            time.sleep(1.2)
+            home_coords, header_coords = scan_search_targets()
+            target_coords = home_coords or header_coords
+            if target_coords:
+                self.tap(device_id, target_coords[0], target_coords[1])
+                time.sleep(1.0)
+                return True
+
+        update_status("Không xác định được ô tìm kiếm Shopee an toàn.")
+        return False
 
     def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
@@ -558,7 +631,11 @@ class ADBController:
                 time.sleep(random.uniform(2.0, 3.0))
             
             update_status("Bấm vào thanh tìm kiếm...")
-            self.ensure_shopee_search_box_click(device_id, status_callback=status_callback)
+            if not self.ensure_shopee_search_box_click(
+                device_id,
+                status_callback=status_callback,
+            ):
+                raise RuntimeError("Không mở được ô tìm kiếm Shopee an toàn")
             time.sleep(1.0)
             check_cancelled()
             
@@ -567,12 +644,9 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
             
-            # Xóa văn bản cũ trong ô tìm kiếm
-            self.clear_input_field(device_id)
-            time.sleep(0.5)
-            
             update_status(f"Đang nhập từ khóa '{keyword}'...")
-            self.input_text(device_id, keyword)
+            if not self.replace_shopee_search_text(device_id, keyword):
+                raise RuntimeError("Không thể xóa và nhập từ khóa Shopee")
             time.sleep(1.5)
             check_cancelled()
             
@@ -639,19 +713,20 @@ class ADBController:
             
             check_cancelled()
             update_status("Bấm ô tìm kiếm...")
-            self.ensure_shopee_search_box_click(device_id, status_callback=status_callback)
+            if not self.ensure_shopee_search_box_click(
+                device_id,
+                status_callback=status_callback,
+            ):
+                raise RuntimeError("Không mở được ô tìm kiếm Shopee an toàn")
             time.sleep(1.0)
             self.tap(device_id, int(width * 0.45), int(height * 0.055))
             time.sleep(1.0)
             check_cancelled()
             
-            # Xóa sạch văn bản cũ trong ô tìm kiếm trước khi gõ từ khóa mới
-            update_status("Xóa từ khóa cũ trong ô tìm kiếm...")
-            self.clear_input_field(device_id)
-            time.sleep(0.5)
-            
-            update_status(f"Nhập từ khóa '{keyword}' (gõ tự nhiên)...")
-            self.input_text_naturally(device_id, keyword)
+            # Xóa sạch và nhập đúng một từ khóa duy nhất qua XwIME.
+            update_status(f"Xóa sạch & nhập một từ khóa '{keyword}'...")
+            if not self.replace_shopee_search_text(device_id, keyword):
+                raise RuntimeError("Không thể xóa và nhập từ khóa Shopee")
             time.sleep(1.5)
             check_cancelled()
             
@@ -1152,7 +1227,13 @@ class ADBController:
             
             # 2. Bấm tìm kiếm trên trang chủ
             update_status("[Dự phòng] Bấm ô tìm kiếm để tìm shop...")
-            self.tap(device_id, SHOPEE_SEARCH_BOX_COORDS[0], SHOPEE_SEARCH_BOX_COORDS[1])
+            if not self.ensure_shopee_search_box_click(
+                device_id,
+                status_callback=status_callback,
+            ):
+                raise RuntimeError(
+                    "Không mở được ô tìm kiếm Shopee an toàn ở nhánh dự phòng"
+                )
             time.sleep(1.5)
             check_cancelled()
             
@@ -1440,115 +1521,442 @@ class ADBController:
             
         self.tap(device_id, coords[0], coords[1])
         time.sleep(2.0)
-        # Tap tiếp ô nhập liệu ở giữa thanh search header để active bàn phím
-        self.tap(device_id, int(width * 0.45), int(height * 0.055))
-        time.sleep(1.0)
+
+        # Chỉ focus đúng EditText; không chạm theo tọa độ mù vào vùng gợi ý.
+        self.focus_tiktok_search_input(device_id)
+
+    def get_tiktok_search_input_state(self, device_id):
+        """Đọc tọa độ, nội dung và trạng thái focus của ô Search TikTok."""
+        safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
+        xml_file = f"/sdcard/dump_tt_input_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_dump_tt_input_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", xml_file]
+        )
+        if dump_code != 0:
+            return None
+
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
+        if pull_code != 0 or not os.path.exists(local_xml):
+            return None
+
+        candidates = []
+        try:
+            root = ET.parse(local_xml).getroot()
+            for elem in root.iter():
+                class_name = elem.get("class", "").lower()
+                resource_id = elem.get("resource-id", "").lower()
+                content_desc = elem.get("content-desc", "").lower()
+                editable = elem.get("editable", "").lower() == "true"
+                searchable = any(
+                    marker in f"{resource_id} {content_desc}"
+                    for marker in ("search", "et_search", "search_input")
+                )
+                if not (editable or "edittext" in class_name or searchable):
+                    continue
+
+                bounds = elem.get("bounds", "")
+                match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                if not match:
+                    continue
+
+                x1, y1, x2, y2 = map(int, match.groups())
+                cy = (y1 + y2) // 2
+                if cy > 350:
+                    continue
+
+                focused = elem.get("focused", "").lower() == "true"
+                score = (
+                    int(focused) * 8
+                    + int(editable) * 4
+                    + int("edittext" in class_name) * 2
+                    + int(searchable)
+                )
+                candidates.append(
+                    {
+                        "score": score,
+                        "text": elem.get("text", ""),
+                        "focused": focused,
+                        "coords": ((x1 + x2) // 2, cy),
+                    }
+                )
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+
+        if not candidates:
+            return None
+        best = max(candidates, key=lambda item: item["score"])
+        best.pop("score", None)
+        return best
+
+    def focus_tiktok_search_input(self, device_id):
+        """Focus đúng EditText của TikTok, có tọa độ dự phòng khi XML không đọc được."""
+        width, height = self.get_screen_size(device_id)
+        state = self.get_tiktok_search_input_state(device_id)
+        coords = state["coords"] if state else (
+            int(width * 0.45),
+            int(height * 0.055),
+        )
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(0.5)
+
+        verified = self.get_tiktok_search_input_state(device_id)
+        if verified and not verified["focused"]:
+            self.tap(device_id, verified["coords"][0], verified["coords"][1])
+            time.sleep(0.4)
+            verified = self.get_tiktok_search_input_state(device_id)
+        return verified is None or verified["focused"]
 
     def clear_tiktok_search_input(self, device_id):
         """
         BẮT BUỘC: Xóa sạch 100% toàn bộ từ khóa cũ trong ô tìm kiếm TikTok trước khi nhập từ khóa mới.
         """
-        width, height = self.get_screen_size(device_id)
-        
-        # 1. Bấm vào ô tìm kiếm ở trên cùng để active bàn phím
-        self.tap(device_id, int(width * 0.45), int(height * 0.055))
-        time.sleep(0.5)
+        self.ensure_ime(device_id)
+        for _ in range(2):
+            if not self.focus_tiktok_search_input(device_id):
+                continue
 
-        # 2. Bấm nút (X) xóa từ khóa ở các tọa độ x khả dĩ (78%, 81%, 84%) ở góc phải ô tìm kiếm
-        for x_ratio in [0.81, 0.78, 0.84]:
-            self.tap(device_id, int(width * x_ratio), int(height * 0.055))
-            time.sleep(0.2)
+            # XwIME trên dàn Android 8 có action xóa chuyên dụng. Keyevent
+            # Backspace (kể cả gửi từng phím) không tác động vào EditText TikTok.
+            code, _, _ = self.execute_adb(
+                device_id,
+                [
+                    "shell", "am", "broadcast",
+                    "-a", "XW_CLEAR_TEXT",
+                    "--receiver-foreground",
+                ],
+            )
+            if code != 0:
+                continue
 
-        # 3. Thử tìm nút (X) qua XML UI Dump nếu có
-        xml_file = f"/sdcard/dump_clear_btn_{device_id}.xml"
-        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
-        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_clear_{device_id}.xml")
-        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
-        
-        if pull_code == 0 and os.path.exists(local_xml):
+            # TikTok có thể trả text cũ trong UI XML ngay sau CLEAR dù input
+            # connection đã rỗng. Điều kiện pass chính xác là nội dung cuối
+            # sau CLEAR + INPUT, được kiểm tra trong replace_tiktok_search_text.
+            time.sleep(0.25)
+            return True
+
+        return False
+
+    def input_tiktok_search_text(self, device_id, text):
+        """Nhập đúng một lần qua XwIME mà không reset IME sau khi vừa xóa."""
+        b64_text = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        code, _, _ = self.execute_adb(
+            device_id,
+            [
+                "shell", "am", "broadcast",
+                "-a", "XW_INPUT_B64",
+                "--es", "msg", b64_text,
+                "--receiver-foreground",
+            ],
+        )
+        return code == 0
+
+    def replace_tiktok_search_text(self, device_id, text):
+        """Xóa nội dung cũ, nhập đúng một lần và xác minh từ khóa mới."""
+        for attempt in range(2):
+            if not self.clear_tiktok_search_input(device_id):
+                continue
+
+            if not self.input_tiktok_search_text(device_id, text):
+                continue
+            time.sleep(0.5)
+            state = self.get_tiktok_search_input_state(device_id)
+            if state is not None and state["text"].strip() == text.strip():
+                return True
+
+            print(
+                f"[Device {device_id[:6]}] Nội dung Search chưa đúng "
+                f"(lần {attempt + 1}/2), đang nhập lại..."
+            )
+
+        raise RuntimeError(
+            f"Không thể nhập chính xác từ khóa TikTok: '{text}'"
+        )
+
+    def _normalize_tiktok_text(self, value):
+        """Chuẩn hóa text TikTok, loại ký tự điều hướng RTL/LTR vô hình."""
+        value = unicodedata.normalize("NFKC", value or "")
+        value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+        return re.sub(r"\s+", " ", value).strip().casefold()
+
+    def _get_tiktok_ui_root(self, device_id, prefix="state"):
+        """Dump UI TikTok và trả về XML root đã parse."""
+        safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
+        remote_xml = f"/sdcard/{prefix}_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_{prefix}_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        if dump_code != 0:
+            return None
+
+        pull_code, _, _ = self.execute_adb(device_id, ["pull", remote_xml, local_xml])
+        if pull_code != 0 or not os.path.exists(local_xml):
+            return None
+
+        try:
+            return ET.parse(local_xml).getroot()
+        except Exception:
+            return None
+        finally:
             try:
-                tree = ET.parse(local_xml)
-                root = tree.getroot()
-                for elem in root.iter():
-                    res_id = (elem.get('resource-id', '') or elem.get('content-desc', '')).lower()
-                    if any(k in res_id for k in ["clear", "close", "delete", "remove", "clean"]):
-                        bounds = elem.get('bounds', '')
-                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                        if m:
-                            x1, y1, x2, y2 = map(int, m.groups())
-                            if (y1 + y2) // 2 < 250:
-                                cx = (x1 + x2) // 2
-                                cy = (y1 + y2) // 2
-                                self.tap(device_id, cx, cy)
-                                time.sleep(0.3)
-                                break
+                os.remove(local_xml)
             except Exception:
                 pass
-            finally:
-                try:
-                    os.remove(local_xml)
-                except Exception:
-                    pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
 
-        # 4. Gửi chuỗi phím Backspace keyevent 67 để xóa sạch 100% toàn bộ ký tự cũ
-        self.clear_input_field(device_id, max_chars=50)
-        time.sleep(0.5)
+    def _element_center(self, elem):
+        bounds = elem.get("bounds", "")
+        match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+        if not match:
+            return None
+        x1, y1, x2, y2 = map(int, match.groups())
+        return (x1 + x2) // 2, (y1 + y2) // 2
+
+    def get_tiktok_feed_signature(self, device_id):
+        """Lấy dấu vân tay UI để biết thao tác vuốt đã đổi bài hay chưa."""
+        root = self._get_tiktok_ui_root(device_id, "tt_feed_signature")
+        if root is None:
+            return None
+
+        signature = []
+        for elem in root.iter():
+            coords = self._element_center(elem)
+            if coords is None or coords[1] < 180:
+                continue
+            text = self._normalize_tiktok_text(elem.get("text", ""))
+            desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
+            resource_id = elem.get("resource-id", "").lower()
+            if text or desc:
+                signature.append((resource_id, text, desc))
+        return tuple(signature)
+
+    def advance_tiktok_feed(self, device_id):
+        """
+        Vuốt sang bài tiếp theo và xác minh UI đã đổi.
+
+        Bài ảnh/carousel có thể giữ cú vuốt chậm đầu tiên, vì vậy thử lại bằng
+        cú fling nhanh và dài hơn ở vị trí ngang khác.
+        """
+        width, height = self.get_screen_size(device_id)
+        before = self.get_tiktok_feed_signature(device_id)
+        gestures = [
+            (0.50, 0.80, 0.50, 0.20, 450),
+            (0.34, 0.86, 0.38, 0.14, 220),
+            (0.66, 0.88, 0.62, 0.12, 160),
+        ]
+
+        for x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration in gestures:
+            self.swipe(
+                device_id,
+                int(width * x1_ratio),
+                int(height * y1_ratio),
+                int(width * x2_ratio),
+                int(height * y2_ratio),
+                duration=duration,
+            )
+            time.sleep(1.2)
+
+            after = self.get_tiktok_feed_signature(device_id)
+            if before is None or after is None or after != before:
+                return True
+
+        return False
+
+    def is_on_tiktok_target_profile(self, device_id, channel_name, root=None):
+        """Xác minh đã rời trang Search và đang ở profile đúng kênh."""
+        if root is None:
+            root = self._get_tiktok_ui_root(device_id, "tt_profile_check")
+        if root is None:
+            return False
+
+        target = self._normalize_tiktok_text(channel_name)
+        has_target = False
+        has_search_input = False
+        has_profile_action = False
+        video_nodes = 0
+
+        for elem in root.iter():
+            class_name = elem.get("class", "")
+            text = self._normalize_tiktok_text(
+                f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            )
+            resource_id = elem.get("resource-id", "").lower()
+            if target and target in text:
+                has_target = True
+            if "edittext" in class_name.lower():
+                has_search_input = True
+            if text in ("message", "following", "follow"):
+                has_profile_action = True
+            if "user_video_view" in resource_id:
+                video_nodes += 1
+
+        return (
+            has_target
+            and not has_search_input
+            and (has_profile_action or video_nodes >= 2)
+        )
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
-        """Phân tích kết quả tìm kiếm TikTok và click vào Thẻ Người dùng / Kênh Khải Hoàn Skincare"""
-        width, height = self.get_screen_size(device_id)
-        xml_file = f"/sdcard/dump_tt_channel_{device_id}.xml"
-        self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-        self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
-        
-        local_xml = os.path.join(os.path.dirname(__file__), f"temp_dump_tt_channel_{device_id}.xml")
-        pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
-        
-        coords = None
-        clean_ch = channel_name.lower().strip()
-        words = [w for w in clean_ch.split() if len(w) > 1]
-        
-        if pull_code == 0 and os.path.exists(local_xml):
-            try:
-                tree = ET.parse(local_xml)
-                root = tree.getroot()
-                
-                # Tìm element text hoặc desc chứa tên kênh Khải Hoàn Skincare
-                for elem in root.iter():
-                    text = (elem.get('text', '') or elem.get('content-desc', '')).lower()
-                    if words and any(w in text for w in words):
-                        bounds = elem.get('bounds', '')
-                        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                        if m:
-                            x1, y1, x2, y2 = map(int, m.groups())
-                            cy = (y1 + y2) // 2
-                            cx = (x1 + x2) // 2
-                            if 200 < cy < 1600:
-                                coords = (cx, cy)
-                                print(f"[Device {device_id[:6]}] Tìm thấy Kênh TikTok '{text[:25]}' tại ({cx}, {cy}).")
-                                break
-            except Exception:
-                pass
-            finally:
-                try:
-                    os.remove(local_xml)
-                except Exception:
-                    pass
+        """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
+        target = self._normalize_tiktok_text(channel_name)
 
-        if not coords:
-            # Tọa độ dự phòng Thẻ Kênh Người dùng đầu tiên (x=45% width, y=30% height)
-            coords = (int(width * 0.45), int(height * 0.30))
-            
-        self.tap(device_id, coords[0], coords[1])
-        time.sleep(3.5)
+        for attempt in range(3):
+            root = self._get_tiktok_ui_root(device_id, f"tt_channel_{attempt}")
+            if root is None:
+                time.sleep(1.0)
+                continue
+
+            parent_map = {child: parent for parent in root.iter() for child in parent}
+            matches = []
+            for elem in root.iter():
+                text = self._normalize_tiktok_text(
+                    f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+                )
+                if not target or target not in text:
+                    continue
+
+                score = 10 if text == target else 5
+                resource_id = elem.get("resource-id", "").lower()
+                if "username" in resource_id:
+                    score += 4
+
+                clickable = elem
+                while (
+                    clickable is not None
+                    and clickable.get("clickable", "").lower() != "true"
+                ):
+                    clickable = parent_map.get(clickable)
+                target_elem = clickable if clickable is not None else elem
+                coords = self._element_center(target_elem)
+                if coords:
+                    matches.append((score, coords, text))
+
+            if not matches:
+                time.sleep(1.0)
+                continue
+
+            _, coords, matched_text = max(matches, key=lambda item: item[0])
+            print(
+                f"[Device {device_id[:6]}] Click card Kênh TikTok "
+                f"'{matched_text[:40]}' tại {coords}."
+            )
+            self.tap(device_id, coords[0], coords[1])
+            time.sleep(3.0)
+
+            if self.is_on_tiktok_target_profile(device_id, channel_name):
+                return True
+
+        return False
+
+    def click_random_tiktok_profile_video(self, device_id, channel_name):
+        """Chọn một clip đang hiển thị trên profile và xác minh đã mở player."""
+        width, height = self.get_screen_size(device_id)
+        for attempt in range(3):
+            root = self._get_tiktok_ui_root(device_id, f"tt_profile_videos_{attempt}")
+            if root is None or not self.is_on_tiktok_target_profile(
+                device_id, channel_name, root=root
+            ):
+                return False
+
+            candidates = []
+            candidate_set = set()
+            parent_map = {child: parent for parent in root.iter() for child in parent}
+
+            # TikTok dùng resource-id khác nhau theo phiên bản/thiết bị:
+            # S2: GridView hwz + item eti; S1: GridView hui + item erf.
+            # Ưu tiên các item clickable trực tiếp trong GridView để không phụ
+            # thuộc tên resource-id đã bị TikTok làm rối.
+            for grid in root.iter():
+                if not grid.get("class", "").lower().endswith("gridview"):
+                    continue
+                for item in list(grid):
+                    if item.get("clickable", "").lower() != "true":
+                        continue
+                    coords = self._element_center(item)
+                    if coords and 0 < coords[1] < height and coords not in candidate_set:
+                        candidates.append(coords)
+                        candidate_set.add(coords)
+
+            for elem in root.iter():
+                resource_id = elem.get("resource-id", "").lower()
+                desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
+                is_known_video = (
+                    "user_video_view" in resource_id
+                    or resource_id.endswith(":id/eti")
+                    or desc.startswith("video by ")
+                )
+                if not is_known_video:
+                    continue
+
+                clickable = elem
+                while (
+                    clickable is not None
+                    and clickable.get("clickable", "").lower() != "true"
+                ):
+                    clickable = parent_map.get(clickable)
+                target_elem = clickable if clickable is not None else elem
+                coords = self._element_center(target_elem)
+                if (
+                    coords
+                    and 0 < coords[1] < height
+                    and coords not in candidate_set
+                ):
+                    candidates.append(coords)
+                    candidate_set.add(coords)
+
+            if not candidates:
+                return False
+
+            coords = random.choice(candidates)
+            self.tap(device_id, coords[0], coords[1])
+            time.sleep(2.5)
+
+            if self.is_tiktok_video_player(device_id):
+                return True
+
+            self.keyevent(device_id, 4)
+            time.sleep(1.0)
+
+        return False
+
+    def is_tiktok_video_player(self, device_id):
+        """Xác minh TikTok đã mở màn hình DetailActivity của một clip."""
+        code, stdout, _ = self.execute_adb(
+            device_id, ["shell", "dumpsys", "window", "windows"]
+        )
+        if code != 0:
+            return False
+        output = stdout.lower()
+        return (
+            "com.ss.android.ugc.trill" in output
+            and (
+                "detailactivity" in output
+                or "aweme.detail" in output
+                or "detail.ui" in output
+            )
+        )
 
     def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
         """
-        Quy trình tự động hóa Bơm TikTok 3 Bước chuẩn chuyên nghiệp:
-        Bước 1: Dạo Trang chủ (For You), lướt 1-10 video, dừng ngẫu nhiên 1-3 video (nghỉ min_delay - max_delay s)
-        Bước 2: Bấm Kính lúp, gõ từ khóa mồi (seed keywords), lướt feed kết quả 15-30s mồi kênh
-        Bước 3: Tìm tên kênh mục tiêu (Khải Hoàn Skincare PT), click vào Kênh, chọn 1-2 video trong lưới để lướt xem
+        Quy trình TikTok cố định:
+        B1 dạo For You 15-60 giây; B2 lướt kết quả 15-30 giây;
+        B3 vào đúng profile, xem 3-5 phút và đổi clip mỗi 15-30 giây.
+        min_delay/max_delay được giữ để tương thích lời gọi cũ nhưng không còn sử dụng.
         """
         def update_status(msg):
             print(f"[Device {device_id[:6]}] {msg}")
@@ -1581,25 +1989,37 @@ class ADBController:
             self.launch_tiktok(device_id)
             check_cancelled()
 
-            update_status(f"[TikTok B1] Dạo Trang chủ (Nghỉ {min_delay}-{max_delay}s per video)...")
-            total_swipes = random.randint(3, 6)
-            videos_to_watch = random.randint(1, 3)
-            watch_indices = random.sample(range(total_swipes), min(videos_to_watch, total_swipes))
-
-            for idx in range(total_swipes):
+            step1_total = random.randint(
+                config.TIKTOK_STEP1_TOTAL_MIN,
+                config.TIKTOK_STEP1_TOTAL_MAX,
+            )
+            update_status(
+                f"[TikTok B1] Dạo Trang chủ trong {step1_total}s "
+                f"(mặc định 15-60s)..."
+            )
+            step1_elapsed = 0
+            step1_video = 1
+            while step1_elapsed < step1_total:
                 check_cancelled()
-                if idx in watch_indices:
-                    dwell = random.randint(int(min_delay), int(max_delay))
-                    update_status(f"[TikTok B1] Xem video {idx+1}/{total_swipes} (Dừng {dwell}s)...")
-                    for s in range(dwell):
-                        time.sleep(1.0)
-                        check_cancelled()
-                else:
-                    time.sleep(random.uniform(1.0, 2.0))
-
-                y_start = int(height * 0.80) + random.randint(-30, 30)
-                y_end = int(height * 0.25) + random.randint(-30, 30)
-                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(400, 700))
+                dwell = min(
+                    random.randint(5, 12),
+                    step1_total - step1_elapsed,
+                )
+                update_status(
+                    f"[TikTok B1] Xem bài {step1_video} ({dwell}s) • "
+                    f"còn {step1_total - step1_elapsed}s..."
+                )
+                for _ in range(dwell):
+                    time.sleep(1.0)
+                    check_cancelled()
+                step1_elapsed += dwell
+                if step1_elapsed < step1_total:
+                    if not self.advance_tiktok_feed(device_id):
+                        update_status(
+                            "[TikTok B1] Bài ảnh chưa đổi sau 3 lần vuốt • "
+                            "tiếp tục thử ở lượt kế tiếp..."
+                        )
+                    step1_video += 1
 
             # ================= BƯỚC 2: TÌM TỪ KHÓA NHIỆM VỤ / MỒI KÊNH =================
             check_cancelled()
@@ -1609,25 +2029,50 @@ class ADBController:
             self.find_and_click_tiktok_search(device_id)
             check_cancelled()
 
-            # Nhập từ khóa mồi
-            self.clear_tiktok_search_input(device_id)
-            self.input_text_naturally(device_id, seed_kw)
+            # Xóa nội dung cũ, nhập đúng từ khóa nhiệm vụ từ ô ent_tt_seed và xác minh.
+            self.replace_tiktok_search_text(device_id, seed_kw)
             time.sleep(1.0)
+            # TikTok hiện dùng Enter để gửi tìm kiếm. Không tap góc phải vì
+            # vị trí đó là nút ba chấm và sẽ mở bảng Filters.
             self.press_enter(device_id)
-            self.tap(device_id, int(width * 0.90), int(height * 0.055))
             time.sleep(3.5)
             check_cancelled()
 
-            # Lướt danh sách kết quả mồi kênh (15 - 25s)
-            update_status(f"[TikTok B2] Lướt feed mồi ngữ cảnh từ khóa '{seed_kw}'...")
-            for _ in range(random.randint(3, 5)):
+            step2_total = random.randint(
+                config.TIKTOK_STEP2_TOTAL_MIN,
+                config.TIKTOK_STEP2_TOTAL_MAX,
+            )
+            update_status(
+                f"[TikTok B2] Lướt kết quả '{seed_kw}' trong {step2_total}s "
+                f"(mặc định 15-30s)..."
+            )
+            step2_elapsed = 0
+            result_index = 1
+            while step2_elapsed < step2_total:
                 check_cancelled()
-                y_start = int(height * 0.75) + random.randint(-40, 40)
-                y_end = int(height * 0.30) + random.randint(-40, 40)
-                self.swipe(device_id, cx, y_start, cx, y_end, duration=random.randint(600, 900))
-                time.sleep(random.uniform(3.0, 5.0))
+                dwell = min(
+                    random.randint(4, 8),
+                    step2_total - step2_elapsed,
+                )
+                update_status(
+                    f"[TikTok B2] Xem nhóm kết quả {result_index} ({dwell}s)..."
+                )
+                for _ in range(dwell):
+                    time.sleep(1.0)
+                    check_cancelled()
+                step2_elapsed += dwell
+                if step2_elapsed < step2_total:
+                    self.swipe(
+                        device_id,
+                        cx,
+                        int(height * 0.75) + random.randint(-40, 40),
+                        cx,
+                        int(height * 0.30) + random.randint(-40, 40),
+                        duration=random.randint(600, 900),
+                    )
+                    result_index += 1
 
-            # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU (KHẢI HOÀN SKINCARE) =================
+            # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
             update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
             
@@ -1635,53 +2080,72 @@ class ADBController:
             self.find_and_click_tiktok_search(device_id)
             check_cancelled()
 
-            # 2. XÓA SẠCH 100% từ khóa mồi cũ của Bước 2
-            self.clear_tiktok_search_input(device_id)
-            time.sleep(0.8)
-            check_cancelled()
-
-            # 3. Gõ tên Kênh mục tiêu chuẩn xác
-            self.input_text_naturally(device_id, target_channel)
+            # 2-3. XÓA SẠCH từ khóa Bước 2 rồi mới nhập tên Kênh mục tiêu.
+            self.replace_tiktok_search_text(device_id, target_channel)
             time.sleep(1.0)
+            # Áp dụng cùng cơ chế cho bước 3: chỉ Enter, không chạm nút ba chấm.
             self.press_enter(device_id)
-            self.tap(device_id, int(width * 0.90), int(height * 0.055))
             time.sleep(3.5)
             check_cancelled()
 
-            # Click vào Card Kênh (Khải Hoàn Skincare PT)
+            # Click vào card kênh mục tiêu đã cấu hình.
             update_status(f"[TikTok B3] Click vào Kênh '{target_channel}'...")
-            self.find_and_click_tiktok_channel(device_id, target_channel)
+            if not self.find_and_click_tiktok_channel(device_id, target_channel):
+                raise RuntimeError(
+                    f"Không mở được Kênh TikTok mục tiêu '{target_channel}'"
+                )
             check_cancelled()
 
-            # Vào Trang Cá Nhân Kênh -> Chọn 1-2 video trong lưới để lướt xem
-            update_status(f"[TikTok B3] Đã vào Trang cá nhân -> Chọn video xem tương tác...")
-            
-            # Tọa độ ngẫu nhiên của 1 trong các video trong lưới (Hàng 1 trong Grid)
-            grid_cols = [int(width * 0.20), int(width * 0.50), int(width * 0.80)]
-            grid_row_y = int(height * 0.70)
-            
-            vid_x = random.choice(grid_cols)
-            vid_y = grid_row_y + random.randint(-30, 30)
-            
-            self.tap(device_id, vid_x, vid_y)
-            time.sleep(2.5)
+            update_status(
+                "[TikTok B3] Đã xác minh đúng profile • mở ngẫu nhiên một clip..."
+            )
+            if not self.click_random_tiktok_profile_video(device_id, target_channel):
+                raise RuntimeError(
+                    f"Đã vào Kênh nhưng không mở được clip của '{target_channel}'"
+                )
             check_cancelled()
 
-            # Xem video chi tiết trên kênh mục tiêu
-            watch_duration = random.randint(15, 30)
-            update_status(f"[TikTok B3] Đang xem video trên Kênh ({watch_duration}s)...")
-            for _ in range(watch_duration):
-                time.sleep(1.0)
+            step3_total = random.randint(
+                config.TIKTOK_STEP3_TOTAL_MIN,
+                config.TIKTOK_STEP3_TOTAL_MAX,
+            )
+            update_status(
+                f"[TikTok B3] Ở lại Kênh {step3_total // 60} phút "
+                f"{step3_total % 60:02d} giây • đổi clip mỗi 15-30s..."
+            )
+            step3_elapsed = 0
+            channel_video = 1
+            while step3_elapsed < step3_total:
                 check_cancelled()
-
-            # Lướt sang video thứ 2 của kênh
-            update_status("[TikTok B3] Lướt xem video thứ 2 của Kênh...")
-            self.swipe(device_id, cx, int(height * 0.80), cx, int(height * 0.25), duration=500)
-            
-            watch_duration_2 = random.randint(12, 25)
-            for _ in range(watch_duration_2):
-                time.sleep(1.0)
-                check_cancelled()
+                watch_duration = min(
+                    random.randint(
+                        config.TIKTOK_STEP3_VIDEO_MIN,
+                        config.TIKTOK_STEP3_VIDEO_MAX,
+                    ),
+                    step3_total - step3_elapsed,
+                )
+                update_status(
+                    f"[TikTok B3] Xem clip {channel_video} ({watch_duration}s) • "
+                    f"đã ở Kênh {step3_elapsed}/{step3_total}s..."
+                )
+                for _ in range(watch_duration):
+                    time.sleep(1.0)
+                    check_cancelled()
+                step3_elapsed += watch_duration
+                if step3_elapsed < step3_total:
+                    update_status(
+                        f"[TikTok B3] Vuốt sang clip ngẫu nhiên tiếp theo "
+                        f"(còn {step3_total - step3_elapsed}s)..."
+                    )
+                    self.swipe(
+                        device_id,
+                        cx,
+                        int(height * 0.80) + random.randint(-25, 25),
+                        cx,
+                        int(height * 0.25) + random.randint(-25, 25),
+                        duration=random.randint(450, 700),
+                    )
+                    channel_video += 1
 
             update_status("Hoàn thành tác vụ Bơm TikTok!")
             return True, "Thành công"

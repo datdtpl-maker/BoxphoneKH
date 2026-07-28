@@ -102,6 +102,7 @@ class TelegramRealtimeTracker:
         self.keyword = ""
         self.current_idx = 0
         self.total_devices = 0
+        self.platform = "Shopee"
 
     def start_dashboard(self, initial_text):
         msg = safe_send_message(self.chat_id, initial_text, parse_mode="Markdown", reply_markup=self.reply_markup)
@@ -110,14 +111,15 @@ class TelegramRealtimeTracker:
             self.last_text = initial_text
             self.last_edit_time = time.time()
 
-    def set_active_device(self, dev_name, dev_serial, keyword, current_idx, total_devices):
+    def set_active_device(self, dev_name, dev_serial, keyword, current_idx, total_devices, platform="Shopee"):
         self.device_name = dev_name
         self.device_serial = dev_serial
         self.keyword = keyword
         self.current_idx = current_idx
         self.total_devices = total_devices
+        self.platform = platform
         self.completed_steps = []
-        self.current_step = "Đang khởi động Shopee..."
+        self.current_step = f"Đang khởi động {platform}..."
         self._force_update()
 
     def status_callback(self, dev_id, msg):
@@ -145,7 +147,7 @@ class TelegramRealtimeTracker:
             safe_edit_message(text, self.chat_id, self.live_msg_id, reply_markup=self.reply_markup, parse_mode="Markdown")
 
     def render_progress_text(self):
-        text = f"🤖 **Log tiến trình: Máy {self.device_name} ({self.current_idx}/{self.total_devices})**\n"
+        text = f"🤖 **{self.platform} • Máy {self.device_name} ({self.current_idx}/{self.total_devices})**\n"
         text += f"📱 ID: `{self.device_serial[:10]}`\n"
         text += f"🔑 Từ khóa: `{self.keyword}`\n"
         text += "----------------------------------------\n"
@@ -174,7 +176,7 @@ class TelegramRealtimeTracker:
     def finish_dashboard(self, summary_text):
         if self.live_msg_id:
             try:
-                bot.edit_message_reply_markup(self.chat_id, self.live_msg_id, reply_markup=None)
+                self.bot.edit_message_reply_markup(self.chat_id, self.live_msg_id, reply_markup=None)
             except Exception:
                 pass
             safe_edit_message(summary_text, self.chat_id, self.live_msg_id, parse_mode="Markdown")
@@ -204,14 +206,43 @@ def send_device_finished_card(chat_id, dev_name, dev_id, keyword, success, err, 
     safe_send_message(chat_id, text, parse_mode="Markdown")
 
 
+def get_xiaowei_leveldb_dirs():
+    """Trả về các thư mục dữ liệu Xiaowei theo tài khoản Windows hiện tại."""
+    local_app_data = os.getenv("LOCALAPPDATA", "")
+    if not local_app_data:
+        return []
+    return [
+        os.path.join(
+            local_app_data,
+            "xiaowei",
+            "EBWebView",
+            "Default",
+            "Local Storage",
+            "leveldb",
+        ),
+        os.path.join(
+            local_app_data,
+            "xiaowei",
+            "EBWebView",
+            "Default",
+            "IndexedDB",
+            "https_tauri.localhost_0.indexeddb.leveldb",
+        ),
+        os.path.join(
+            local_app_data,
+            "com.xiaowei.android",
+            "EBWebView",
+            "Default",
+            "IndexedDB",
+            "https_tauri.localhost_0.indexeddb.leveldb",
+        ),
+    ]
+
+
 def get_ordered_devices():
     global cached_mapping
     raw_devices = adb.get_devices()
-    search_dirs = [
-        r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\Local Storage\leveldb",
-        r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb",
-        r"C:\Users\datdt\AppData\Local\com.xiaowei.android\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb"
-    ]
+    search_dirs = get_xiaowei_leveldb_dirs()
     
     # 1. Thu thập tất cả file leveldb cùng mtime của chúng
     db_files = []
@@ -301,11 +332,7 @@ def get_device_name(serial):
     if not cached_mapping:
         raw_devices = adb.get_devices()
         db_files = []
-        search_dirs = [
-            r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\Local Storage\leveldb",
-            r"C:\Users\datdt\AppData\Local\xiaowei\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb",
-            r"C:\Users\datdt\AppData\Local\com.xiaowei.android\EBWebView\Default\IndexedDB\https_tauri.localhost_0.indexeddb.leveldb"
-        ]
+        search_dirs = get_xiaowei_leveldb_dirs()
         for sdir in search_dirs:
             if not os.path.exists(sdir):
                 continue
@@ -367,6 +394,16 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         )
     else:
         expanded_keywords = keywords
+
+    if not expanded_keywords:
+        safe_send_message(
+            message.chat.id,
+            "❌ Không có từ khóa Shopee hợp lệ để chạy.",
+        )
+        return
+
+    # Bốc đúng một từ khóa cho toàn bộ lượt chạy tuần tự.
+    current_keyword = random.choice(expanded_keywords)
         
     # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
     markup = telebot.types.InlineKeyboardMarkup()
@@ -378,6 +415,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
         f"Từ khóa chính: `{', '.join(keywords)}`\n"
         f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
+        f"Từ khóa được chọn cho toàn bộ máy: `{current_keyword}`\n"
         f"Tổng số máy: {len(devices)} máy\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**\n\n"
         f"_(Cập nhật tiến trình thời gian thực từng thiết bị ở bên dưới)_"
@@ -393,8 +431,6 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             break
             
         dev_name = get_device_name(dev)
-        current_keyword = random.choice(expanded_keywords)
-        
         # Bắt đầu theo dõi thời gian thực cho máy hiện tại
         dev_start_time = time.time()
         tracker.set_active_device(dev_name, dev, current_keyword, idx + 1, len(devices))
@@ -740,7 +776,7 @@ def handle_slash_commands(message):
     elif cmd_lower.startswith("/setshop"):
         shops_raw = cmd[8:].strip()
         if not shops_raw:
-            bot.reply_to(message, "⚠️ Vui lòng nhập danh sách shop sau lệnh `/setshop`, ví dụ:\n`/setshop khaihoanhealthcare.bt, nhathuockh.pharma`", parse_mode="Markdown")
+            bot.reply_to(message, "⚠️ Vui lòng nhập danh sách shop sau lệnh `/setshop`, ví dụ:\n`/setshop shop_a, shop_b`", parse_mode="Markdown")
             return
         handle_set_shop(message, shops_raw)
 
@@ -753,7 +789,7 @@ def handle_slash_commands(message):
 def send_full_dashboard(message):
     shops_str = ", ".join(config.SHOPEE_SHOP_NAMES) if config.SHOPEE_SHOP_NAMES else "Chưa cấu hình"
     instructions = (
-        "🤖 **BOX PHONE CONTROL - SHOPEE KHẢI HOÀN (BẢNG ĐIỀU KHIỂN & HƯỚNG DẪN)** 🤖\n\n"
+        "🤖 **BOXPHONE AUTOMATION - BẢNG ĐIỀU KHIỂN & HƯỚNG DẪN BOT** 🤖\n\n"
         f"🏬 **Shop dự phòng hiện tại:** `{shops_str}`\n"
         "----------------------------------------\n\n"
         "📖 **HƯỚNG DẪN SỬ DỤNG CHI TIẾT TẤT CẢ LỆNH:**\n\n"
@@ -765,7 +801,7 @@ def send_full_dashboard(message):
         "• **Tầng 2 (Bóc tách Tiêu đề thô CoT):**\n"
         "  Cú pháp: `/t2 <tiêu đề 1>, <tiêu đề 2>` hoặc `sinh tầng 2 <tiêu đề>`\n"
         "  _Ví dụ:_ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`\n"
-        "  *(Khi kết quả trả về, bạn chỉ cần bấm nút `▶️ Chạy Tuần Tự` hoặc `⚡ Chạy Song Song` ngay dưới tin nhắn để khởi chạy)*\n\n"
+        "  *(Sau khi AI sinh từ khóa, bấm nút `▶️ Chạy Tuần Tự` hoặc `⚡ Chạy Song Song` ngay dưới tin nhắn để khởi chạy)*\n\n"
 
         "🛒 **2. LỆNH TÌM KIẾM & TƯƠNG TÁC SHOPEE:**\n"
         "• **Chạy Tuần Tự (Cập nhật Real-time 100%):**\n"
@@ -775,11 +811,19 @@ def send_full_dashboard(message):
         "• **Chạy Song Song Tất Cả Các Máy:**\n"
         "  `tìm lâm đồng deriva`\n"
         "• **Chạy Trên Một Máy Chỉ Định:**\n"
-        "  `máy 10 tìm lâm đồng deriva`\n\n"
+        "  `máy 1 tìm lâm đồng deriva`\n\n"
 
-        "⚙️ **3. CẤU HÌNH SHOP DỰ PHÒNG:**\n"
+        "🎵 **3. LỆNH BƠM TIKTOK 3 BƯỚC:**\n"
+        "• **Chạy TikTok Song Song (Tất cả máy):**\n"
+        "  `/tiktok từ khóa 1, từ khóa 2 | ten_kenh_tiktok`\n"
+        "• **Chạy TikTok Tuần Tự:**\n"
+        "  `/tiktok tuần tự từ khóa 1, từ khóa 2 | ten_kenh_tiktok`\n"
+        "• **Chạy TikTok Trên Máy Chỉ Định:**\n"
+        "  `máy 1 bơm tiktok từ khóa 1 | ten_kenh_tiktok`\n\n"
+
+        "⚙️ **4. CẤU HÌNH SHOP DỰ PHÒNG:**\n"
         "• **Cài đặt danh sách shop mới:**\n"
-        "  `/setshop khaihoanhealthcare.bt, nhathuockh.pharma` hoặc `đặt shop khaihoanhealthcare.bt, nhathuockh.pharma`\n"
+        "  `/setshop shop_a, shop_b` hoặc `đặt shop shop_a, shop_b`\n"
         "• **Xem danh sách shop đang lưu:**\n"
         "  `/shop` hoặc `danh sách shop`\n\n"
 
@@ -1073,12 +1117,20 @@ def handle_all_messages(message):
                 
                 tracker = TelegramRealtimeTracker(bot, message.chat.id)
                 tracker.start_dashboard(f"🎵 **BƠM TIKTOK TUẦN TỰ**\nKênh mục tiêu: `{target_ch}`\nĐang quét trên {len(target_devices)} máy...")
-                
+
+                success_count = 0
                 for idx, dev in enumerate(target_devices):
                     if is_cancelled():
                         break
                     dev_name = get_device_name(dev)
-                    tracker.set_active_device(dev_name, dev, f"TikTok: {target_ch}", idx+1, len(target_devices))
+                    tracker.set_active_device(
+                        dev_name,
+                        dev,
+                        f"TikTok: {target_ch}",
+                        idx + 1,
+                        len(target_devices),
+                        platform="TikTok",
+                    )
                     dev_start = time.time()
                     success, err = adb.tiktok_automation_workflow(
                         dev,
@@ -1089,8 +1141,13 @@ def handle_all_messages(message):
                     )
                     dev_dur = time.time() - dev_start
                     send_device_finished_card(message.chat.id, dev_name, dev, f"TikTok: {target_ch}", success, err, dev_dur)
-                    
-                tracker.finish_dashboard("🏁 Hoàn tất tiến trình Bơm TikTok Tuần Tự!")
+                    if success:
+                        success_count += 1
+
+                tracker.finish_dashboard(
+                    f"🏁 **KẾT QUẢ TIKTOK TUẦN TỰ: "
+                    f"{success_count}/{len(target_devices)} MÁY THÀNH CÔNG**"
+                )
 
             threading.Thread(target=run_seq_tt_thread, daemon=True).start()
         else:
@@ -1100,14 +1157,38 @@ def handle_all_messages(message):
             
             def run_tt_parallel(device_id):
                 dev_name = get_device_name(device_id)
+                tracker = TelegramRealtimeTracker(bot, message.chat.id)
+                tracker.start_dashboard(
+                    f"🎵 **TIKTOK SONG SONG • MÁY {dev_name}**\n"
+                    f"Kênh mục tiêu: `{target_ch}`"
+                )
+                tracker.set_active_device(
+                    dev_name,
+                    device_id,
+                    f"TikTok: {target_ch}",
+                    1,
+                    1,
+                    platform="TikTok",
+                )
                 dev_start = time.time()
                 success, err = adb.tiktok_automation_workflow(
                     device_id,
                     seed_keywords=seed_kws,
                     target_channel=target_ch,
+                    status_callback=tracker.status_callback,
                     is_cancelled=is_cancelled
                 )
                 dev_dur = time.time() - dev_start
+                if success:
+                    tracker.finish_dashboard(
+                        f"✅ **MÁY {dev_name} HOÀN THÀNH TIKTOK**\n"
+                        f"Kênh: `{target_ch}`"
+                    )
+                else:
+                    tracker.finish_dashboard(
+                        f"❌ **MÁY {dev_name} TIKTOK THẤT BẠI**\n"
+                        f"Lỗi: `{err}`"
+                    )
                 send_device_finished_card(message.chat.id, dev_name, device_id, f"TikTok: {target_ch}", success, err, dev_dur)
                 return dev_name, success, err
                 
@@ -1336,9 +1417,17 @@ if __name__ == "__main__":
     print("--------------------------------------------------")
     
     # Khởi chạy bot
+    skip_pending_on_start = True
     while True:
         try:
-            bot.polling(none_stop=True, interval=1, timeout=20)
+            skip_pending = skip_pending_on_start
+            skip_pending_on_start = False
+            bot.polling(
+                none_stop=True,
+                skip_pending=skip_pending,
+                interval=1,
+                timeout=20,
+            )
         except Exception as e:
             print(f"Bot bi loi mat ket noi, dang khoi dong lai sau 5s... Loi: {e}")
             time.sleep(5)

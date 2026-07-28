@@ -1,0 +1,51 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from gui_app import GUIApp
+
+
+class _Entry:
+    def __init__(self, value):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+
+class TikTokGuiStatusTests(unittest.TestCase):
+    def test_sequential_run_reports_failure_instead_of_completed(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_tt_selection = _Entry("1")
+        app.ent_tt_seed = _Entry("chăm sóc da phan thiết")
+        app.ent_tt_channel = _Entry("Kênh TikTok Mẫu")
+        app.parse_targets = lambda entry_widget=None: ["device-1"]
+        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.run_in_thread = lambda action: action()
+        app.log_message = lambda _message: None
+
+        fake_adb = SimpleNamespace(
+            tiktok_automation_workflow=lambda *_args, **_kwargs: (
+                False,
+                "Không thể nhập chính xác từ khóa TikTok",
+            )
+        )
+
+        with (
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", return_value="1"),
+            patch("builtins.print") as print_mock,
+        ):
+            app.run_seq_tiktok()
+
+        output = "\n".join(
+            " ".join(str(part) for part in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("THẤT BẠI", output)
+        self.assertIn("KẾT THÚC CÓ LỖI", output)
+        self.assertNotIn("Hoàn tất tiến trình chạy TikTok Tuần Tự!", output)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -42,10 +42,18 @@ TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
 TIKTOK_PACKAGE_ALT = "com.zhiliaoapp.musically"
 
 # Cấu hình mặc định cho tự động hóa Bơm TikTok
-TIKTOK_TARGET_CHANNEL_DEFAULT = "Khải Hoàn Skincare PT"
+TIKTOK_TARGET_CHANNEL_DEFAULT = os.getenv("TIKTOK_TARGET_CHANNEL", "")
 TIKTOK_SEED_KEYWORDS_DEFAULT = "skincare, trị mụn, nặn mụn, chăm sóc da"
 TIKTOK_WATCH_TIME_MIN_DEFAULT = 5
 TIKTOK_WATCH_TIME_MAX_DEFAULT = 10
+TIKTOK_STEP1_TOTAL_MIN = 15
+TIKTOK_STEP1_TOTAL_MAX = 60
+TIKTOK_STEP2_TOTAL_MIN = 15
+TIKTOK_STEP2_TOTAL_MAX = 30
+TIKTOK_STEP3_TOTAL_MIN = 180
+TIKTOK_STEP3_TOTAL_MAX = 300
+TIKTOK_STEP3_VIDEO_MIN = 15
+TIKTOK_STEP3_VIDEO_MAX = 30
 
 # API Key Gemini dùng để sinh từ khóa
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -73,6 +81,17 @@ def generate_keywords_via_gemini(api_key, main_keywords, status_cb=None):
 
     if not keywords_list:
         return []
+
+    suffixes = [
+        " chính hãng", " giá rẻ", " tốt nhất", " shopee", " cao cấp",
+        " trị mụn", " bôi da", " an toàn", " cho bé", " hiệu quả"
+    ]
+    fallback_list = [
+        f"{keyword}{suffix}"
+        for keyword in keywords_list
+        for suffix in suffixes
+    ]
+    expected_count = len(keywords_list) * 10
 
     log(f"Đang sinh từ khóa phụ cho các từ khóa chính: {keywords_list}...")
     
@@ -117,20 +136,17 @@ def generate_keywords_via_gemini(api_key, main_keywords, status_cb=None):
             generated_list = json.loads(text_response.strip())
             if isinstance(generated_list, list):
                 res = [str(item).strip() for item in generated_list if item]
-                log(f"Đã dùng Gemini sinh ra {len(res)} từ khóa thành công!")
-                return res
+                if len(res) == expected_count:
+                    log(f"Đã dùng Gemini sinh ra đúng {len(res)} từ khóa thành công!")
+                    return res
+                log(
+                    f"Gemini trả về {len(res)}/{expected_count} từ khóa; "
+                    "dùng danh sách dự phòng để bảo đảm đúng 10 từ cho mỗi đầu vào."
+                )
     except Exception as e:
         log(f"Lỗi gọi Gemini API ({e}). Đang tạo danh sách từ khóa phụ dự phòng...")
         
     # Luồng dự phòng nếu API lỗi: tự sinh từ khóa liên quan bằng các hậu tố phổ biến
-    suffixes = [
-        " chính hãng", " giá rẻ", " tốt nhất", " shopee", " cao cấp", 
-        " trị mụn", " bôi da", " an toàn", " cho bé", " hiệu quả"
-    ]
-    fallback_list = []
-    for kw in keywords_list:
-        for s in suffixes:
-            fallback_list.append(f"{kw}{s}")
     log(f"Đã tạo {len(fallback_list)} từ khóa phụ dự phòng.")
     return fallback_list
 
@@ -161,8 +177,12 @@ def generate_keywords_tier2_via_gemini(api_key, shopee_product_titles, status_cb
     
     all_tier2_keywords = []
     
-    # Tính số lượng từ khóa sinh ra trên mỗi tiêu đề để tổng số lượng nằm trong khoảng 15 - 30 từ
-    count_per_title = 5 if len(titles) >= 3 else (10 if len(titles) == 2 else 15)
+    # Mỗi tiêu đề luôn sinh đúng 10 từ khóa: 1 đầu vào -> 10, 10 đầu vào -> 100.
+    count_per_title = 10
+    fallback_suffixes = [
+        " trị mụn", " bôi da", " tốt nhất", " hiệu quả", " chính hãng",
+        " an toàn", " cho bé", " giá rẻ", " cao cấp", " tốt không"
+    ]
 
     for idx, title in enumerate(titles):
         log(f"-> Phân tích tiêu đề [{idx+1}/{len(titles)}]: \"{title[:45]}...\"")
@@ -211,28 +231,35 @@ def generate_keywords_tier2_via_gemini(api_key, shopee_product_titles, status_cb
                 
                 generated_list = json.loads(text_response.strip())
                 if isinstance(generated_list, list):
-                    res = [str(item).strip() for item in generated_list if item]
+                    res = []
+                    for item in generated_list:
+                        keyword = str(item).strip()
+                        if keyword and keyword not in res:
+                            res.append(keyword)
+                        if len(res) == count_per_title:
+                            break
+
+                    if len(res) < count_per_title:
+                        words = [w for w in title.split() if len(w) > 2][:3]
+                        base_kw = " ".join(words) if words else title
+                        for suffix in fallback_suffixes:
+                            fallback_keyword = f"{base_kw}{suffix}"
+                            if fallback_keyword not in res:
+                                res.append(fallback_keyword)
+                            if len(res) == count_per_title:
+                                break
+
                     all_tier2_keywords.extend(res)
-                    log(f"   + Đã sinh {len(res)} từ khóa Tầng 2 cho tiêu đề #{idx+1}")
+                    log(f"   + Đã sinh đủ {len(res)} từ khóa Tầng 2 cho tiêu đề #{idx+1}")
                     continue
         except Exception as e:
             log(f"   + Lỗi gọi Gemini API cho tiêu đề #{idx+1} ({e}). Dùng luồng dự phòng...")
             
         # Luồng dự phòng nếu API lỗi: tự sinh từ khóa liên quan bằng các hậu tố phổ biến
-        suffixes = [
-            " trị mụn", " bôi da", " tốt nhất", " hiệu quả", " chính hãng", 
-            " an toàn", " cho bé", " giá rẻ", " cao cấp", " tốt không"
-        ]
         words = [w for w in title.split() if len(w) > 2][:3]
         base_kw = " ".join(words) if words else title
-        for s in suffixes[:count_per_title]:
+        for s in fallback_suffixes:
             all_tier2_keywords.append(f"{base_kw}{s}")
 
-    # Lọc trùng lặp nhưng giữ nguyên thứ tự
-    unique_keywords = []
-    for kw in all_tier2_keywords:
-        if kw and kw not in unique_keywords:
-            unique_keywords.append(kw)
-
-    log(f"✅ Đã sinh tổng cộng {len(unique_keywords)} từ khóa Tầng 2 từ {len(titles)} tiêu đề sản phẩm!")
-    return unique_keywords
+    log(f"✅ Đã sinh tổng cộng {len(all_tier2_keywords)} từ khóa Tầng 2 từ {len(titles)} tiêu đề sản phẩm!")
+    return all_tier2_keywords
