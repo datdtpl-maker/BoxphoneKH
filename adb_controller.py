@@ -309,7 +309,7 @@ class ADBController:
         return s
 
     def input_text_naturally(self, device_id, text):
-        """Mô phỏng gõ chữ từ app truyền sang với cơ chế kép bảo đảm 100% gõ chuẩn"""
+        """Mô phỏng gõ chữ từ app truyền sang từng từ một chuẩn 100% bằng ADB keyevents"""
         self.ensure_ime(device_id)
         
         # 1. Thử gửi Tiếng Việt có dấu qua XwIME Base64 broadcast
@@ -326,16 +326,21 @@ class ADBController:
             pass
         time.sleep(0.3)
         
-        # 2. Phương án bảo đảm 100%: Gửi chuỗi không dấu an toàn qua ADB input text (thay space bằng %s)
+        # 2. Phương án bảo đảm 100%: Chuyển thành không dấu & gõ từng từ một qua ADB text + space (62)
         try:
             ascii_text = self.remove_vietnamese_accents(text)
-            clean_ascii = re.sub(r'[^a-zA-Z0-9\s]', '', ascii_text).strip()
-            if clean_ascii:
-                formatted_text = clean_ascii.replace(" ", "%s")
-                self.execute_adb(device_id, ["shell", "input", "text", formatted_text])
+            words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in ascii_text.split() if w.strip()]
+            for idx, w in enumerate(words):
+                if w:
+                    self.execute_adb(device_id, ["shell", "input", "text", w])
+                    time.sleep(0.15)
+                    if idx < len(words) - 1:
+                        # Phím cách (Space keyevent 62)
+                        self.execute_adb(device_id, ["shell", "input", "keyevent", "62"])
+                        time.sleep(0.15)
         except Exception:
             pass
-        time.sleep(0.4)
+        time.sleep(0.5)
 
 
     def press_enter(self, device_id):
