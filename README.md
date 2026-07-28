@@ -1,4 +1,4 @@
-# Box Phone Shopee Automation Bot - Khải Hoàn Edition 🤖📱
+# Box Phone Shopee Automation Bot 🤖📱
 
 Hệ thống tự động hóa điều khiển hàng loạt điện thoại Android (Box Phone) thông qua Telegram Bot chuyên nghiệp dành cho hệ thống **BOX PHONE - SHOPEE KHẢI HOÀN**. Dự án tích hợp các kịch bản tìm kiếm sản phẩm thông minh, tự động giải Captcha bằng OpenCV, đo độ phân giải động, và đặc biệt là giả lập hành vi người dùng thật 100% để tối ưu hóa SEO sản phẩm & cửa hàng.
 
