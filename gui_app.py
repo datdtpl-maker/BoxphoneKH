@@ -1360,12 +1360,17 @@ class GUIApp(ctk.CTk):
                     break
                 dev_name = main.get_device_name(dev)
                 print(f"[GUI] TikTok -> Máy {dev_name} ({idx+1}/{len(target_devices)})")
+                
+                def tt_status_cb(d, msg):
+                    self.log_message(f"[{msg}]")
+
                 main.adb.tiktok_automation_workflow(
                     dev, 
                     seed_keywords=seed_raw, 
                     target_channel=channel, 
                     min_delay=min_d, 
                     max_delay=max_d, 
+                    status_callback=tt_status_cb,
                     is_cancelled=main.is_cancelled
                 )
             print("[GUI] 🏁 Hoàn tất tiến trình chạy TikTok Tuần Tự!")
@@ -1391,12 +1396,17 @@ class GUIApp(ctk.CTk):
         print(f"[GUI] Bắt đầu chạy TikTok Song Song trên {len(target_devices)} máy...")
 
         def run_parallel_tt(device_id):
+            dev_name = main.get_device_name(device_id)
+            def tt_status_cb(d, msg):
+                self.log_message(f"[Máy {dev_name}] {msg}")
+
             main.adb.tiktok_automation_workflow(
                 device_id, 
                 seed_keywords=seed_raw, 
                 target_channel=channel, 
                 min_delay=min_d, 
                 max_delay=max_d, 
+                status_callback=tt_status_cb,
                 is_cancelled=main.is_cancelled
             )
 

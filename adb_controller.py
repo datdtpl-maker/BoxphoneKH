@@ -1337,7 +1337,10 @@ class ADBController:
             coords = (int(width * 0.90), int(height * 0.055))
             
         self.tap(device_id, coords[0], coords[1])
-        time.sleep(1.5)
+        time.sleep(2.0)
+        # Tap tiếp ô nhập liệu ở giữa thanh search header để active bàn phím
+        self.tap(device_id, int(width * 0.45), int(height * 0.055))
+        time.sleep(1.0)
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Phân tích kết quả tìm kiếm TikTok và click vào Thẻ Người dùng / Kênh Khải Hoàn Skincare"""
@@ -1395,6 +1398,7 @@ class ADBController:
         Bước 3: Tìm tên kênh mục tiêu (Khải Hoàn Skincare PT), click vào Kênh, chọn 1-2 video trong lưới để lướt xem
         """
         def update_status(msg):
+            print(f"[Device {device_id[:6]}] {msg}")
             if status_callback:
                 status_callback(device_id, msg)
 
@@ -1457,6 +1461,7 @@ class ADBController:
             self.input_text_naturally(device_id, seed_kw)
             time.sleep(1.0)
             self.press_enter(device_id)
+            self.tap(device_id, int(width * 0.90), int(height * 0.055))
             time.sleep(3.5)
             check_cancelled()
 
@@ -1473,9 +1478,7 @@ class ADBController:
             check_cancelled()
             update_status(f"[TikTok B3] Tìm kiếm Kênh mục tiêu '{target_channel}'...")
             
-            # Click lại Kính Lúp ở trang search
-            self.tap(device_id, int(width * 0.90), int(height * 0.055))
-            time.sleep(1.0)
+            # Click lại ô tìm kiếm ở trên đỉnh trang search
             self.tap(device_id, int(width * 0.45), int(height * 0.055))
             time.sleep(1.0)
 
@@ -1483,6 +1486,7 @@ class ADBController:
             self.input_text_naturally(device_id, target_channel)
             time.sleep(1.0)
             self.press_enter(device_id)
+            self.tap(device_id, int(width * 0.90), int(height * 0.055))
             time.sleep(3.5)
             check_cancelled()
 
