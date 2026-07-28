@@ -167,13 +167,13 @@ class GUIApp(ctk.CTk):
         )
         self.btn_save.pack(fill="x", padx=16, pady=(8, 12))
         
-        # Phân đoạn 2: Bảng tác vụ tự động
+        # Phân đoạn 2: Bảng tác vụ tự động Shopee
         self.tasks_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.tasks_card.pack(fill="x", padx=16, pady=6)
         
         self.lbl_tasks = ctk.CTkLabel(
             self.tasks_card, 
-            text="🚀 Điều khiển Tác vụ & Từ khóa", 
+            text="🛒 Điều khiển Tác vụ Tự động hóa Shopee", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#0f172a"
         )
@@ -181,7 +181,7 @@ class GUIApp(ctk.CTk):
         
         self.lbl_main_keywords = ctk.CTkLabel(
             self.tasks_card,
-            text="📌 Từ khóa chính (Mỗi dòng 1 từ khóa):",
+            text="📌 Từ khóa chính Shopee (Mỗi dòng 1 từ khóa):",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color="#334155"
         )
@@ -290,7 +290,7 @@ class GUIApp(ctk.CTk):
         
         self.ent_selection = ctk.CTkEntry(
             self.tasks_card, 
-            placeholder_text="Chọn máy chạy (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+            placeholder_text="Chọn máy chạy Shopee (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
             fg_color="#ffffff",
             border_color="#cbd5e1",
             text_color="#0f172a",
@@ -300,7 +300,7 @@ class GUIApp(ctk.CTk):
         )
         self.ent_selection.pack(fill="x", padx=16, pady=3)
         
-        # Panel nút chạy tác vụ
+        # Panel nút chạy tác vụ Shopee
         self.btn_grid = ctk.CTkFrame(self.tasks_card, fg_color="transparent")
         self.btn_grid.pack(fill="x", padx=16, pady=(6, 8))
         self.btn_grid.columnconfigure(0, weight=1)
@@ -308,7 +308,7 @@ class GUIApp(ctk.CTk):
         
         self.btn_seq = ctk.CTkButton(
             self.btn_grid, 
-            text="▶️ Chạy Tuần Tự", 
+            text="▶️ Chạy Tuần Tự Shopee", 
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color="#10b981", 
             hover_color="#059669",
@@ -321,7 +321,7 @@ class GUIApp(ctk.CTk):
         
         self.btn_par = ctk.CTkButton(
             self.btn_grid, 
-            text="⚡ Chạy Song Song", 
+            text="⚡ Chạy Song Song Shopee", 
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color="#2563eb", 
             hover_color="#1d4ed8",
@@ -334,7 +334,7 @@ class GUIApp(ctk.CTk):
         
         self.btn_stop = ctk.CTkButton(
             self.tasks_card, 
-            text="🛑 DỪNG CHẠY KHẨN CẤP", 
+            text="🛑 DỪNG SHOPEE KHẨN CẤP", 
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color="#ef4444", 
             hover_color="#dc2626",
@@ -347,7 +347,7 @@ class GUIApp(ctk.CTk):
         )
         self.btn_stop.pack(fill="x", padx=16, pady=(0, 12))
 
-        # Phân đoạn 2.5: Bảng điều khiển tác vụ Bơm TikTok 3 Bước
+        # Phân đoạn 2.5: Bảng điều khiển tác vụ Bơm TikTok 3 Bước (TÁCH BIỆT HOÀN TOÀN)
         self.tiktok_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.tiktok_card.pack(fill="x", padx=16, pady=6)
         
@@ -402,8 +402,16 @@ class GUIApp(ctk.CTk):
         self.ent_tt_channel.pack(fill="x", padx=16, pady=3)
 
         # Cài đặt thời gian dừng xem video (Min - Max)
+        self.lbl_tt_delay = ctk.CTkLabel(
+            self.tiktok_card,
+            text="⏱️ Thời gian lướt video (Giây Min - Max):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#334155"
+        )
+        self.lbl_tt_delay.pack(padx=16, pady=(4, 0), anchor="w")
+
         self.delay_frame = ctk.CTkFrame(self.tiktok_card, fg_color="transparent")
-        self.delay_frame.pack(fill="x", padx=16, pady=4)
+        self.delay_frame.pack(fill="x", padx=16, pady=2)
         self.delay_frame.columnconfigure(0, weight=1)
         self.delay_frame.columnconfigure(1, weight=1)
 
@@ -431,9 +439,22 @@ class GUIApp(ctk.CTk):
         self.ent_tt_max_delay.insert(0, str(config.TIKTOK_WATCH_TIME_MAX_DEFAULT))
         self.ent_tt_max_delay.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
+        # Ô chọn máy chạy TikTok riêng biệt
+        self.ent_tt_selection = ctk.CTkEntry(
+            self.tiktok_card, 
+            placeholder_text="Chọn máy chạy TikTok (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+            fg_color="#ffffff",
+            border_color="#cbd5e1",
+            text_color="#0f172a",
+            placeholder_text_color="#94a3b8",
+            corner_radius=8,
+            height=32
+        )
+        self.ent_tt_selection.pack(fill="x", padx=16, pady=(6, 3))
+
         # Nút bấm chạy TikTok Tuần tự / Song song
         self.tt_btn_grid = ctk.CTkFrame(self.tiktok_card, fg_color="transparent")
-        self.tt_btn_grid.pack(fill="x", padx=16, pady=(6, 10))
+        self.tt_btn_grid.pack(fill="x", padx=16, pady=(6, 4))
         self.tt_btn_grid.columnconfigure(0, weight=1)
         self.tt_btn_grid.columnconfigure(1, weight=1)
 
@@ -462,6 +483,22 @@ class GUIApp(ctk.CTk):
             command=self.run_par_tiktok
         )
         self.btn_tt_par.grid(row=0, column=1, padx=(3, 0), sticky="ew")
+
+        # Nút dừng TikTok khẩn cấp riêng biệt
+        self.btn_tt_stop = ctk.CTkButton(
+            self.tiktok_card, 
+            text="🛑 DỪNG TIKTOK KHẨN CẤP", 
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#ef4444", 
+            hover_color="#dc2626",
+            text_color="#ffffff",
+            border_width=1,
+            border_color="#f87171",
+            corner_radius=8,
+            height=36,
+            command=self.stop_all
+        )
+        self.btn_tt_stop.pack(fill="x", padx=16, pady=(4, 10))
         
         # Phân đoạn 3: Bảng điều khiển hàng loạt thủ công
         self.bulk_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
@@ -935,8 +972,10 @@ class GUIApp(ctk.CTk):
         main.cancel_sequential = True
         print("[GUI] 🛑 ĐÃ XÓA TOÀN BỘ LUỒNG VÀ DỪNG KHẨN CẤP! Phần mềm sẵn sàng nhận lệnh mới.")
 
-    def parse_targets(self):
-        selection = self.ent_selection.get().strip()
+    def parse_targets(self, entry_widget=None):
+        if entry_widget is None:
+            entry_widget = self.ent_selection
+        selection = entry_widget.get().strip()
         devices = main.get_ordered_devices()
         if not devices:
             messagebox.showwarning("Cảnh báo", "Không có thiết bị nào đang kết nối!")
@@ -1086,7 +1125,7 @@ class GUIApp(ctk.CTk):
             
         self.run_in_thread(action)
 
-    # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM =================
+    # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM SHOPEE =================
     def run_seq_search(self):
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
@@ -1095,7 +1134,7 @@ class GUIApp(ctk.CTk):
         if mode == "original":
             raw_text = self.txt_main_keywords.get("1.0", "end").strip()
             if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính!")
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính Shopee!")
                 return
             keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
             for kw in keywords:
@@ -1139,7 +1178,7 @@ class GUIApp(ctk.CTk):
                         clean_keywords.append(clean_kw)
                 keywords = clean_keywords
             
-        target_devices = self.parse_targets()
+        target_devices = self.parse_targets(entry_widget=self.ent_selection)
         if not target_devices:
             return
             
@@ -1231,7 +1270,7 @@ class GUIApp(ctk.CTk):
                         clean_keywords.append(clean_kw)
                 keywords = clean_keywords
             
-        target_devices = self.parse_targets()
+        target_devices = self.parse_targets(entry_widget=self.ent_selection)
         if not target_devices:
             return
             
@@ -1270,7 +1309,7 @@ class GUIApp(ctk.CTk):
                 try:
                     main.bot.send_message(
                         config.ALLOWED_USER_IDS[0],
-                        f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG**\n\n"
+                        f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG SHOPEE**\n\n"
                         f"Từ khóa chính: `{', '.join(keywords)}`\n"
                         f"Từ khóa mở rộng (Gemini): Có {len(keywords)} từ khóa\n"
                         f"Tổng số máy: {len(target_devices)} máy\n"
@@ -1318,14 +1357,14 @@ class GUIApp(ctk.CTk):
             success_count = sum(1 for r in results if r[2])
             fail_count = len(results) - success_count
             
-            summary = f"🏁 **[GUI] KẾT QUẢ TÌM SHOP LÂM ĐỒNG (SONG SONG):**\n\n"
+            summary = f"🏁 **[GUI] KẾT QUẢ TÌM SHOPEE (SONG SONG):**\n\n"
             summary += f"✅ Hoàn thành trọn vẹn: **{success_count}/{len(target_devices)} máy**\n"
             if fail_count > 0:
                 summary += f"❌ Thất bại: **{fail_count} máy**\n"
                 fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
                 summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
                 
-            print("[GUI] Tiến trình tìm kiếm song song kết thúc.")
+            print("[GUI] Tiến trình tìm kiếm song song Shopee kết thúc.")
             if config.ALLOWED_USER_IDS:
                 try:
                     main.bot.send_message(config.ALLOWED_USER_IDS[0], summary, parse_mode="Markdown")
@@ -1336,7 +1375,7 @@ class GUIApp(ctk.CTk):
 
     # ================= CÁC TÁC VỤ BƠM TIKTOK =================
     def run_seq_tiktok(self):
-        target_devices = self.parse_targets()
+        target_devices = self.parse_targets(entry_widget=self.ent_tt_selection)
         if not target_devices:
             return
         seed_raw = self.ent_tt_seed.get().strip()
@@ -1378,7 +1417,7 @@ class GUIApp(ctk.CTk):
         self.run_in_thread(action)
 
     def run_par_tiktok(self):
-        target_devices = self.parse_targets()
+        target_devices = self.parse_targets(entry_widget=self.ent_tt_selection)
         if not target_devices:
             return
         seed_raw = self.ent_tt_seed.get().strip()
