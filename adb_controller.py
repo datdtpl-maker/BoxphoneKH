@@ -1800,9 +1800,20 @@ class ADBController:
                 has_target = True
             if "edittext" in class_name.lower():
                 has_search_input = True
-            if text in ("message", "following", "follow"):
+            if text in (
+                "message",
+                "following",
+                "follow",
+                "nhắn tin",
+                "đang follow",
+                "đã follow",
+                "theo dõi",
+            ):
                 has_profile_action = True
-            if "user_video_view" in resource_id:
+            if (
+                "user_video_view" in resource_id
+                or resource_id.endswith(":id/erf")
+            ):
                 video_nodes += 1
 
         return (

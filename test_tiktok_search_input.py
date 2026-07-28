@@ -120,6 +120,42 @@ class TikTokSearchInputTests(unittest.TestCase):
         )
         self.assertEqual([(540, 422)], taps)
 
+    def test_profile_verifier_supports_vietnamese_actions_and_erf_video_items(self):
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.Button"
+                    text="Kênh TikTok Mẫu"
+                    clickable="true"
+                    bounds="[294,436][785,494]" />
+              <node class="android.widget.TextView"
+                    text="Đã follow"
+                    resource-id="com.ss.android.ugc.trill:id/s71" />
+              <node class="android.widget.TextView"
+                    text=" Nhắn tin"
+                    resource-id="com.ss.android.ugc.trill:id/faz" />
+              <node class="android.widget.GridView"
+                    resource-id="com.ss.android.ugc.trill:id/hui"
+                    bounds="[0,1108][1079,1920]">
+                <node class="android.widget.FrameLayout"
+                      clickable="true"
+                      resource-id="com.ss.android.ugc.trill:id/erf"
+                      bounds="[0,1108][358,1585]" />
+                <node class="android.widget.FrameLayout"
+                      clickable="true"
+                      resource-id="com.ss.android.ugc.trill:id/erf"
+                      bounds="[361,1108][718,1585]" />
+              </node>
+            </hierarchy>
+            """
+        )
+
+        self.assertTrue(
+            self.controller.is_on_tiktok_target_profile(
+                "device-1", "Kênh TikTok Mẫu", root=profile_root
+            )
+        )
+
     @patch("adb_controller.time.sleep", return_value=None)
     def test_profile_video_click_supports_s1_grid_resource_ids(self, _sleep):
         profile_root = ET.fromstring(
