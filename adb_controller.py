@@ -322,10 +322,11 @@ class ADBController:
         # Cách 3: Lệnh keyevent SEARCH của Android (84)
         self.keyevent(device_id, 84)
 
-    def clear_input_field(self, device_id, max_chars=60):
-        """Xóa sạch văn bản cũ trong ô tìm kiếm trước khi nhập văn bản mới"""
+    def clear_input_field(self, device_id, max_chars=40):
+        """Xóa sạch văn bản cũ trong ô tìm kiếm một cách triệt để"""
         try:
-            self.execute_adb(device_id, ["shell", "input", "keyevent"] + ["67"] * max_chars)
+            for _ in range(max_chars):
+                self.execute_adb(device_id, ["shell", "input", "keyevent", "67"])
         except Exception:
             pass
 
@@ -1415,19 +1416,20 @@ class ADBController:
 
     def clear_tiktok_search_input(self, device_id):
         """
-        Bấm nút (X) để xóa sạch toàn bộ từ khóa cũ trong ô tìm kiếm TikTok trước khi nhập từ khóa mới.
+        BẮT BUỘC: Xóa sạch 100% toàn bộ từ khóa cũ trong ô tìm kiếm TikTok trước khi nhập từ khóa mới.
         """
         width, height = self.get_screen_size(device_id)
         
-        # 1. Bấm vào ô tìm kiếm để active
-        self.tap(device_id, int(width * 0.50), int(height * 0.055))
-        time.sleep(0.8)
+        # 1. Bấm vào ô tìm kiếm ở trên cùng để active bàn phím
+        self.tap(device_id, int(width * 0.45), int(height * 0.055))
+        time.sleep(0.5)
 
-        # 2. Bấm nút (X) xóa từ khóa ở góc phải ô tìm kiếm (x ~ 81% width, y ~ 5.5% height)
-        clear_x = int(width * 0.81)
-        clear_y = int(height * 0.055)
-        
-        # Thử tìm nút (X) qua XML UI Dump trước
+        # 2. Bấm nút (X) xóa từ khóa ở các tọa độ x khả dĩ (78%, 81%, 84%) ở góc phải ô tìm kiếm
+        for x_ratio in [0.81, 0.78, 0.84]:
+            self.tap(device_id, int(width * x_ratio), int(height * 0.055))
+            time.sleep(0.2)
+
+        # 3. Thử tìm nút (X) qua XML UI Dump nếu có
         xml_file = f"/sdcard/dump_clear_btn_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
@@ -1446,8 +1448,10 @@ class ADBController:
                         if m:
                             x1, y1, x2, y2 = map(int, m.groups())
                             if (y1 + y2) // 2 < 250:
-                                clear_x = (x1 + x2) // 2
-                                clear_y = (y1 + y2) // 2
+                                cx = (x1 + x2) // 2
+                                cy = (y1 + y2) // 2
+                                self.tap(device_id, cx, cy)
+                                time.sleep(0.3)
                                 break
             except Exception:
                 pass
@@ -1457,12 +1461,8 @@ class ADBController:
                 except Exception:
                     pass
 
-        # Click nút (X) để xóa sạch ô nhập
-        self.tap(device_id, clear_x, clear_y)
-        time.sleep(0.8)
-        
-        # Xóa thêm bằng ADB Keyevent Delete dự phòng
-        self.clear_input_field(device_id)
+        # 4. Gửi chuỗi phím Backspace keyevent 67 để xóa sạch 100% toàn bộ ký tự cũ
+        self.clear_input_field(device_id, max_chars=50)
         time.sleep(0.5)
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
@@ -1599,12 +1599,18 @@ class ADBController:
 
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU (KHẢI HOÀN SKINCARE) =================
             check_cancelled()
-            update_status(f"[TikTok B3] Xóa từ khóa mồi cũ & Tìm Kênh mục tiêu '{target_channel}'...")
+            update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
             
-            # Bấm nút (X) để xóa sạch từ khóa mồi cũ trước khi gõ tên kênh
-            self.clear_tiktok_search_input(device_id)
+            # 1. Bấm vào Kính lúp / Ô tìm kiếm ở đầu trang
+            self.find_and_click_tiktok_search(device_id)
             check_cancelled()
 
+            # 2. XÓA SẠCH 100% từ khóa mồi cũ của Bước 2
+            self.clear_tiktok_search_input(device_id)
+            time.sleep(0.8)
+            check_cancelled()
+
+            # 3. Gõ tên Kênh mục tiêu chuẩn xác
             self.input_text_naturally(device_id, target_channel)
             time.sleep(1.0)
             self.press_enter(device_id)
