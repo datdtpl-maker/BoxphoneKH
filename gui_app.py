@@ -56,7 +56,7 @@ class GUIApp(ctk.CTk):
         
         # Header Banner Cá nhân hóa (Light Premium Banner)
         self.brand_badge = ctk.CTkFrame(self.left_panel, fg_color="#eff6ff", corner_radius=14, border_width=1, border_color="#bfdbfe")
-        self.brand_badge.pack(fill="x", padx=16, pady=(12, 10))
+        self.brand_badge.pack(fill="x", padx=16, pady=(12, 6))
         
         self.lbl_brand = ctk.CTkLabel(
             self.brand_badge, 
@@ -68,13 +68,39 @@ class GUIApp(ctk.CTk):
         
         self.lbl_sub_brand = ctk.CTkLabel(
             self.brand_badge, 
-            text="Box Phone System Pro • Tự Động Hóa Shopee", 
+            text="Box Phone System Pro • Shopee & TikTok Automation", 
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color="#475569"
         )
         self.lbl_sub_brand.pack(pady=(0, 10), padx=16, anchor="w")
+
+        # ================= PHÂN ĐOẠN 1: NHẬT KÝ HOẠT ĐỘNG (ĐẶT TRÊN CÙNG PHẦN MỀM) =================
+        self.lbl_log = ctk.CTkLabel(
+            self.left_panel, 
+            text="📟 Nhật ký hoạt động (Real-time Console Log)", 
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color="#0f172a"
+        )
+        self.lbl_log.pack(padx=16, anchor="w", pady=(6, 2))
         
-        # Phân đoạn 1: Cấu hình hệ thống & Kết nối
+        self.log_box = ctk.CTkTextbox(
+            self.left_panel, 
+            height=140, 
+            state="disabled",
+            fg_color="#0f172a", 
+            text_color="#06b6d4", 
+            font=ctk.CTkFont(family="Consolas", size=11),
+            border_width=1,
+            border_color="#cbd5e1",
+            corner_radius=10
+        )
+        self.log_box.pack(fill="x", padx=16, pady=(0, 8))
+        
+        # Redirect standard output & error to log_box at top
+        sys.stdout = ConsoleRedirector(self.log_box)
+        sys.stderr = ConsoleRedirector(self.log_box)
+        
+        # Phân đoạn 2: Cấu hình hệ thống & Kết nối
         self.settings_card = ctk.CTkFrame(self.left_panel, fg_color="#f8fafc", corner_radius=14, border_width=1, border_color="#e2e8f0")
         self.settings_card.pack(fill="x", padx=16, pady=6)
         
@@ -647,32 +673,6 @@ class GUIApp(ctk.CTk):
         )
         self.btn_bulk_reboot.grid(row=0, column=3, padx=2, sticky="ew")
         
-        # Phân đoạn 4: Khung Terminal Log (High contrast slate console)
-        self.lbl_log = ctk.CTkLabel(
-            self.left_panel, 
-            text="📟 Nhật ký hoạt động (Real-time Console)", 
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#0f172a"
-        )
-        self.lbl_log.pack(padx=20, anchor="w", pady=(10, 2))
-        
-        self.log_box = ctk.CTkTextbox(
-            self.left_panel, 
-            height=130, 
-            state="disabled",
-            fg_color="#0f172a", 
-            text_color="#06b6d4", 
-            font=ctk.CTkFont(family="Consolas", size=11),
-            border_width=1,
-            border_color="#cbd5e1",
-            corner_radius=10
-        )
-        self.log_box.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        
-        # Redirect standard output
-        sys.stdout = ConsoleRedirector(self.log_box)
-        sys.stderr = ConsoleRedirector(self.log_box)
-        
         # ================= RIGHT MONITOR GRID PANEL =================
         self.right_panel = ctk.CTkFrame(self, corner_radius=16, fg_color="#ffffff", border_width=1, border_color="#cbd5e1")
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=16)
@@ -687,7 +687,7 @@ class GUIApp(ctk.CTk):
         
         self.lbl_devices = ctk.CTkLabel(
             self.header_frame, 
-            text="📱 QUẢN LÝ THIẾT BỊ BOX PHONE (20 DEVICE SLOTS)", 
+            text="📱 QUẢN LÝ THIẾT BỊ BOX PHONE", 
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
             text_color="#0f172a"
         )
