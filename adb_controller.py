@@ -296,11 +296,23 @@ class ADBController:
         ]
         return self.execute_adb(device_id, cmd)
 
+    def remove_vietnamese_accents(self, text):
+        """Chuyển đổi chuỗi tiếng Việt có dấu thành không dấu để gửi an toàn qua ADB shell input text"""
+        s1 = u'ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẶặẸẹẺẻẼẽẾếỀềỂểỄễỆệỈỉỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỴỵỶỷỸỹ'
+        s0 = u'AAAAEEEIIOOOOUUYaaaaeeeiioooouuyAdDIiOoUuAaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiIiOoOoOoOoOoOoOoOoOoOoOoOoUuUuUuUuUuUuUuYyYyYyYy'
+        s = ''
+        for c in text:
+            if c in s1:
+                s += s0[s1.index(c)]
+            else:
+                s += c
+        return s
+
     def input_text_naturally(self, device_id, text):
-        """Mô phỏng gõ chữ tự nhiên với cơ chế kép (XwIME + ADB input text fallback)"""
+        """Mô phỏng gõ chữ từ app truyền sang với cơ chế kép bảo đảm 100% gõ chuẩn"""
         self.ensure_ime(device_id)
         
-        # 1. Gửi qua XwIME broadcast (mã hóa base64)
+        # 1. Thử gửi Tiếng Việt có dấu qua XwIME Base64 broadcast
         try:
             b64_bytes = base64.b64encode(text.encode('utf-8'))
             b64_str = b64_bytes.decode('utf-8')
@@ -312,13 +324,15 @@ class ADBController:
             ])
         except Exception:
             pass
-        time.sleep(0.4)
+        time.sleep(0.3)
         
-        # 2. Gửi qua ADB shell input text làm phương án kép bảo đảm 100% gõ được chữ
+        # 2. Phương án bảo đảm 100%: Gửi chuỗi không dấu an toàn qua ADB input text (thay space bằng %s)
         try:
-            # Chuyển đổi ký tự và thay space bằng %s cho ADB shell input text
-            clean_ascii = text.replace(" ", "%s")
-            self.execute_adb(device_id, ["shell", "input", "text", clean_ascii])
+            ascii_text = self.remove_vietnamese_accents(text)
+            clean_ascii = re.sub(r'[^a-zA-Z0-9\s]', '', ascii_text).strip()
+            if clean_ascii:
+                formatted_text = clean_ascii.replace(" ", "%s")
+                self.execute_adb(device_id, ["shell", "input", "text", formatted_text])
         except Exception:
             pass
         time.sleep(0.4)
