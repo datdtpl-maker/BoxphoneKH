@@ -14,17 +14,48 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import main
 
-# Operations dashboard: dark, high-contrast, dense and optimized for long sessions.
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
+# Bright operations dashboard with a lightweight iOS-inspired glass treatment.
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
 class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("BOXPHONE AUTOMATION • OPERATIONS CONTROL CENTER")
-        self.geometry("1480x940")
-        self.minsize(1180, 760)
-        self.configure(fg_color="#070b14")
+        self.title("BoxPhoneControl")
+        self.geometry("1480x880")
+        self.minsize(1100, 720)
+        self.configure(fg_color="#edf3fa")
+
+        # Design tokens: light "liquid glass" surfaces rendered with native
+        # CustomTkinter layers so the dashboard remains fast with many devices.
+        bg = "#edf3fa"
+        glass = "#fbfdff"
+        glass_tint = "#f5f9ff"
+        surface = "#ffffff"
+        border = "#d7e3f1"
+        border_hover = "#a9c6f7"
+        text = "#17233c"
+        muted = "#64748b"
+        blue = "#2563eb"
+        blue_hover = "#1d4ed8"
+        blue_soft = "#eaf2ff"
+        orange = "#ea6a12"
+        orange_soft = "#fff3e8"
+        pink = "#c0266d"
+        pink_soft = "#fcecf5"
+        violet = "#6d4bd1"
+        violet_soft = "#f3efff"
+        green = "#0f9f6e"
+        green_hover = "#0b815a"
+        red = "#dc3f49"
+        red_soft = "#fff0f1"
+        input_border = "#cbd8e8"
+
+        title_font = ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
+        section_font = ctk.CTkFont(family="Segoe UI", size=15, weight="bold")
+        label_font = ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
+        body_font = ctk.CTkFont(family="Segoe UI", size=12)
+        button_font = ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
         
         # Thiết lập app icon bitmap
         icon_path = os.path.join(os.path.dirname(__file__), "app_icon.ico")
@@ -37,513 +68,728 @@ class GUIApp(ctk.CTk):
         # Lưu trữ các biến Checkbox điều khiển hàng loạt
         self.device_checkboxes = {}
         
-        # Main Grid Layout: 1 Cột, 4 Hàng (Header, Log Console trên cùng, Operations Grid 2 cột, Bottom Config)
+        # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)
         self.grid_rowconfigure(1, weight=0)
         self.grid_rowconfigure(2, weight=1)
         self.grid_rowconfigure(3, weight=0)
         
-        # ================= ROW 0: TOP HEADER BANNER =================
-        self.top_header = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=16, border_width=1, border_color="#243244")
-        self.top_header.grid(row=0, column=0, sticky="ew", padx=18, pady=(14, 8))
-        
-        self.brand_badge = ctk.CTkFrame(self.top_header, fg_color="#111c31", corner_radius=12, border_width=0)
-        self.brand_badge.pack(fill="x", padx=10, pady=10)
+        # ================= ROW 0: GLASS HEADER =================
+        self.top_header = ctk.CTkFrame(
+            self,
+            fg_color=glass,
+            corner_radius=22,
+            border_width=1,
+            border_color=border,
+        )
+        self.top_header.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 10))
+
+        self.brand_badge = ctk.CTkFrame(
+            self.top_header, fg_color="transparent", corner_radius=18
+        )
+        self.brand_badge.pack(fill="x", padx=16, pady=14)
+
+        self.brand_icon = ctk.CTkLabel(
+            self.brand_badge,
+            text="BP",
+            width=48,
+            height=48,
+            corner_radius=16,
+            fg_color=blue_soft,
+            text_color=blue,
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+        )
+        self.brand_icon.pack(side="left", padx=(0, 12))
+
+        self.brand_copy = ctk.CTkFrame(self.brand_badge, fg_color="transparent")
+        self.brand_copy.pack(side="left", fill="y")
         
         self.lbl_brand = ctk.CTkLabel(
-            self.brand_badge,
-            text="BOXPHONE AUTOMATION",
-            font=ctk.CTkFont(family="Segoe UI", size=19, weight="bold"),
-            text_color="#f8fafc"
+            self.brand_copy,
+            text="BoxPhoneControl",
+            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            text_color=text,
         )
-        self.lbl_brand.pack(side="left", padx=14, pady=6)
+        self.lbl_brand.pack(anchor="w")
         
         self.lbl_sub_brand = ctk.CTkLabel(
-            self.brand_badge,
-            text="OPERATIONS CONTROL CENTER  /  SHOPEE + TIKTOK",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#94a3b8"
+            self.brand_copy,
+            text="Trung tâm điều khiển tự động hóa đa thiết bị",
+            font=body_font,
+            text_color=muted,
         )
-        self.lbl_sub_brand.pack(side="left", padx=10, pady=6)
+        self.lbl_sub_brand.pack(anchor="w", pady=(1, 0))
+
+        self.platform_badge = ctk.CTkLabel(
+            self.brand_badge,
+            text="SHOPEE  +  TIKTOK",
+            height=34,
+            corner_radius=17,
+            fg_color=blue_soft,
+            text_color=blue,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.platform_badge.pack(side="right", padx=(10, 2))
 
         self.btn_refresh = ctk.CTkButton(
             self.brand_badge,
-            text="QUÉT THIẾT BỊ",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            width=148,
-            height=36,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
+            text="Quét thiết bị",
+            font=button_font,
+            width=150,
+            height=44,
+            fg_color=blue,
+            hover_color=blue_hover,
             text_color="#ffffff",
-            corner_radius=9,
-            command=self.refresh_devices_action
+            corner_radius=14,
+            cursor="hand2",
+            command=self.refresh_devices_action,
         )
-        self.btn_refresh.pack(side="right", padx=14, pady=6)
+        self.btn_refresh.pack(side="right", padx=(14, 0), pady=2)
 
-        # ================= ROW 1: NHẬT KÝ HOẠT ĐỘNG (ĐẶT NẰM NỔI BẬT TRÊN CÙNG PHẦN MỀM) =================
-        self.log_card = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=16, border_width=1, border_color="#243244")
-        self.log_card.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 8))
+        # ================= ROW 1: REAL-TIME ACTIVITY =================
+        self.log_card = ctk.CTkFrame(
+            self,
+            fg_color=glass,
+            corner_radius=22,
+            border_width=1,
+            border_color=border,
+        )
+        self.log_card.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
+
+        self.log_header = ctk.CTkFrame(self.log_card, fg_color="transparent")
+        self.log_header.pack(fill="x", padx=16, pady=(12, 7))
         
         self.lbl_log = ctk.CTkLabel(
-            self.log_card,
-            text="NHẬT KÝ HOẠT ĐỘNG  •  REAL-TIME",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color="#e2e8f0"
+            self.log_header,
+            text="Nhật ký hoạt động",
+            font=section_font,
+            text_color=text,
         )
-        self.lbl_log.pack(padx=14, anchor="w", pady=(8, 2))
+        self.lbl_log.pack(side="left")
+
+        self.lbl_log_hint = ctk.CTkLabel(
+            self.log_header,
+            text="Theo dõi trạng thái hệ thống theo thời gian thực",
+            font=body_font,
+            text_color=muted,
+        )
+        self.lbl_log_hint.pack(side="left", padx=12)
+
+        self.live_badge = ctk.CTkLabel(
+            self.log_header,
+            text="LIVE",
+            width=56,
+            height=26,
+            corner_radius=13,
+            fg_color="#e7f8f1",
+            text_color=green,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.live_badge.pack(side="right")
         
         self.log_box = ctk.CTkTextbox(
             self.log_card,
-            height=150,
+            height=104,
             state="disabled",
-            fg_color="#050914",
-            text_color="#22d3ee",
+            fg_color=glass_tint,
+            text_color="#164e78",
             font=ctk.CTkFont(family="Consolas", size=11),
             border_width=1,
-            border_color="#1e293b",
-            corner_radius=10
+            border_color=input_border,
+            corner_radius=14,
+            scrollbar_button_color="#bed0e7",
+            scrollbar_button_hover_color="#9db8d8",
         )
-        self.log_box.pack(fill="x", padx=14, pady=(0, 10))
+        self.log_box.pack(fill="x", padx=16, pady=(0, 14))
         
         # Redirect standard output & error to log_box
         sys.stdout = ConsoleRedirector(self.log_box)
         sys.stderr = ConsoleRedirector(self.log_box)
 
-        # ================= ROW 2: OPERATIONAL CARDS (2 DANH MỤC RIÊNG BIỆT: SHOPEE & TIKTOK) =================
+        # ================= ROW 2: OPERATIONAL CARDS =================
         self.ops_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.ops_frame.grid(row=2, column=0, sticky="nsew", padx=18, pady=2)
+        self.ops_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=0)
         self.ops_frame.columnconfigure(0, weight=1)
         self.ops_frame.columnconfigure(1, weight=1)
         self.ops_frame.rowconfigure(0, weight=1)
 
-        # ---------------- KHUNG 1: SHOPEE AUTOMATION ----------------
+        scroll_style = {
+            "corner_radius": 22,
+            "fg_color": glass,
+            "border_width": 1,
+            "border_color": border,
+            "scrollbar_button_color": "#c5d5e7",
+            "scrollbar_button_hover_color": "#a9bfd9",
+        }
+        field_style = {
+            "fg_color": surface,
+            "border_color": input_border,
+            "text_color": text,
+            "placeholder_text_color": "#8a9ab0",
+            "border_width": 1,
+            "corner_radius": 12,
+            "font": body_font,
+        }
+
+        # ---------------- SHOPEE AUTOMATION ----------------
         self.shopee_scroll = ctk.CTkScrollableFrame(
-            self.ops_frame, 
-            corner_radius=16,
-            fg_color="#0f172a",
-            border_width=1, 
-            border_color="#243244"
+            self.ops_frame,
+            **scroll_style,
         )
-        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=0)
+        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        self.shopee_heading = ctk.CTkFrame(
+            self.shopee_scroll, fg_color=orange_soft, corner_radius=16
+        )
+        self.shopee_heading.pack(fill="x", padx=16, pady=(14, 10))
+
+        self.shopee_mark = ctk.CTkLabel(
+            self.shopee_heading,
+            text="S",
+            width=38,
+            height=38,
+            corner_radius=12,
+            fg_color="#ffffff",
+            text_color=orange,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+        )
+        self.shopee_mark.pack(side="left", padx=10, pady=9)
+
+        self.shopee_heading_copy = ctk.CTkFrame(
+            self.shopee_heading, fg_color="transparent"
+        )
+        self.shopee_heading_copy.pack(side="left", fill="y", pady=8)
 
         self.lbl_tasks = ctk.CTkLabel(
-            self.shopee_scroll,
-            text="SHOPEE AUTOMATION",
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            text_color="#fb923c"
+            self.shopee_heading_copy,
+            text="Shopee Automation",
+            font=title_font,
+            text_color=text,
         )
-        self.lbl_tasks.pack(pady=(12, 4), padx=16, anchor="w")
+        self.lbl_tasks.pack(anchor="w")
+
+        self.lbl_shopee_hint = ctk.CTkLabel(
+            self.shopee_heading_copy,
+            text="Tìm kiếm đa tầng và điều phối thiết bị",
+            font=body_font,
+            text_color=muted,
+        )
+        self.lbl_shopee_hint.pack(anchor="w")
         
         self.lbl_main_keywords = ctk.CTkLabel(
             self.shopee_scroll,
             text="Từ khóa chính • Mỗi dòng một từ khóa",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            font=label_font,
+            text_color=text,
         )
-        self.lbl_main_keywords.pack(padx=16, pady=(2, 0), anchor="w")
+        self.lbl_main_keywords.pack(padx=16, pady=(0, 3), anchor="w")
 
         self.txt_main_keywords = ctk.CTkTextbox(
-            self.shopee_scroll, 
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
+            self.shopee_scroll,
+            fg_color=surface,
+            border_color=input_border,
+            text_color=text,
             border_width=1,
-            corner_radius=10,
-            height=70,
-            font=ctk.CTkFont(family="Segoe UI", size=11)
+            corner_radius=12,
+            height=64,
+            font=body_font,
+            scrollbar_button_color="#c5d5e7",
+            scrollbar_button_hover_color="#a9bfd9",
         )
-        self.txt_main_keywords.pack(fill="x", padx=16, pady=3)
+        self.txt_main_keywords.pack(fill="x", padx=16, pady=(0, 8))
         
         # Chế độ từ khóa
         self.keyword_mode = ctk.StringVar(value="original")
-        self.mode_frame = ctk.CTkFrame(self.shopee_scroll, fg_color="#111827", corner_radius=10, border_width=1, border_color="#273449")
-        self.mode_frame.pack(fill="x", padx=16, pady=4)
+        self.mode_frame = ctk.CTkFrame(
+            self.shopee_scroll,
+            fg_color=glass_tint,
+            corner_radius=12,
+            border_width=1,
+            border_color=border,
+        )
+        self.mode_frame.pack(fill="x", padx=16, pady=(0, 8))
         
         self.rad_orig = ctk.CTkRadioButton(
-            self.mode_frame, 
-            text="Gốc (Không AI)", 
-            variable=self.keyword_mode, 
+            self.mode_frame,
+            text="Gốc (Không AI)",
+            variable=self.keyword_mode,
             value="original",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#e2e8f0",
-            fg_color="#2563eb",
-            hover_color="#1d4ed8"
+            font=label_font,
+            text_color=text,
+            fg_color=blue,
+            hover_color=blue_hover,
+            border_color="#9eb0c7",
         )
-        self.rad_orig.pack(side="left", padx=(8, 4), pady=5)
+        self.rad_orig.pack(side="left", padx=(10, 7), pady=9)
         
         self.rad_ai = ctk.CTkRadioButton(
-            self.mode_frame, 
-            text="Mở rộng (AI)", 
-            variable=self.keyword_mode, 
+            self.mode_frame,
+            text="Mở rộng (AI)",
+            variable=self.keyword_mode,
             value="ai",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#e2e8f0",
-            fg_color="#8b5cf6",
-            hover_color="#7c3aed"
+            font=label_font,
+            text_color=text,
+            fg_color=violet,
+            hover_color="#5b3fb3",
+            border_color="#9eb0c7",
         )
-        self.rad_ai.pack(side="left", padx=4, pady=5)
+        self.rad_ai.pack(side="left", padx=7, pady=9)
 
         self.rad_ai_t2 = ctk.CTkRadioButton(
-            self.mode_frame, 
-            text="Tầng 2 (AI sinh)", 
-            variable=self.keyword_mode, 
+            self.mode_frame,
+            text="Tầng 2 (AI sinh)",
+            variable=self.keyword_mode,
             value="ai_t2",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#e2e8f0",
-            fg_color="#a855f7",
-            hover_color="#9333ea"
+            font=label_font,
+            text_color=text,
+            fg_color=violet,
+            hover_color="#5b3fb3",
+            border_color="#9eb0c7",
         )
-        self.rad_ai_t2.pack(side="left", padx=(4, 8), pady=5)
+        self.rad_ai_t2.pack(side="left", padx=(7, 10), pady=9)
         
         # Nút sinh từ khóa qua AI
-        self.btn_gen_ai = ctk.CTkButton(
-            self.shopee_scroll,
-            text="SINH TỪ KHÓA TẦNG 1  •  MỞ RỘNG SEO",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#7c3aed",
-            hover_color="#6d28d9",
-            text_color="#ffffff",
-            corner_radius=8,
-            height=30,
-            command=self.generate_ai_keywords_action
+        self.ai_btn_grid = ctk.CTkFrame(
+            self.shopee_scroll, fg_color="transparent"
         )
-        self.btn_gen_ai.pack(fill="x", padx=16, pady=2)
+        self.ai_btn_grid.pack(fill="x", padx=16, pady=(0, 8))
+        self.ai_btn_grid.columnconfigure(0, weight=1)
+        self.ai_btn_grid.columnconfigure(1, weight=1)
+
+        self.btn_gen_ai = ctk.CTkButton(
+            self.ai_btn_grid,
+            text="Tạo từ khóa tầng 1",
+            font=button_font,
+            fg_color=violet_soft,
+            hover_color="#e8e0ff",
+            text_color=violet,
+            border_width=1,
+            border_color="#d9cdfa",
+            corner_radius=12,
+            height=38,
+            cursor="hand2",
+            command=self.generate_ai_keywords_action,
+        )
+        self.btn_gen_ai.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         
         self.btn_gen_ai_t2 = ctk.CTkButton(
-            self.shopee_scroll,
-            text="SINH TỪ KHÓA TẦNG 2  •  BÓC TÁCH TIÊU ĐỀ",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#8b5cf6",
-            hover_color="#7c3aed",
-            text_color="#ffffff",
-            corner_radius=8,
-            height=30,
-            command=self.generate_ai_keywords_tier2_action
+            self.ai_btn_grid,
+            text="Tạo từ khóa tầng 2",
+            font=button_font,
+            fg_color=violet_soft,
+            hover_color="#e8e0ff",
+            text_color=violet,
+            border_width=1,
+            border_color="#d9cdfa",
+            corner_radius=12,
+            height=38,
+            cursor="hand2",
+            command=self.generate_ai_keywords_tier2_action,
         )
-        self.btn_gen_ai_t2.pack(fill="x", padx=16, pady=2)
+        self.btn_gen_ai_t2.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         
         self.lbl_ai_keywords = ctk.CTkLabel(
             self.shopee_scroll,
             text="Từ khóa AI đã tạo",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            font=label_font,
+            text_color=text,
         )
-        self.lbl_ai_keywords.pack(padx=16, pady=(4, 0), anchor="w")
+        self.lbl_ai_keywords.pack(padx=16, pady=(0, 3), anchor="w")
         
         self.txt_ai_keywords = ctk.CTkTextbox(
             self.shopee_scroll,
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#38bdf8",
+            fg_color=surface,
+            border_color=input_border,
+            text_color="#245ca6",
             border_width=1,
-            corner_radius=8,
-            height=80,
-            font=ctk.CTkFont(family="Segoe UI", size=11)
+            corner_radius=12,
+            height=64,
+            font=body_font,
+            scrollbar_button_color="#c5d5e7",
+            scrollbar_button_hover_color="#a9bfd9",
         )
-        self.txt_ai_keywords.pack(fill="x", padx=16, pady=3)
+        self.txt_ai_keywords.pack(fill="x", padx=16, pady=(0, 8))
         
         self.ent_selection = ctk.CTkEntry(
-            self.shopee_scroll, 
+            self.shopee_scroll,
             placeholder_text="Chọn máy chạy Shopee (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            placeholder_text_color="#94a3b8",
-            corner_radius=10,
-            height=38
+            height=42,
+            **field_style,
         )
-        self.ent_selection.pack(fill="x", padx=16, pady=3)
+        self.ent_selection.pack(fill="x", padx=16, pady=(0, 8))
         
         self.btn_grid = ctk.CTkFrame(self.shopee_scroll, fg_color="transparent")
-        self.btn_grid.pack(fill="x", padx=16, pady=(4, 6))
+        self.btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.btn_grid.columnconfigure(0, weight=1)
         self.btn_grid.columnconfigure(1, weight=1)
         
         self.btn_seq = ctk.CTkButton(
             self.btn_grid,
-            text="CHẠY TUẦN TỰ",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#10b981", 
-            hover_color="#059669",
+            text="Chạy tuần tự",
+            font=button_font,
+            fg_color=green,
+            hover_color=green_hover,
             text_color="#ffffff",
-            corner_radius=8,
-            height=40,
-            command=self.run_seq_search
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_seq_search,
         )
-        self.btn_seq.grid(row=0, column=0, padx=(0, 3), sticky="ew")
+        self.btn_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
         
         self.btn_par = ctk.CTkButton(
             self.btn_grid,
-            text="CHẠY SONG SONG",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#2563eb", 
-            hover_color="#1d4ed8",
+            text="Chạy song song",
+            font=button_font,
+            fg_color=blue,
+            hover_color=blue_hover,
             text_color="#ffffff",
-            corner_radius=8,
-            height=40,
-            command=self.run_par_search
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_par_search,
         )
-        self.btn_par.grid(row=0, column=1, padx=(3, 0), sticky="ew")
+        self.btn_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
         
         self.btn_stop = ctk.CTkButton(
             self.shopee_scroll,
-            text="DỪNG SHOPEE KHẨN CẤP",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            fg_color="#ef4444", 
-            hover_color="#dc2626",
-            text_color="#ffffff",
+            text="Dừng Shopee khẩn cấp",
+            font=button_font,
+            fg_color=red_soft,
+            hover_color="#ffe1e4",
+            text_color=red,
             border_width=1,
-            border_color="#f87171",
-            corner_radius=10,
+            border_color="#f4b8bd",
+            corner_radius=13,
             height=42,
-            command=self.stop_all
+            cursor="hand2",
+            command=self.stop_all,
         )
-        self.btn_stop.pack(fill="x", padx=16, pady=(2, 10))
+        self.btn_stop.pack(fill="x", padx=16, pady=(0, 12))
 
-        # ---------------- KHUNG 2: TIKTOK AUTOMATION 3 BƯỚC ----------------
+        # ---------------- TIKTOK AUTOMATION ----------------
         self.tiktok_scroll = ctk.CTkScrollableFrame(
-            self.ops_frame, 
-            corner_radius=16,
-            fg_color="#0f172a",
-            border_width=1, 
-            border_color="#243244"
+            self.ops_frame,
+            **scroll_style,
         )
-        self.tiktok_scroll.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=0)
+        self.tiktok_scroll.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        self.tiktok_heading = ctk.CTkFrame(
+            self.tiktok_scroll, fg_color=pink_soft, corner_radius=16
+        )
+        self.tiktok_heading.pack(fill="x", padx=16, pady=(14, 10))
+
+        self.tiktok_mark = ctk.CTkLabel(
+            self.tiktok_heading,
+            text="T",
+            width=38,
+            height=38,
+            corner_radius=12,
+            fg_color="#ffffff",
+            text_color=pink,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+        )
+        self.tiktok_mark.pack(side="left", padx=10, pady=9)
+
+        self.tiktok_heading_copy = ctk.CTkFrame(
+            self.tiktok_heading, fg_color="transparent"
+        )
+        self.tiktok_heading_copy.pack(side="left", fill="y", pady=8)
 
         self.lbl_tiktok_title = ctk.CTkLabel(
-            self.tiktok_scroll,
-            text="TIKTOK • QUY TRÌNH 3 BƯỚC",
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            text_color="#f472b6"
+            self.tiktok_heading_copy,
+            text="TikTok Automation",
+            font=title_font,
+            text_color=text,
         )
-        self.lbl_tiktok_title.pack(pady=(12, 4), padx=16, anchor="w")
+        self.lbl_tiktok_title.pack(anchor="w")
+
+        self.lbl_tiktok_hint = ctk.CTkLabel(
+            self.tiktok_heading_copy,
+            text="Quy trình tương tác tự động 3 bước",
+            font=body_font,
+            text_color=muted,
+        )
+        self.lbl_tiktok_hint.pack(anchor="w")
 
         self.lbl_tt_seed = ctk.CTkLabel(
             self.tiktok_scroll,
             text="Từ khóa nhiệm vụ • Phân cách bằng dấu phẩy",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            font=label_font,
+            text_color=text,
         )
-        self.lbl_tt_seed.pack(padx=16, pady=(2, 0), anchor="w")
+        self.lbl_tt_seed.pack(padx=16, pady=(0, 3), anchor="w")
 
         self.ent_tt_seed = ctk.CTkEntry(
             self.tiktok_scroll,
             placeholder_text="skincare, trị mụn, nặn mụn, chăm sóc da",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            placeholder_text_color="#94a3b8",
-            corner_radius=10,
-            height=40
+            height=42,
+            **field_style,
         )
         self.ent_tt_seed.insert(0, config.TIKTOK_SEED_KEYWORDS_DEFAULT)
-        self.ent_tt_seed.pack(fill="x", padx=16, pady=3)
+        self.ent_tt_seed.pack(fill="x", padx=16, pady=(0, 8))
 
         self.lbl_tt_channel = ctk.CTkLabel(
             self.tiktok_scroll,
             text="Tên kênh TikTok mục tiêu",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1"
+            font=label_font,
+            text_color=text,
         )
-        self.lbl_tt_channel.pack(padx=16, pady=(4, 0), anchor="w")
+        self.lbl_tt_channel.pack(padx=16, pady=(0, 3), anchor="w")
 
         self.ent_tt_channel = ctk.CTkEntry(
             self.tiktok_scroll,
             placeholder_text="Tên kênh TikTok mục tiêu",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            placeholder_text_color="#94a3b8",
-            corner_radius=10,
-            height=40
+            height=42,
+            **field_style,
         )
         self.ent_tt_channel.insert(0, config.TIKTOK_TARGET_CHANNEL_DEFAULT)
-        self.ent_tt_channel.pack(fill="x", padx=16, pady=3)
+        self.ent_tt_channel.pack(fill="x", padx=16, pady=(0, 8))
 
         self.tt_timeline_card = ctk.CTkFrame(
             self.tiktok_scroll,
-            fg_color="#172033",
-            corner_radius=10,
+            fg_color=glass_tint,
+            corner_radius=14,
             border_width=1,
-            border_color="#334155",
+            border_color=border,
         )
-        self.tt_timeline_card.pack(fill="x", padx=16, pady=(10, 4))
+        self.tt_timeline_card.pack(fill="x", padx=16, pady=(0, 8))
         self.lbl_tt_timeline = ctk.CTkLabel(
             self.tt_timeline_card,
             text=(
-                "LỘ TRÌNH TỰ ĐỘNG\n"
-                "B1  Trang chủ: 15–60 giây\n"
-                "B2  Từ khóa nhiệm vụ: 15–30 giây\n"
-                "B3  Ở trong kênh: 3–5 phút • đổi clip mỗi 15–30 giây"
+                "LỘ TRÌNH TỰ ĐỘNG\n\n"
+                "01   Trang chủ  •  15–60 giây\n"
+                "02   Từ khóa nhiệm vụ  •  15–30 giây\n"
+                "03   Trong kênh  •  3–5 phút, đổi clip mỗi 15–30 giây"
             ),
             justify="left",
             anchor="w",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#cbd5e1",
+            font=label_font,
+            text_color=text,
         )
-        self.lbl_tt_timeline.pack(fill="x", padx=14, pady=10)
+        self.lbl_tt_timeline.pack(fill="x", padx=14, pady=12)
 
         self.ent_tt_selection = ctk.CTkEntry(
-            self.tiktok_scroll, 
+            self.tiktok_scroll,
             placeholder_text="Chọn máy chạy TikTok (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            placeholder_text_color="#94a3b8",
-            corner_radius=10,
-            height=40
+            height=42,
+            **field_style,
         )
-        self.ent_tt_selection.pack(fill="x", padx=16, pady=(6, 3))
+        self.ent_tt_selection.pack(fill="x", padx=16, pady=(0, 8))
 
         self.tt_btn_grid = ctk.CTkFrame(self.tiktok_scroll, fg_color="transparent")
-        self.tt_btn_grid.pack(fill="x", padx=16, pady=(6, 4))
+        self.tt_btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.tt_btn_grid.columnconfigure(0, weight=1)
         self.tt_btn_grid.columnconfigure(1, weight=1)
 
         self.btn_tt_seq = ctk.CTkButton(
             self.tt_btn_grid,
-            text="CHẠY TUẦN TỰ",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#16a34a",
-            hover_color="#15803d",
+            text="Chạy tuần tự",
+            font=button_font,
+            fg_color=green,
+            hover_color=green_hover,
             text_color="#ffffff",
-            corner_radius=10,
-            height=40,
-            command=self.run_seq_tiktok
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_seq_tiktok,
         )
-        self.btn_tt_seq.grid(row=0, column=0, padx=(0, 3), sticky="ew")
+        self.btn_tt_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
 
         self.btn_tt_par = ctk.CTkButton(
             self.tt_btn_grid,
-            text="CHẠY SONG SONG",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#db2777",
-            hover_color="#be185d",
+            text="Chạy song song",
+            font=button_font,
+            fg_color=pink,
+            hover_color="#9f1f5a",
             text_color="#ffffff",
-            corner_radius=10,
-            height=40,
-            command=self.run_par_tiktok
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_par_tiktok,
         )
-        self.btn_tt_par.grid(row=0, column=1, padx=(3, 0), sticky="ew")
+        self.btn_tt_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
         self.btn_tt_stop = ctk.CTkButton(
             self.tiktok_scroll,
-            text="DỪNG TIKTOK KHẨN CẤP",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            fg_color="#ef4444", 
-            hover_color="#dc2626",
-            text_color="#ffffff",
+            text="Dừng TikTok khẩn cấp",
+            font=button_font,
+            fg_color=red_soft,
+            hover_color="#ffe1e4",
+            text_color=red,
             border_width=1,
-            border_color="#f87171",
-            corner_radius=10,
+            border_color="#f4b8bd",
+            corner_radius=13,
             height=42,
-            command=self.stop_all
+            cursor="hand2",
+            command=self.stop_all,
         )
-        self.btn_tt_stop.pack(fill="x", padx=16, pady=(4, 10))
+        self.btn_tt_stop.pack(fill="x", padx=16, pady=(0, 12))
 
-        # ================= ROW 3: BOTTOM PANEL (CẤU HÌNH HỆ THỐNG & ĐIỀU KHIỂN CHUNG) =================
-        self.bottom_panel = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=16, border_width=1, border_color="#243244")
-        self.bottom_panel.grid(row=3, column=0, sticky="ew", padx=18, pady=(8, 14))
-        
-        self.settings_card = ctk.CTkFrame(self.bottom_panel, fg_color="transparent")
-        self.settings_card.pack(fill="x", padx=12, pady=6)
+        # ================= ROW 3: SYSTEM SETTINGS =================
+        self.bottom_panel = ctk.CTkFrame(
+            self,
+            fg_color=glass,
+            corner_radius=22,
+            border_width=1,
+            border_color=border,
+        )
+        self.bottom_panel.grid(row=3, column=0, sticky="ew", padx=20, pady=(10, 18))
+
+        self.settings_header = ctk.CTkFrame(
+            self.bottom_panel, fg_color="transparent"
+        )
+        self.settings_header.pack(fill="x", padx=16, pady=(10, 3))
         
         self.lbl_settings = ctk.CTkLabel(
-            self.settings_card,
-            text="CẤU HÌNH HỆ THỐNG",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color="#e2e8f0"
+            self.settings_header,
+            text="Cấu hình hệ thống",
+            font=section_font,
+            text_color=text,
         )
-        self.lbl_settings.pack(side="left", padx=6)
+        self.lbl_settings.pack(side="left")
 
-        self.ent_token = ctk.CTkEntry(
-            self.settings_card, 
-            placeholder_text="Telegram Bot Token", 
-            show="*",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            corner_radius=6,
-            height=28,
-            width=200
+        self.lbl_settings_hint = ctk.CTkLabel(
+            self.settings_header,
+            text="Thông tin kết nối được lưu cục bộ trên máy tính",
+            font=body_font,
+            text_color=muted,
         )
-        self.ent_token.pack(side="left", padx=4)
+        self.lbl_settings_hint.pack(side="left", padx=12)
+
+        self.settings_card = ctk.CTkFrame(
+            self.bottom_panel, fg_color="transparent"
+        )
+        self.settings_card.pack(fill="x", padx=12, pady=(2, 12))
+        for column, weight in enumerate((2, 1, 2, 2, 2, 0)):
+            self.settings_card.columnconfigure(column, weight=weight)
+
+        def make_setting_field(column, label, placeholder, show=None):
+            wrapper = ctk.CTkFrame(self.settings_card, fg_color="transparent")
+            wrapper.grid(row=0, column=column, sticky="ew", padx=4)
+            ctk.CTkLabel(
+                wrapper,
+                text=label,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color=muted,
+                anchor="w",
+            ).pack(fill="x", padx=2, pady=(0, 3))
+            entry = ctk.CTkEntry(
+                wrapper,
+                placeholder_text=placeholder,
+                show=show or "",
+                height=38,
+                **field_style,
+            )
+            entry.pack(fill="x")
+            return entry
+
+        self.ent_token = make_setting_field(
+            0, "TELEGRAM BOT TOKEN", "Nhập Telegram Bot Token", show="*"
+        )
         self.ent_token.insert(0, config.TELEGRAM_BOT_TOKEN or "")
 
         admin_ids_str = ",".join(map(str, config.ALLOWED_USER_IDS or []))
-        self.ent_admins = ctk.CTkEntry(
-            self.settings_card, 
-            placeholder_text="Admin IDs",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            corner_radius=6,
-            height=28,
-            width=120
+        self.ent_admins = make_setting_field(
+            1, "ADMIN IDS", "ID được phép dùng bot"
         )
-        self.ent_admins.pack(side="left", padx=4)
         self.ent_admins.insert(0, admin_ids_str)
 
-        self.ent_adb = ctk.CTkEntry(
-            self.settings_card, 
-            placeholder_text="ADB Path",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            corner_radius=6,
-            height=28,
-            width=180
+        self.ent_adb = make_setting_field(
+            2, "ĐƯỜNG DẪN ADB", "Đường dẫn adb.exe"
         )
-        self.ent_adb.pack(side="left", padx=4)
         self.ent_adb.insert(0, config.ADB_PATH or "")
 
         shops_str = ",".join(config.SHOPEE_SHOP_NAMES or [])
-        self.ent_shops = ctk.CTkEntry(
-            self.settings_card, 
-            placeholder_text="Shops",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            corner_radius=6,
-            height=28,
-            width=160
+        self.ent_shops = make_setting_field(
+            3, "SHOP DỰ PHÒNG", "Tên shop, phân cách bằng dấu phẩy"
         )
-        self.ent_shops.pack(side="left", padx=4)
         self.ent_shops.insert(0, shops_str)
 
-        self.ent_gemini_key = ctk.CTkEntry(
-            self.settings_card,
-            placeholder_text="Gemini Key",
-            show="*",
-            fg_color="#0b1220",
-            border_color="#334155",
-            text_color="#f8fafc",
-            corner_radius=6,
-            height=28,
-            width=160
+        self.ent_gemini_key = make_setting_field(
+            4, "GEMINI API KEY", "Nhập Gemini API Key", show="*"
         )
-        self.ent_gemini_key.pack(side="left", padx=4)
         self.ent_gemini_key.insert(0, config.GEMINI_API_KEY or "")
 
         self.btn_save = ctk.CTkButton(
             self.settings_card,
-            text="LƯU",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
+            text="Lưu cấu hình",
+            font=button_font,
+            fg_color=blue,
+            hover_color=blue_hover,
             text_color="#ffffff",
-            corner_radius=6,
-            height=28,
-            width=70,
-            command=self.save_settings
+            corner_radius=12,
+            height=38,
+            width=120,
+            cursor="hand2",
+            command=self.save_settings,
         )
-        self.btn_save.pack(side="right", padx=6)
+        self.btn_save.grid(row=0, column=5, padx=(8, 4), pady=(19, 0))
+
+        # Subtle glass border response and a short window fade-in. These are
+        # presentation-only effects and do not touch automation state.
+        self._bind_glass_hover(self.top_header, border, border_hover)
+        self._bind_glass_hover(self.log_card, border, border_hover)
+        self._bind_glass_hover(self.shopee_scroll, border, "#f1b98d")
+        self._bind_glass_hover(self.tiktok_scroll, border, "#e4a7c5")
+        self._bind_glass_hover(self.bottom_panel, border, border_hover)
+        try:
+            self.attributes("-alpha", 0.0)
+            self.after(20, self._fade_in)
+        except Exception:
+            pass
+        self.after(80, self._maximize_window)
+        self.after_idle(self._reset_operation_scrolls)
+        self.after(600, self._reset_operation_scrolls)
+        self.after(1600, self._reset_operation_scrolls)
 
         # Quét thiết bị khi vừa khởi động
         self.refresh_devices_action()
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
+
+    def _bind_glass_hover(self, widget, base_border, hover_border):
+        """Tạo phản hồi viền nhẹ cho card kính, không ảnh hưởng callback nghiệp vụ."""
+        widget.bind(
+            "<Enter>",
+            lambda _event: widget.configure(border_color=hover_border),
+            add="+",
+        )
+        widget.bind(
+            "<Leave>",
+            lambda _event: widget.configure(border_color=base_border),
+            add="+",
+        )
+
+    def _maximize_window(self):
+        """Maximize sau khi CustomTkinter hoàn tất khởi tạo DPI scaling."""
+        try:
+            self.state("zoomed")
+        except Exception:
+            pass
+
+    def _fade_in(self):
+        """Hiệu ứng mở cửa sổ ngắn, dừng ngay khi đạt độ rõ 100%."""
+        try:
+            current = float(self.attributes("-alpha"))
+            next_alpha = min(1.0, current + 0.1)
+            self.attributes("-alpha", next_alpha)
+            if next_alpha < 1.0:
+                self.after(18, self._fade_in)
+        except Exception:
+            pass
+
+    def _reset_operation_scrolls(self):
+        """Luôn hiển thị tiêu đề hai card khi app vừa mở."""
+        try:
+            self.shopee_scroll._parent_canvas.yview_moveto(0)
+            self.tiktok_scroll._parent_canvas.yview_moveto(0)
+            # Giữ focus khởi động ở nút header để Textbox không tự yêu cầu
+            # cuộn card Shopee xuống khi cửa sổ được kích hoạt lại.
+            self.btn_refresh.focus_set()
+        except Exception:
+            pass
 
     def run_in_thread(self, func, *args):
         threading.Thread(target=func, args=args, daemon=True).start()
