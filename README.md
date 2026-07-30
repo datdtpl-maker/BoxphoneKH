@@ -59,12 +59,13 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 ALLOWED_USER_IDS=123456789
 GEMINI_API_KEY=your_gemini_api_key
 SHOPEE_SHOP_NAMES=shop_a,shop_b
-TIKTOK_TARGET_CHANNEL=ten_kenh_tiktok
+TIKTOK_TARGET_CHANNEL=kenh_tiktok_a,kenh_tiktok_b
 ```
 
 Không commit file `.env`. File này đã được khai báo trong `.gitignore`.
 
 Các trường Telegram token, Admin ID, đường dẫn ADB và danh sách shop cũng có thể được cập nhật trong giao diện rồi bấm `LƯU`.
+Danh sách kênh TikTok được phân cách bằng dấu phẩy; mỗi máy sẽ chọn ngẫu nhiên đúng một kênh để tìm kiếm.
 
 ## Bản chạy Windows
 

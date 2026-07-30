@@ -532,7 +532,7 @@ class GUIApp(ctk.CTk):
 
         self.lbl_tt_channel = ctk.CTkLabel(
             self.tiktok_scroll,
-            text="Tên kênh TikTok mục tiêu",
+            text="Kênh TikTok mục tiêu • Phân cách bằng dấu phẩy • Random 1 kênh",
             font=label_font,
             text_color=text,
         )
@@ -540,7 +540,7 @@ class GUIApp(ctk.CTk):
 
         self.ent_tt_channel = ctk.CTkEntry(
             self.tiktok_scroll,
-            placeholder_text="Tên kênh TikTok mục tiêu",
+            placeholder_text="Kênh TikTok A, Kênh TikTok B, Kênh TikTok C",
             height=42,
             **field_style,
         )

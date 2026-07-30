@@ -1985,9 +1985,29 @@ class ADBController:
 
         if not target_channel:
             target_channel = config.TIKTOK_TARGET_CHANNEL_DEFAULT
+        if isinstance(target_channel, str):
+            target_channels = [
+                channel.strip()
+                for channel in target_channel.split(",")
+                if channel.strip()
+            ]
+        else:
+            target_channels = [
+                str(channel).strip()
+                for channel in target_channel
+                if str(channel).strip()
+            ]
 
         try:
             check_cancelled()
+            if not target_channels:
+                raise RuntimeError("Chưa nhập tên Kênh TikTok mục tiêu")
+            target_channel = random.choice(target_channels)
+            if len(target_channels) > 1:
+                update_status(
+                    f"[TikTok] Chọn ngẫu nhiên Kênh mục tiêu "
+                    f"'{target_channel}' (1/{len(target_channels)} kênh)..."
+                )
             width, height = self.get_screen_size(device_id)
             cx = width // 2
 

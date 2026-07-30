@@ -254,6 +254,43 @@ class TikTokSearchInputTests(unittest.TestCase):
             any("[TikTok B3] Ở lại Kênh 3 phút" in message for message in statuses)
         )
 
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
+    @patch("adb_controller.random.uniform", return_value=1.0)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_workflow_randomly_selects_one_comma_separated_target_channel(
+        self, _sleep, _randint, _uniform, _choice
+    ):
+        entered_keywords = []
+        opened_channels = []
+        self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.swipe = lambda *_args, **_kwargs: None
+        self.controller.advance_tiktok_feed = lambda _device_id: True
+        self.controller.find_and_click_tiktok_search = lambda _device_id: None
+        self.controller.replace_tiktok_search_text = (
+            lambda _device_id, text: entered_keywords.append(text) or True
+        )
+        self.controller.press_enter = lambda _device_id: None
+        self.controller.find_and_click_tiktok_channel = (
+            lambda _device_id, channel:
+            opened_channels.append(channel) or True
+        )
+        self.controller.click_random_tiktok_profile_video = (
+            lambda _device_id, channel:
+            opened_channels.append(channel) or True
+        )
+
+        success, _message = self.controller.tiktok_automation_workflow(
+            "device-1",
+            seed_keywords=["nặn mụn"],
+            target_channel="Kênh TikTok A, Kênh TikTok B",
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(["nặn mụn", "Kênh TikTok B"], entered_keywords)
+        self.assertEqual(["Kênh TikTok B", "Kênh TikTok B"], opened_channels)
+
     @patch("adb_controller.random.uniform", return_value=1.0)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     @patch("adb_controller.time.sleep", return_value=None)

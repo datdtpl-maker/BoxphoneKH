@@ -815,11 +815,12 @@ def send_full_dashboard(message):
 
         "🎵 **3. LỆNH BƠM TIKTOK 3 BƯỚC:**\n"
         "• **Chạy TikTok Song Song (Tất cả máy):**\n"
-        "  `/tiktok từ khóa 1, từ khóa 2 | ten_kenh_tiktok`\n"
+        "  `/tiktok từ khóa 1, từ khóa 2 | kenh_a, kenh_b`\n"
+        "  _(Mỗi máy chọn ngẫu nhiên đúng 1 kênh trong danh sách)_\n"
         "• **Chạy TikTok Tuần Tự:**\n"
-        "  `/tiktok tuần tự từ khóa 1, từ khóa 2 | ten_kenh_tiktok`\n"
+        "  `/tiktok tuần tự từ khóa 1, từ khóa 2 | kenh_a, kenh_b`\n"
         "• **Chạy TikTok Trên Máy Chỉ Định:**\n"
-        "  `máy 1 bơm tiktok từ khóa 1 | ten_kenh_tiktok`\n\n"
+        "  `máy 1 bơm tiktok từ khóa 1 | kenh_a, kenh_b`\n\n"
 
         "⚙️ **4. CẤU HÌNH SHOP DỰ PHÒNG:**\n"
         "• **Cài đặt danh sách shop mới:**\n"
