@@ -49,6 +49,44 @@ class ShopeeSearchClickTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
+    def test_homepage_generic_top_edittext_is_safe_search_target(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node resource-id="com.shopee.vn:id/a1b2c3"
+                    class="android.widget.EditText"
+                    editable="true"
+                    clickable="true"
+                    bounds="[24,58][828,190]" />
+              <node resource-id="com.shopee.vn:id/cart_btn"
+                    class="android.widget.ImageView"
+                    bounds="[900,58][1040,190]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+        taps = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            self.assertTrue(
+                controller.ensure_shopee_search_box_click("device-1")
+            )
+
+        self.assertEqual([(426, 124)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
     def test_product_detail_uses_header_search_icon_instead_of_blind_home_tap(
         self, _exists, _remove, _sleep
     ):
@@ -141,6 +179,58 @@ class ShopeeSearchClickTests(unittest.TestCase):
             )
 
         self.assertEqual([4], keyevents)
+        self.assertEqual([(429, 124)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_search_click_recovers_homepage_after_safe_scans_fail(
+        self, _exists, _remove, _sleep
+    ):
+        blank_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node resource-id="com.shopee.vn:id/loading"
+                    bounds="[0,0][1080,1920]" />
+            </hierarchy>
+            """
+        )
+        home_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node resource-id="com.shopee.vn:id/inputSearchBar"
+                    bounds="[20,58][838,190]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+        taps = []
+        recoveries = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        controller.keyevent = lambda *_args: None
+        controller.ensure_shopee_homepage = (
+            lambda *_args, **_kwargs: recoveries.append(True) or True
+        )
+        controller.bypass_shopee_popup = lambda _device_id: None
+
+        with patch(
+            "adb_controller.ET.parse",
+            side_effect=[
+                SimpleNamespace(getroot=lambda: blank_root),
+                SimpleNamespace(getroot=lambda: blank_root),
+                SimpleNamespace(getroot=lambda: blank_root),
+                SimpleNamespace(getroot=lambda: home_root),
+            ],
+        ):
+            self.assertTrue(
+                controller.ensure_shopee_search_box_click("device-1")
+            )
+
+        self.assertEqual([True], recoveries)
         self.assertEqual([(429, 124)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)

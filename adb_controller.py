@@ -497,6 +497,8 @@ class ADBController:
                     res_id = elem.get('resource-id', '')
                     text = elem.get('text', '')
                     desc = elem.get('content-desc', '')
+                    class_name = elem.get('class', '').lower()
+                    editable = elem.get('editable', '').lower() == 'true'
                     val = " ".join((res_id, text, desc)).lower()
                     bounds = elem.get('bounds', '')
                     match = re.match(
@@ -519,7 +521,27 @@ class ADBController:
                         "search_prefill_click",
                         "pre_search_label",
                     )
-                    if any(marker in val for marker in home_markers):
+                    excluded_markers = (
+                        "cart",
+                        "giỏ",
+                        "chat",
+                        "share",
+                        "filter",
+                        "more",
+                    )
+                    generic_top_input = (
+                        (editable or "edittext" in class_name)
+                        and (x2 - x1) >= int(width * 0.35)
+                        and x1 < int(width * 0.25)
+                        and x2 < int(width * 0.90)
+                    )
+                    if (
+                        (
+                            any(marker in val for marker in home_markers)
+                            or generic_top_input
+                        )
+                        and not any(marker in val for marker in excluded_markers)
+                    ):
                         home_search_coords = (cx, cy)
                         continue
 
@@ -529,14 +551,6 @@ class ADBController:
                         "btn_search",
                         "action_search",
                         "iv_search",
-                    )
-                    excluded_markers = (
-                        "cart",
-                        "giỏ",
-                        "chat",
-                        "share",
-                        "filter",
-                        "more",
                     )
                     desc_is_search = desc.strip().casefold() in {
                         "search",
@@ -592,6 +606,33 @@ class ADBController:
                 self.tap(device_id, target_coords[0], target_coords[1])
                 time.sleep(1.0)
                 return True
+
+        # Trạng thái Shopee trên một số máy có thể chưa tải xong hoặc đang ở
+        # màn hình trung gian. Phục hồi có kiểm soát về Trang chủ rồi quét lại;
+        # vẫn tuyệt đối không dùng tọa độ mù.
+        update_status(
+            "Chưa nhận diện được ô tìm kiếm • phục hồi Trang chủ và thử lại..."
+        )
+        self.ensure_shopee_homepage(
+            device_id,
+            status_callback=status_callback,
+        )
+        self.bypass_shopee_popup(device_id)
+        time.sleep(2.0)
+
+        for attempt in range(3):
+            home_coords, header_coords = scan_search_targets()
+            target_coords = home_coords or header_coords
+            if target_coords:
+                update_status(
+                    f"Đã nhận diện ô tìm kiếm sau phục hồi "
+                    f"({attempt + 1}/3)."
+                )
+                self.tap(device_id, target_coords[0], target_coords[1])
+                time.sleep(1.0)
+                return True
+            if attempt < 2:
+                time.sleep(1.0)
 
         update_status("Không xác định được ô tìm kiếm Shopee an toàn.")
         return False
