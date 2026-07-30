@@ -1163,57 +1163,89 @@ class GUIApp(ctk.CTk):
                 for k in keywords:
                     self.txt_ai_keywords.insert("end", f"{k}\n")
             
-            keyword_str = ", ".join(keywords)
             print(f"[GUI] Bắt đầu tìm kiếm song song (Mở rộng từ Gemini) trên {len(target_devices)} máy...")
-            
-            if config.ALLOWED_USER_IDS:
-                try:
-                    main.bot.send_message(
-                        config.ALLOWED_USER_IDS[0],
-                        f"🚀 **[GUI] BẮT ĐẦU CHẠY SONG SONG SHOPEE**\n\n"
-                        f"Từ khóa chính: `{', '.join(keywords)}`\n"
-                        f"Từ khóa mở rộng (Gemini): Có {len(keywords)} từ khóa\n"
-                        f"Tổng số máy: {len(target_devices)} máy\n"
-                        f"Chế độ click đầu tiên: **{click_first_item}**"
-                    )
-                except Exception:
-                    pass
 
             keyword_assignments = main.assign_shopee_keywords(
                 keywords,
                 target_devices,
             )
+            chat_id = (
+                config.ALLOWED_USER_IDS[0]
+                if config.ALLOWED_USER_IDS
+                else None
+            )
+            markup = None
+            if chat_id:
+                markup = main.telebot.types.InlineKeyboardMarkup()
+                markup.add(
+                    main.telebot.types.InlineKeyboardButton(
+                        "🛑 DỪNG CHẠY KHẨN CẤP",
+                        callback_data="stop_all",
+                    )
+                )
+                main.safe_send_message(
+                    chat_id,
+                    f"🚀 **BẮT ĐẦU CHẠY SONG SONG SHOPEE**\n\n"
+                    f"🔑 Kho từ khóa: **{len(keywords)} từ khóa**\n"
+                    f"📱 Tổng số profile: **{len(target_devices)}**\n"
+                    f"🎲 Mỗi profile nhận một từ khóa random riêng\n"
+                    f"🧭 Chế độ bấm sản phẩm đầu tiên: "
+                    f"**{click_first_item}**\n\n"
+                    f"_(Mỗi profile có một log thời gian thực riêng)_",
+                    parse_mode="Markdown",
+                    reply_markup=markup,
+                )
+
+            target_positions = {
+                device_id: index + 1
+                for index, device_id in enumerate(target_devices)
+            }
             
             def run_search_parallel(device_id):
-                devices = main.get_ordered_devices()
-                dev_idx = devices.index(device_id) + 1
+                dev_idx = target_positions[device_id]
+                dev_name = main.get_device_name(device_id)
                 current_keyword = keyword_assignments[device_id]
-                print(f"[Máy {dev_idx}] Bắt đầu tìm kiếm với từ khóa '{current_keyword}'...")
+                tracker = None
+                if chat_id:
+                    tracker = main.start_shopee_profile_tracker(
+                        chat_id,
+                        dev_name,
+                        device_id,
+                        current_keyword,
+                        dev_idx,
+                        len(target_devices),
+                    )
+                print(
+                    f"[Profile {dev_name}] Bắt đầu tìm kiếm với "
+                    f"từ khóa '{current_keyword}'..."
+                )
                 
+                dev_start = time.time()
                 success, err = main.adb.shopee_find_and_click_lamdong(
                     device_id, 
                     current_keyword, 
+                    status_callback=(
+                        tracker.status_callback if tracker else None
+                    ),
                     is_cancelled=lambda: main.cancel_flag or main.cancel_sequential, 
                     click_first_item=click_first_item
                 )
+                dev_duration = time.time() - dev_start
+                if tracker:
+                    main.finish_shopee_profile_tracker(
+                        tracker,
+                        success,
+                        err,
+                        dev_duration,
+                    )
                 if success:
-                    print(f"[Máy {dev_idx}] ✅ Hoàn thành trọn vẹn quy trình (Lướt sản phẩm & dạo Shop) với từ khóa '{current_keyword}'!")
-                    if config.ALLOWED_USER_IDS:
-                        try:
-                            main.bot.send_message(
-                                config.ALLOWED_USER_IDS[0], 
-                                f"✅ **Máy {dev_idx}**: Đã hoàn thành trọn vẹn quy trình với từ khóa `{current_keyword}`!"
-                            )
-                        except Exception:
-                            pass
+                    print(
+                        f"[Profile {dev_name}] ✅ Hoàn thành trọn vẹn "
+                        f"quy trình với từ khóa '{current_keyword}'!"
+                    )
                 else:
-                    print(f"[Máy {dev_idx}] ❌ Thất bại: {err}")
-                    if config.ALLOWED_USER_IDS:
-                        try:
-                            main.bot.send_message(config.ALLOWED_USER_IDS[0], f"❌ **Máy {dev_idx}**: {err}")
-                        except Exception:
-                            pass
-                return dev_idx, current_keyword, success, err
+                    print(f"[Profile {dev_name}] ❌ Thất bại: {err}")
+                return dev_name, current_keyword, success, err
                 
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
@@ -1231,11 +1263,12 @@ class GUIApp(ctk.CTk):
                 summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
                 
             print("[GUI] Tiến trình tìm kiếm song song Shopee kết thúc.")
-            if config.ALLOWED_USER_IDS:
-                try:
-                    main.bot.send_message(config.ALLOWED_USER_IDS[0], summary, parse_mode="Markdown")
-                except Exception:
-                    pass
+            if chat_id:
+                main.safe_send_message(
+                    chat_id,
+                    summary,
+                    parse_mode="Markdown",
+                )
             
         self.run_in_thread(action)
 

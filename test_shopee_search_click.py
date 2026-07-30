@@ -497,19 +497,19 @@ class ShopeeSearchClickTests(unittest.TestCase):
             )
         )
         fake_tracker = SimpleNamespace(
-            start_dashboard=lambda *_args, **_kwargs: None,
-            set_active_device=lambda *_args, **_kwargs: None,
             status_callback=lambda *_args, **_kwargs: None,
-            update_rest_countdown=lambda *_args, **_kwargs: None,
-            finish_dashboard=lambda *_args, **_kwargs: None,
         )
         message = SimpleNamespace(chat=SimpleNamespace(id=123))
 
         with (
             patch("main.adb", fake_adb),
-            patch("main.TelegramRealtimeTracker", return_value=fake_tracker),
+            patch(
+                "main.start_shopee_profile_tracker",
+                return_value=fake_tracker,
+            ),
+            patch("main.finish_shopee_profile_tracker"),
+            patch("main.send_shopee_rest_countdown"),
             patch("main.get_device_name", return_value="S"),
-            patch("main.send_device_finished_card"),
             patch("main.safe_send_message"),
         ):
             main.run_sequential_shopee_search(

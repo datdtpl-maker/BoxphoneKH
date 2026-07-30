@@ -206,6 +206,101 @@ def send_device_finished_card(chat_id, dev_name, dev_id, keyword, success, err, 
     safe_send_message(chat_id, text, parse_mode="Markdown")
 
 
+def start_shopee_profile_tracker(
+    chat_id,
+    dev_name,
+    dev_id,
+    keyword,
+    current_idx,
+    total_devices,
+    reply_markup=None,
+):
+    """Tạo một tin log Telegram mới, độc lập cho từng profile Shopee."""
+    tracker = TelegramRealtimeTracker(
+        bot,
+        chat_id,
+        reply_markup=reply_markup,
+    )
+    tracker.set_active_device(
+        dev_name,
+        dev_id,
+        keyword,
+        current_idx,
+        total_devices,
+        platform="Shopee",
+    )
+    tracker.start_dashboard(tracker.render_progress_text())
+    return tracker
+
+
+def finish_shopee_profile_tracker(
+    tracker,
+    success,
+    err,
+    duration_sec,
+):
+    """Chốt log live thành báo cáo profile ngay tại đúng vị trí tin nhắn."""
+    minutes = int(duration_sec // 60)
+    seconds = int(duration_sec % 60)
+    duration_text = (
+        f"{minutes} phút {seconds} giây"
+        if minutes
+        else f"{seconds} giây"
+    )
+    report = (
+        f"📊 **BÁO CÁO CHI TIẾT: PROFILE {tracker.device_name}**\n\n"
+        f"🤖 Kịch bản: **Shopee Automation**\n"
+        f"📱 Profile: **{tracker.device_name}** "
+        f"(ID: `{tracker.device_serial[:10]}`)\n"
+        f"🔑 Từ khóa: `{tracker.keyword}`\n"
+        f"⏱️ Tổng thời gian: **{duration_text}**\n"
+        "----------------------------------------\n"
+    )
+    if success:
+        report += "✅ **HOÀN THÀNH THÀNH CÔNG!**"
+    else:
+        report += (
+            "❌ **KỊCH BẢN CHẠY THẤT BẠI**\n"
+            f"⚠️ Lỗi: `{err}`"
+        )
+    tracker.finish_dashboard(report)
+
+
+def send_shopee_rest_countdown(
+    chat_id,
+    next_dev_name,
+    delay,
+    reply_markup=None,
+    is_cancelled_callback=None,
+):
+    """Tạo countdown riêng dưới báo cáo profile vừa hoàn tất."""
+    rest_tracker = TelegramRealtimeTracker(
+        bot,
+        chat_id,
+        reply_markup=reply_markup,
+    )
+    rest_tracker.start_dashboard(
+        f"⏳ **CHỜ CHUYỂN SANG PROFILE {next_dev_name}**\n\n"
+        f"Thời gian nghỉ: **{delay} giây**"
+    )
+    for remaining in range(delay, 0, -1):
+        if is_cancelled_callback and is_cancelled_callback():
+            rest_tracker.finish_dashboard(
+                "⏹️ **ĐÃ DỪNG TRONG THỜI GIAN NGHỈ**"
+            )
+            return False
+        rest_tracker.update_rest_countdown(
+            next_dev_name,
+            remaining,
+        )
+        time.sleep(1)
+    rest_tracker.finish_dashboard(
+        f"✅ **HẾT THỜI GIAN NGHỈ • "
+        f"CHUYỂN SANG PROFILE {next_dev_name}**"
+    )
+    return True
+
+
 def get_xiaowei_leveldb_dirs():
     """Trả về các thư mục dữ liệu Xiaowei theo tài khoản Windows hiện tại."""
     local_app_data = os.getenv("LOCALAPPDATA", "")
@@ -441,18 +536,20 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
     
-    tracker = TelegramRealtimeTracker(bot, message.chat.id, reply_markup=markup)
-    
     initial_text = (
-        f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
-        f"Từ khóa chính: `{', '.join(keywords)}`\n"
-        f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
-        f"Phân phối: Random riêng từng máy, không lặp khi kho còn đủ\n"
-        f"Tổng số máy: {len(devices)} máy\n"
+        f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ SHOPEE**\n\n"
+        f"🔑 Kho từ khóa: **{len(expanded_keywords)} từ khóa**\n"
+        f"📱 Tổng số profile: **{len(devices)}**\n"
+        f"🎲 Phân phối: **Random riêng, không lặp khi kho còn đủ**\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**\n\n"
-        f"_(Cập nhật tiến trình thời gian thực từng thiết bị ở bên dưới)_"
+        f"_(Mỗi profile có một log thời gian thực riêng bên dưới)_"
     )
-    tracker.start_dashboard(initial_text)
+    safe_send_message(
+        message.chat.id,
+        initial_text,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
     
     total_start_time = time.time()
     success_count = 0
@@ -464,9 +561,16 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             
         dev_name = get_device_name(dev)
         current_keyword = keyword_assignments[dev]
-        # Bắt đầu theo dõi thời gian thực cho máy hiện tại
+        tracker = start_shopee_profile_tracker(
+            message.chat.id,
+            dev_name,
+            dev,
+            current_keyword,
+            idx + 1,
+            len(devices),
+            reply_markup=markup,
+        )
         dev_start_time = time.time()
-        tracker.set_active_device(dev_name, dev, current_keyword, idx + 1, len(devices))
         
         success, err = adb.shopee_find_and_click_lamdong(
             dev, 
@@ -479,14 +583,25 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         dev_duration = time.time() - dev_start_time
         
         if cancel_sequential or cancel_flag:
+            finish_shopee_profile_tracker(
+                tracker,
+                False,
+                "Bị dừng bởi người dùng",
+                dev_duration,
+            )
             safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
-            
+
+        finish_shopee_profile_tracker(
+            tracker,
+            success,
+            err,
+            dev_duration,
+        )
+
         if success:
             success_count += 1
-            send_device_finished_card(message.chat.id, dev_name, dev, current_keyword, True, "", dev_duration)
         else:
-            send_device_finished_card(message.chat.id, dev_name, dev, current_keyword, False, err, dev_duration)
             if "Captcha" in err or "bị chặn" in err.lower():
                 temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
                 os.makedirs(temp_dir, exist_ok=True)
@@ -510,12 +625,13 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         if idx < len(devices) - 1:
             next_dev_name = get_device_name(devices[idx + 1])
             delay = random.randint(60, 90)
-            
-            for rem in range(delay, 0, -1):
-                if cancel_sequential or cancel_flag:
-                    break
-                tracker.update_rest_countdown(next_dev_name, rem)
-                time.sleep(1)
+            send_shopee_rest_countdown(
+                message.chat.id,
+                next_dev_name,
+                delay,
+                reply_markup=markup,
+                is_cancelled_callback=is_cancelled,
+            )
                 
     if not cancel_sequential and not cancel_flag:
         total_duration = time.time() - total_start_time
@@ -530,7 +646,11 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             f"🟢 Thành công: **{success_count} máy**\n"
             f"⏱️ Tổng thời gian: **{total_time_str}**"
         )
-        tracker.finish_dashboard(final_summary)
+        safe_send_message(
+            message.chat.id,
+            final_summary,
+            parse_mode="Markdown",
+        )
 
 
 # Hàm cập nhật ALLOWED_USER_IDS vào file .env để lưu cấu hình bảo mật lâu dài
