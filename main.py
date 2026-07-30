@@ -378,6 +378,36 @@ def get_device_name(serial):
         return f"{serial[:8].upper()}"
     return serial
 
+
+def assign_shopee_keywords(keywords, devices):
+    """Random từ khóa riêng cho từng máy, không lặp cho đến khi hết kho."""
+    unique_keywords = []
+    seen = set()
+    for keyword in keywords:
+        clean_keyword = str(keyword).strip()
+        normalized = clean_keyword.casefold()
+        if clean_keyword and normalized not in seen:
+            seen.add(normalized)
+            unique_keywords.append(clean_keyword)
+
+    if not unique_keywords:
+        return {}
+
+    assignments = {}
+    device_index = 0
+    while device_index < len(devices):
+        shuffled_batch = random.sample(
+            unique_keywords,
+            len(unique_keywords),
+        )
+        for keyword in shuffled_batch:
+            if device_index >= len(devices):
+                break
+            assignments[devices[device_index]] = keyword
+            device_index += 1
+    return assignments
+
+
 def run_sequential_shopee_search(message, keywords, devices, click_first_item=False, use_ai=True):
     global cancel_sequential, cancel_flag
     cancel_sequential = False
@@ -402,8 +432,10 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         )
         return
 
-    # Bốc đúng một từ khóa cho toàn bộ lượt chạy tuần tự.
-    current_keyword = random.choice(expanded_keywords)
+    keyword_assignments = assign_shopee_keywords(
+        expanded_keywords,
+        devices,
+    )
         
     # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
     markup = telebot.types.InlineKeyboardMarkup()
@@ -415,7 +447,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
         f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ**\n\n"
         f"Từ khóa chính: `{', '.join(keywords)}`\n"
         f"Từ khóa mở rộng (Gemini): Có {len(expanded_keywords)} từ khóa\n"
-        f"Từ khóa được chọn cho toàn bộ máy: `{current_keyword}`\n"
+        f"Phân phối: Random riêng từng máy, không lặp khi kho còn đủ\n"
         f"Tổng số máy: {len(devices)} máy\n"
         f"Nghỉ giữa mỗi phiên: **60 - 90 giây**\n\n"
         f"_(Cập nhật tiến trình thời gian thực từng thiết bị ở bên dưới)_"
@@ -431,6 +463,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             break
             
         dev_name = get_device_name(dev)
+        current_keyword = keyword_assignments[dev]
         # Bắt đầu theo dõi thời gian thực cho máy hiện tại
         dev_start_time = time.time()
         tracker.set_active_device(dev_name, dev, current_keyword, idx + 1, len(devices))
@@ -1263,10 +1296,14 @@ def handle_all_messages(message):
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
             status_msg = bot.reply_to(message, f"🚀 Bắt đầu chạy song song trên {len(target_devices)} máy...", reply_markup=markup)
+            keyword_assignments = assign_shopee_keywords(
+                expanded_keywords,
+                target_devices,
+            )
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
-                current_keyword = random.choice(expanded_keywords)
+                current_keyword = keyword_assignments[device_id]
                 dev_start = time.time()
                 success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=is_cancelled)
                 dev_dur = time.time() - dev_start
@@ -1314,10 +1351,14 @@ def handle_all_messages(message):
             markup = telebot.types.InlineKeyboardMarkup()
             markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
             status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng song song trên {len(target_devices)} máy...", reply_markup=markup)
+            keyword_assignments = assign_shopee_keywords(
+                expanded_keywords,
+                target_devices,
+            )
             
             def run_search_parallel(device_id):
                 dev_name = get_device_name(device_id)
-                current_keyword = random.choice(expanded_keywords)
+                current_keyword = keyword_assignments[device_id]
                 dev_start = time.time()
                 success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first)
                 dev_dur = time.time() - dev_start

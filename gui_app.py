@@ -277,13 +277,34 @@ class GUIApp(ctk.CTk):
         )
         self.lbl_shopee_hint.pack(anchor="w")
         
-        self.lbl_main_keywords = ctk.CTkLabel(
+        self.main_keywords_header = ctk.CTkFrame(
             self.shopee_scroll,
+            fg_color="transparent",
+        )
+        self.main_keywords_header.pack(fill="x", padx=16, pady=(0, 3))
+
+        self.lbl_main_keywords = ctk.CTkLabel(
+            self.main_keywords_header,
             text="Từ khóa chính • Mỗi dòng một từ khóa",
             font=label_font,
             text_color=text,
         )
-        self.lbl_main_keywords.pack(padx=16, pady=(0, 3), anchor="w")
+        self.lbl_main_keywords.pack(side="left")
+
+        self.btn_toggle_main_keywords = ctk.CTkButton(
+            self.main_keywords_header,
+            text="Mở rộng ▼",
+            width=92,
+            height=28,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color=blue_soft,
+            hover_color="#dce9ff",
+            text_color=blue,
+            corner_radius=10,
+            cursor="hand2",
+            command=lambda: self.toggle_shopee_keyword_box("main"),
+        )
+        self.btn_toggle_main_keywords.pack(side="right")
 
         self.txt_main_keywords = ctk.CTkTextbox(
             self.shopee_scroll,
@@ -389,13 +410,34 @@ class GUIApp(ctk.CTk):
         )
         self.btn_gen_ai_t2.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         
-        self.lbl_ai_keywords = ctk.CTkLabel(
+        self.ai_keywords_header = ctk.CTkFrame(
             self.shopee_scroll,
+            fg_color="transparent",
+        )
+        self.ai_keywords_header.pack(fill="x", padx=16, pady=(0, 3))
+
+        self.lbl_ai_keywords = ctk.CTkLabel(
+            self.ai_keywords_header,
             text="Từ khóa AI đã tạo",
             font=label_font,
             text_color=text,
         )
-        self.lbl_ai_keywords.pack(padx=16, pady=(0, 3), anchor="w")
+        self.lbl_ai_keywords.pack(side="left")
+
+        self.btn_toggle_ai_keywords = ctk.CTkButton(
+            self.ai_keywords_header,
+            text="Mở rộng ▼",
+            width=92,
+            height=28,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color=violet_soft,
+            hover_color="#e8e0ff",
+            text_color=violet,
+            corner_radius=10,
+            cursor="hand2",
+            command=lambda: self.toggle_shopee_keyword_box("ai"),
+        )
+        self.btn_toggle_ai_keywords.pack(side="right")
         
         self.txt_ai_keywords = ctk.CTkTextbox(
             self.shopee_scroll,
@@ -410,6 +452,19 @@ class GUIApp(ctk.CTk):
             scrollbar_button_hover_color="#a9bfd9",
         )
         self.txt_ai_keywords.pack(fill="x", padx=16, pady=(0, 8))
+
+        self._shopee_keyword_boxes = {
+            "main": {
+                "textbox": self.txt_main_keywords,
+                "button": self.btn_toggle_main_keywords,
+                "expanded": False,
+            },
+            "ai": {
+                "textbox": self.txt_ai_keywords,
+                "button": self.btn_toggle_ai_keywords,
+                "expanded": False,
+            },
+        }
         
         self.ent_selection = ctk.CTkEntry(
             self.shopee_scroll,
@@ -921,6 +976,18 @@ class GUIApp(ctk.CTk):
                     executor.map(disable_rot, target_devices)
         self.run_in_thread(action)
 
+    def toggle_shopee_keyword_box(self, box_name):
+        box = self._shopee_keyword_boxes.get(box_name)
+        if not box:
+            return
+
+        expanded = not box["expanded"]
+        box["expanded"] = expanded
+        box["textbox"].configure(height=220 if expanded else 64)
+        box["button"].configure(
+            text="Thu nhỏ ▲" if expanded else "Mở rộng ▼"
+        )
+
     # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM SHOPEE =================
     def run_seq_search(self):
         click_first_item = False
@@ -1111,11 +1178,16 @@ class GUIApp(ctk.CTk):
                     )
                 except Exception:
                     pass
+
+            keyword_assignments = main.assign_shopee_keywords(
+                keywords,
+                target_devices,
+            )
             
             def run_search_parallel(device_id):
                 devices = main.get_ordered_devices()
                 dev_idx = devices.index(device_id) + 1
-                current_keyword = random.choice(keywords)
+                current_keyword = keyword_assignments[device_id]
                 print(f"[Máy {dev_idx}] Bắt đầu tìm kiếm với từ khóa '{current_keyword}'...")
                 
                 success, err = main.adb.shopee_find_and_click_lamdong(

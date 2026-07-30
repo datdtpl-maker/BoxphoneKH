@@ -9,6 +9,70 @@ import main
 
 class ShopeeSearchClickTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.random.uniform", return_value=7.5)
+    def test_shopee_loading_delay_is_random_between_five_and_ten_seconds(
+        self,
+        uniform_mock,
+        sleep_mock,
+    ):
+        controller = ADBController(adb_path="adb")
+
+        delay = controller.shopee_loading_delay(
+            "device-1",
+            "kết quả tìm kiếm",
+        )
+
+        self.assertEqual(7.5, delay)
+        uniform_mock.assert_called_once_with(5.0, 10.0)
+        self.assertAlmostEqual(
+            7.5,
+            sum(call.args[0] for call in sleep_mock.call_args_list),
+        )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.random.uniform", return_value=1.0)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    def test_basic_shopee_search_delays_before_swiping(
+        self,
+        _randint,
+        _uniform,
+        _sleep,
+    ):
+        controller = ADBController(adb_path="adb")
+        events = []
+        controller.execute_adb = (
+            lambda *_args, **_kwargs: (0, "", "")
+        )
+        controller.ensure_shopee_homepage = lambda *_args, **_kwargs: True
+        controller.bypass_shopee_popup = lambda *_args, **_kwargs: None
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.shopee_loading_delay = (
+            lambda _device_id, context, **_kwargs:
+            (events.append(f"delay:{context}") or 7.5)
+        )
+        controller.swipe = (
+            lambda *_args, **_kwargs: events.append("swipe")
+        )
+        controller.ensure_shopee_search_box_click = (
+            lambda *_args, **_kwargs: True
+        )
+        controller.tap = lambda *_args, **_kwargs: None
+        controller.replace_shopee_search_text = (
+            lambda *_args, **_kwargs: True
+        )
+        controller.press_enter = lambda _device_id: events.append("enter")
+
+        success, _message = controller.shopee_search_sequence(
+            "device-1",
+            "từ khóa mẫu",
+        )
+
+        self.assertTrue(success)
+        self.assertEqual("delay:home", events[0])
+        self.assertGreater(events.index("swipe"), events.index("delay:home"))
+        self.assertGreater(events.index("delay:results"), events.index("enter"))
+
+    @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
     def test_homepage_add_to_cart_text_does_not_redirect_to_cart(
@@ -380,6 +444,11 @@ class ShopeeSearchClickTests(unittest.TestCase):
         )
         controller.find_and_click_view_shop = lambda *_args, **_kwargs: (500, 500)
         controller.get_screen_size = lambda _device_id: (1080, 1920)
+        waited_contexts = []
+        controller.shopee_loading_delay = (
+            lambda _device_id, context, **_kwargs:
+            (waited_contexts.append(context) or 7.5)
+        )
         controller.find_random_product_in_shop = (
             lambda _device_id: (700, 900)
         )
@@ -405,15 +474,20 @@ class ShopeeSearchClickTests(unittest.TestCase):
         self.assertEqual(["Shop Mẫu"], entered_texts)
         self.assertEqual(1, len(enter_events))
         self.assertIn((700, 900), taps)
+        self.assertEqual(["results", "shop", "product"], waited_contexts)
         self.assertTrue(
             any("ngẫu nhiên" in message.lower() for message in statuses)
         )
 
     @patch("main.time.sleep", return_value=None)
     @patch("main.random.randint", return_value=60)
-    @patch("main.random.choice", return_value="từ khóa chung")
-    def test_sequential_uses_one_random_keyword_for_all_devices(
-        self, choice_mock, _randint, _sleep
+    @patch(
+        "main.random.sample",
+        return_value=["từ khóa 3", "từ khóa 1", "từ khóa 2"],
+    )
+    @patch("main.random.choice", return_value="từ khóa 1")
+    def test_sequential_assigns_different_random_keyword_per_device(
+        self, _choice_mock, sample_mock, _randint, _sleep
     ):
         used_keywords = []
         fake_adb = SimpleNamespace(
@@ -434,19 +508,25 @@ class ShopeeSearchClickTests(unittest.TestCase):
         with (
             patch("main.adb", fake_adb),
             patch("main.TelegramRealtimeTracker", return_value=fake_tracker),
-            patch("main.get_device_name", side_effect=["S1", "S2", "S2"]),
+            patch("main.get_device_name", return_value="S"),
             patch("main.send_device_finished_card"),
             patch("main.safe_send_message"),
         ):
             main.run_sequential_shopee_search(
                 message,
                 ["từ khóa 1", "từ khóa 2", "từ khóa 3"],
-                ["device-1", "device-2"],
+                ["device-1", "device-2", "device-3"],
                 use_ai=False,
             )
 
-        self.assertEqual(["từ khóa chung", "từ khóa chung"], used_keywords)
-        choice_mock.assert_called_once()
+        self.assertEqual(
+            ["từ khóa 3", "từ khóa 1", "từ khóa 2"],
+            used_keywords,
+        )
+        sample_mock.assert_called_once_with(
+            ["từ khóa 1", "từ khóa 2", "từ khóa 3"],
+            3,
+        )
 
 
 if __name__ == "__main__":

@@ -299,6 +299,38 @@ class ADBController:
             self.keyevent(device_id, 4)
             time.sleep(1.0)
 
+    def shopee_loading_delay(
+        self,
+        device_id,
+        context,
+        status_callback=None,
+        is_cancelled=None,
+    ):
+        """Delay ngẫu nhiên 5-10 giây trước khi Shopee lướt hoặc bấm."""
+        context_labels = {
+            "home": "trang chủ",
+            "results": "kết quả sau khi Enter",
+            "shop": "trang Shop",
+            "product": "trang sản phẩm",
+        }
+        delay = random.uniform(5.0, 10.0)
+        context_label = context_labels.get(context, context)
+        if status_callback:
+            status_callback(
+                device_id,
+                f"Chờ {delay:.1f} giây cho {context_label} tải ổn định "
+                "trước khi tương tác...",
+            )
+
+        remaining = delay
+        while remaining > 0:
+            if is_cancelled and is_cancelled():
+                raise Exception("Bị dừng bởi người dùng")
+            sleep_step = min(0.25, remaining)
+            time.sleep(sleep_step)
+            remaining -= sleep_step
+        return delay
+
     def input_text(self, device_id, text):
         """Nhập chữ tiếng Việt thông qua bàn phím XwIME bằng Base64 broadcast"""
         # Đảm bảo IME đã bật
@@ -709,6 +741,13 @@ class ADBController:
             check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
+
+            self.shopee_loading_delay(
+                device_id,
+                "home",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
@@ -745,7 +784,12 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
-            time.sleep(3.5)
+            self.shopee_loading_delay(
+                device_id,
+                "results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
             check_cancelled()
             
             update_status("Hoàn thành tìm kiếm!")
@@ -789,6 +833,13 @@ class ADBController:
             check_cancelled()
             update_status("Kiểm tra và tắt popup quảng cáo...")
             self.bypass_shopee_popup(device_id)
+
+            self.shopee_loading_delay(
+                device_id,
+                "home",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
                 
             # Lấy kích thước màn hình động
             width, height = self.get_screen_size(device_id)
@@ -825,11 +876,13 @@ class ADBController:
             
             update_status("Gửi lệnh tìm kiếm...")
             self.press_enter(device_id)
-            
-            # Đợi trang kết quả tải xong
-            for _ in range(4):
-                time.sleep(1.0)
-                check_cancelled()
+            self.shopee_loading_delay(
+                device_id,
+                "results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            check_cancelled()
             
             # Kiểm tra Captcha lần 2 sau khi bấm tìm kiếm
             if not self.check_and_bypass_captcha(device_id, max_retries=3, status_callback=status_callback):
@@ -991,7 +1044,12 @@ class ADBController:
                     click_y = max(0, cy - 120)
                     update_status(f"Tìm thấy nhãn Lâm Đồng tại ({cx}, {cy}). Tiến hành click vào sản phẩm...")
                     self.tap(device_id, cx, click_y)
-                    time.sleep(4.0) # Đợi trang sản phẩm mở ra
+                    self.shopee_loading_delay(
+                        device_id,
+                        "product",
+                        status_callback=status_callback,
+                        is_cancelled=is_cancelled,
+                    )
                     
                     # 1. Vuốt xem album ảnh sản phẩm (Swipe Image Carousel - 2-4 ảnh)
                     update_status("Vuốt xem album ảnh sản phẩm chi tiết...")
@@ -1052,7 +1110,12 @@ class ADBController:
                     if shop_coords:
                         update_status("Đang truy cập cửa hàng...")
                         self.tap(device_id, shop_coords[0], shop_coords[1])
-                        time.sleep(4.5) # Đợi trang Shop tải
+                        self.shopee_loading_delay(
+                            device_id,
+                            "shop",
+                            status_callback=status_callback,
+                            is_cancelled=is_cancelled,
+                        )
                         
                         # Dạo trang chủ Shop trong 30 - 45 giây
                         shop_duration = random.randint(30, 45)
@@ -1073,7 +1136,12 @@ class ADBController:
                         # Nhấn nút Back để quay lại trang sản phẩm
                         update_status("Hoàn thành dạo Shop. Quay lại sản phẩm...")
                         self.keyevent(device_id, 4) # Quay lại sản phẩm
-                        time.sleep(3.0)
+                        self.shopee_loading_delay(
+                            device_id,
+                            "product",
+                            status_callback=status_callback,
+                            is_cancelled=is_cancelled,
+                        )
 
                     # 5. Dạo xem thêm chi tiết sản phẩm & Đánh giá sau khi quay lại (30 - 45 giây)
                     view_duration = random.randint(30, 45)
@@ -1442,7 +1510,12 @@ class ADBController:
             
             update_status("[Dự phòng] Gửi lệnh tìm kiếm shop...")
             self.press_enter(device_id)
-            time.sleep(3.5)
+            self.shopee_loading_delay(
+                device_id,
+                "results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
             check_cancelled()
 
             # 3. Tìm nút "Xem Shop" / "Thêm kết quả >" / Thẻ đại diện Shop
@@ -1460,7 +1533,12 @@ class ADBController:
                 update_status(f"[Dự phòng] Click nút/thẻ Shop tại {view_shop_coords}...")
                 self.tap(device_id, view_shop_coords[0], view_shop_coords[1])
             
-            time.sleep(4.0) # Đợi trang Shop tải
+            self.shopee_loading_delay(
+                device_id,
+                "shop",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
             check_cancelled()
 
             # 4. Dạo trang Shop trước khi chọn sản phẩm.
@@ -1516,7 +1594,12 @@ class ADBController:
                 f"[Dự phòng] Chọn ngẫu nhiên sản phẩm tại {product_coords}..."
             )
             self.tap(device_id, product_coords[0], product_coords[1])
-            time.sleep(4.0)
+            self.shopee_loading_delay(
+                device_id,
+                "product",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
             check_cancelled()
 
             # 6. Lướt album ảnh của sản phẩm.
