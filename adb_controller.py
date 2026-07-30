@@ -1300,13 +1300,15 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
 
-            # Xóa từ khóa cũ trong shop nếu có
-            self.clear_input_field(device_id)
-            time.sleep(0.5)
-
-            # 5. Nhập từ khóa sản phẩm và tìm kiếm trong Shop
-            update_status(f"[Dự phòng] Nhập từ khóa '{keyword}' trong Shop...")
-            self.input_text_naturally(device_id, keyword)
+            # 5. Xóa sạch và nhập đúng một từ khóa sản phẩm trong Shop.
+            # Không dùng input_text_naturally vì hàm đó còn gõ thêm bản không dấu.
+            update_status(
+                f"[Dự phòng] Xóa sạch & nhập một từ khóa '{keyword}' trong Shop..."
+            )
+            if not self.replace_shopee_search_text(device_id, keyword):
+                raise RuntimeError(
+                    "Không thể xóa và nhập từ khóa sản phẩm trong Shop"
+                )
             time.sleep(1.5)
             check_cancelled()
             

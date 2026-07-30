@@ -167,6 +167,51 @@ class ShopeeSearchClickTests(unittest.TestCase):
             sum("XW_INPUT_B64" in command for command in commands),
         )
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.config.SHOPEE_SHOP_NAMES", ["Shop Mẫu"])
+    def test_shop_fallback_enters_product_keyword_only_once(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.ensure_shopee_homepage = lambda *_args, **_kwargs: True
+        controller.bypass_shopee_popup = lambda _device_id: None
+        controller.ensure_shopee_search_box_click = (
+            lambda *_args, **_kwargs: True
+        )
+        controller.tap = lambda *_args: None
+        controller.clear_input_field = lambda _device_id: None
+        controller.input_text = lambda *_args: None
+        controller.press_enter = lambda _device_id: None
+        controller.find_and_click_view_shop = lambda *_args, **_kwargs: (500, 500)
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.find_shop_search_box = lambda _device_id: (540, 106)
+
+        replaced_keywords = []
+        natural_inputs = []
+        controller.replace_shopee_search_text = (
+            lambda _device_id, keyword:
+            replaced_keywords.append(keyword) or True
+        )
+        controller.input_text_naturally = (
+            lambda _device_id, keyword:
+            natural_inputs.append(keyword)
+        )
+        controller.find_first_product_in_shop = (
+            lambda *_args: (_ for _ in ()).throw(
+                RuntimeError("stop after product keyword")
+            )
+        )
+
+        controller.shopee_fallback_by_shop_name(
+            "device-1", "Sản phẩm mẫu hiệu quả"
+        )
+
+        self.assertEqual(
+            ["Sản phẩm mẫu hiệu quả"],
+            replaced_keywords,
+        )
+        self.assertEqual([], natural_inputs)
+
     @patch("main.time.sleep", return_value=None)
     @patch("main.random.randint", return_value=60)
     @patch("main.random.choice", return_value="từ khóa chung")
