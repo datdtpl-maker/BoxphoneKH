@@ -111,6 +111,26 @@ class ADBController:
             return True
         return False
 
+    def is_shopee_home_activity(self, device_id):
+        """Xác minh cửa sổ đang focus chính xác là HomeActivity của Shopee."""
+        code, stdout, _ = self.execute_adb(
+            device_id,
+            ["shell", "dumpsys", "window", "windows"],
+        )
+        if code != 0:
+            return False
+
+        focus_lines = [
+            line.casefold()
+            for line in stdout.splitlines()
+            if "mcurrentfocus" in line.casefold()
+            or "mfocusedapp" in line.casefold()
+        ]
+        return any(
+            "com.shopee.vn/" in line and "homeactivity" in line
+            for line in focus_lines
+        )
+
     def is_on_shopee_homepage(self, device_id):
         """Kiểm tra xem thiết bị có đang ở màn hình chính Shopee hay không"""
         # 1. Kiểm tra tiến trình Shopee đang ở foreground
@@ -475,17 +495,19 @@ class ADBController:
                 f"temp_dump_search_click_{device_id}.xml",
             )
             self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-            dump_code, _, _ = self.execute_adb(
+            dump_code, dump_stdout, dump_stderr = self.execute_adb(
                 device_id, ["shell", "uiautomator", "dump", xml_file]
             )
-            if dump_code != 0:
-                return None, None
+            dump_message = f"{dump_stdout} {dump_stderr}".casefold()
+            ui_busy = "could not get idle state" in dump_message
+            if dump_code != 0 or ui_busy:
+                return None, None, ui_busy
 
             pull_code, _, _ = self.execute_adb(
                 device_id, ["pull", xml_file, local_xml]
             )
             if pull_code != 0 or not os.path.exists(local_xml):
-                return None, None
+                return None, None, False
 
             home_search_coords = None
             header_search_coords = None
@@ -573,9 +595,25 @@ class ADBController:
                 except Exception:
                     pass
                 self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-            return home_search_coords, header_search_coords
+            return home_search_coords, header_search_coords, False
 
-        home_coords, header_coords = scan_search_targets()
+        def click_guarded_home_search():
+            if not self.is_shopee_home_activity(device_id):
+                return False
+            guarded_x = int(width * 0.40)
+            guarded_y = int(height * 0.08)
+            update_status(
+                "Shopee Home đang bận animation • bấm vùng search "
+                "đã xác minh an toàn..."
+            )
+            self.tap(device_id, guarded_x, guarded_y)
+            time.sleep(1.2)
+            return True
+
+        home_coords, header_coords, ui_busy = scan_search_targets()
+        if ui_busy and click_guarded_home_search():
+            return True
+
         if home_coords:
             print(
                 f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm Trang chủ "
@@ -600,7 +638,9 @@ class ADBController:
             )
             self.keyevent(device_id, 4)
             time.sleep(1.2)
-            home_coords, header_coords = scan_search_targets()
+            home_coords, header_coords, ui_busy = scan_search_targets()
+            if ui_busy and click_guarded_home_search():
+                return True
             target_coords = home_coords or header_coords
             if target_coords:
                 self.tap(device_id, target_coords[0], target_coords[1])
@@ -621,7 +661,9 @@ class ADBController:
         time.sleep(2.0)
 
         for attempt in range(3):
-            home_coords, header_coords = scan_search_targets()
+            home_coords, header_coords, ui_busy = scan_search_targets()
+            if ui_busy and click_guarded_home_search():
+                return True
             target_coords = home_coords or header_coords
             if target_coords:
                 update_status(
@@ -633,6 +675,12 @@ class ADBController:
                 return True
             if attempt < 2:
                 time.sleep(1.0)
+
+        # Một số máy Shopee luôn chạy animation ở Home khiến uiautomator báo
+        # "could not get idle state" và không tạo XML. Chỉ dùng tọa độ dự phòng
+        # sau khi dumpsys xác nhận chính xác cửa sổ đang focus là HomeActivity.
+        if click_guarded_home_search():
+            return True
 
         update_status("Không xác định được ô tìm kiếm Shopee an toàn.")
         return False

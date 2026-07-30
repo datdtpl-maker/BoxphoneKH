@@ -234,6 +234,45 @@ class ShopeeSearchClickTests(unittest.TestCase):
         self.assertEqual([(429, 124)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_home_activity_uses_guarded_search_fallback_when_ui_dump_is_busy(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+
+        def execute_adb(_device_id, args, timeout=15):
+            if args[:4] == ["shell", "uiautomator", "dump", "/sdcard/dump_search_click_device-1.xml"]:
+                return -1, "", "ERROR: could not get idle state"
+            if args[:4] == ["shell", "dumpsys", "window", "windows"]:
+                return (
+                    0,
+                    "mCurrentFocus=Window{abc u0 "
+                    "com.shopee.vn/com.shopee.app.ui.home.HomeActivity_}",
+                    "",
+                )
+            return 0, "", ""
+
+        controller.execute_adb = execute_adb
+        recoveries = []
+        back_events = []
+        controller.ensure_shopee_homepage = (
+            lambda *_args, **_kwargs: recoveries.append(True) or True
+        )
+        controller.bypass_shopee_popup = lambda _device_id: None
+        controller.keyevent = (
+            lambda _device_id, keycode: back_events.append(keycode)
+        )
+        taps = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            controller.ensure_shopee_search_box_click("device-1")
+        )
+        self.assertEqual([(432, 153)], taps)
+        self.assertEqual([], back_events)
+        self.assertEqual([], recoveries)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_replace_shopee_keyword_clears_then_inputs_only_once(self, _sleep):
         controller = ADBController(adb_path="adb")
         commands = []
