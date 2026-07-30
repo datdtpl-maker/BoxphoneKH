@@ -84,6 +84,32 @@ class TikTokSearchInputTests(unittest.TestCase):
         )
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_replace_search_accepts_visually_identical_unicode_text(self, _sleep):
+        self.controller.clear_tiktok_search_input = lambda _device_id: True
+        self.controller.input_tiktok_search_text = lambda *_args: True
+        self.controller.get_tiktok_search_input_state = lambda _device_id: {
+            "text": "\u200eKênh TikTok\u00a0Mẫu\u2069",
+            "focused": True,
+            "coords": (486, 106),
+        }
+
+        self.assertTrue(
+            self.controller.replace_tiktok_search_text(
+                "device-1", "Kênh TikTok Mẫu"
+            )
+        )
+
+    def test_tiktok_search_submit_sends_only_one_enter_key(self):
+        keyevents = []
+        self.controller.keyevent = (
+            lambda _device_id, keycode: keyevents.append(keycode)
+        )
+
+        self.controller.submit_tiktok_search("device-1")
+
+        self.assertEqual([66], keyevents)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_channel_click_uses_clickable_card_and_verifies_profile(self, _sleep):
         search_root = ET.fromstring(
             """
@@ -119,6 +145,47 @@ class TikTokSearchInputTests(unittest.TestCase):
             )
         )
         self.assertEqual([(540, 422)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_click_ignores_search_input_with_same_target_text(self, _sleep):
+        search_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.EditText" clickable="true"
+                    bounds="[120,45][850,145]"
+                    resource-id="com.ss.android.ugc.trill:id/search_edit_text"
+                    text="Target Channel" />
+              <node class="android.widget.RelativeLayout" clickable="true"
+                    bounds="[180,260][900,520]" resource-id="profile_card">
+                <node class="android.widget.TextView" clickable="false"
+                      bounds="[280,300][720,360]"
+                      resource-id="com.ss.android.ugc.trill:id/title"
+                      text="Target Channel" />
+              </node>
+            </hierarchy>
+            """
+        )
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Target Channel" />
+              <node class="android.widget.Button" text="Follow" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+            </hierarchy>
+            """
+        )
+        roots = iter([search_root, profile_root])
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots)
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_channel(
+                "device-1", "Target Channel"
+            )
+        )
+        self.assertEqual([(540, 390)], taps)
 
     def test_profile_verifier_supports_vietnamese_actions_and_erf_video_items(self):
         profile_root = ET.fromstring(

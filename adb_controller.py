@@ -353,6 +353,10 @@ class ADBController:
         # Cách 3: Lệnh keyevent SEARCH của Android (84)
         self.keyevent(device_id, 84)
 
+    def submit_tiktok_search(self, device_id):
+        """Gửi đúng một phím Enter cho ô tìm kiếm TikTok."""
+        return self.keyevent(device_id, 66)
+
     def clear_input_field(self, device_id, max_chars=40):
         """Xóa sạch văn bản cũ trong ô tìm kiếm một cách triệt để"""
         try:
@@ -1671,7 +1675,11 @@ class ADBController:
                 continue
             time.sleep(0.5)
             state = self.get_tiktok_search_input_state(device_id)
-            if state is not None and state["text"].strip() == text.strip():
+            if (
+                state is not None
+                and self._normalize_tiktok_text(state["text"])
+                == self._normalize_tiktok_text(text)
+            ):
                 return True
 
             print(
@@ -1825,6 +1833,8 @@ class ADBController:
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
         target = self._normalize_tiktok_text(channel_name)
+        _, screen_height = self.get_screen_size(device_id)
+        search_bar_bottom = int(screen_height * 0.12)
 
         for attempt in range(3):
             root = self._get_tiktok_ui_root(device_id, f"tt_channel_{attempt}")
@@ -1835,6 +1845,16 @@ class ADBController:
             parent_map = {child: parent for parent in root.iter() for child in parent}
             matches = []
             for elem in root.iter():
+                class_name = elem.get("class", "").lower()
+                resource_id = elem.get("resource-id", "").lower()
+                if (
+                    "edittext" in class_name
+                    or "search_edit" in resource_id
+                    or "search_input" in resource_id
+                    or "search_src_text" in resource_id
+                ):
+                    continue
+
                 text = self._normalize_tiktok_text(
                     f"{elem.get('text', '')} {elem.get('content-desc', '')}"
                 )
@@ -1842,7 +1862,6 @@ class ADBController:
                     continue
 
                 score = 10 if text == target else 5
-                resource_id = elem.get("resource-id", "").lower()
                 if "username" in resource_id:
                     score += 4
 
@@ -1853,8 +1872,15 @@ class ADBController:
                 ):
                     clickable = parent_map.get(clickable)
                 target_elem = clickable if clickable is not None else elem
+                target_class = target_elem.get("class", "").lower()
+                target_resource_id = target_elem.get("resource-id", "").lower()
                 coords = self._element_center(target_elem)
-                if coords:
+                if (
+                    coords
+                    and coords[1] > search_bar_bottom
+                    and "edittext" not in target_class
+                    and "search" not in target_resource_id
+                ):
                     matches.append((score, coords, text))
 
             if not matches:
@@ -2065,7 +2091,7 @@ class ADBController:
             time.sleep(1.0)
             # TikTok hiện dùng Enter để gửi tìm kiếm. Không tap góc phải vì
             # vị trí đó là nút ba chấm và sẽ mở bảng Filters.
-            self.press_enter(device_id)
+            self.submit_tiktok_search(device_id)
             time.sleep(3.5)
             check_cancelled()
 
@@ -2115,7 +2141,7 @@ class ADBController:
             self.replace_tiktok_search_text(device_id, target_channel)
             time.sleep(1.0)
             # Áp dụng cùng cơ chế cho bước 3: chỉ Enter, không chạm nút ba chấm.
-            self.press_enter(device_id)
+            self.submit_tiktok_search(device_id)
             time.sleep(3.5)
             check_cancelled()
 
