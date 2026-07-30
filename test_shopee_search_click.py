@@ -296,10 +296,67 @@ class ShopeeSearchClickTests(unittest.TestCase):
             sum("XW_INPUT_B64" in command for command in commands),
         )
 
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_random_shop_product_uses_visible_clickable_grid_card(
+        self, _exists, _remove, _choice
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.view.ViewGroup" clickable="true"
+                    content-desc="shop_page_product_tab"
+                    bounds="[260,60][480,210]" />
+              <node class="android.view.ViewGroup" clickable="true"
+                    bounds="[40,500][520,1120]" />
+              <node class="android.view.ViewGroup" clickable="true"
+                    bounds="[560,500][1040,1120]" />
+              <node class="android.view.ViewGroup" clickable="true"
+                    content-desc="shop_page_button_back_to_top"
+                    bounds="[940,1760][1040,1860]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            coords = controller.find_random_product_in_shop("device-1")
+
+        self.assertEqual((800, 810), coords)
+
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
+    def test_random_shop_product_uses_grid_fallback_when_ui_is_busy(
+        self, _choice
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, args, timeout=15:
+            (
+                (0, "", "ERROR: could not get idle state")
+                if "uiautomator" in args
+                else (0, "", "")
+            )
+        )
+
+        coords = controller.find_random_product_in_shop("device-1")
+
+        self.assertEqual((810, 1459), coords)
+
+    @patch("adb_controller.random.uniform", return_value=1.0)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.config.SHOPEE_SHOP_NAMES", ["Shop Mẫu"])
-    def test_shop_fallback_enters_product_keyword_only_once(
-        self, _sleep
+    def test_shop_fallback_browses_random_product_without_product_search(
+        self, _sleep, _randint, _uniform
     ):
         controller = ADBController(adb_path="adb")
         controller.ensure_shopee_homepage = lambda *_args, **_kwargs: True
@@ -307,39 +364,50 @@ class ShopeeSearchClickTests(unittest.TestCase):
         controller.ensure_shopee_search_box_click = (
             lambda *_args, **_kwargs: True
         )
-        controller.tap = lambda *_args: None
+        taps = []
+        statuses = []
+        entered_texts = []
+        enter_events = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
         controller.clear_input_field = lambda _device_id: None
-        controller.input_text = lambda *_args: None
-        controller.press_enter = lambda _device_id: None
+        controller.input_text = (
+            lambda _device_id, text: entered_texts.append(text)
+        )
+        controller.press_enter = (
+            lambda _device_id: enter_events.append(True)
+        )
         controller.find_and_click_view_shop = lambda *_args, **_kwargs: (500, 500)
         controller.get_screen_size = lambda _device_id: (1080, 1920)
-        controller.find_shop_search_box = lambda _device_id: (540, 106)
-
-        replaced_keywords = []
-        natural_inputs = []
-        controller.replace_shopee_search_text = (
-            lambda _device_id, keyword:
-            replaced_keywords.append(keyword) or True
+        controller.find_random_product_in_shop = (
+            lambda _device_id: (700, 900)
         )
-        controller.input_text_naturally = (
-            lambda _device_id, keyword:
-            natural_inputs.append(keyword)
+        controller.swipe = lambda *_args, **_kwargs: None
+        controller.swipe_curved = lambda *_args, **_kwargs: None
+        controller.find_shop_search_box = lambda *_args: self.fail(
+            "Không được bấm ô tìm kiếm sau khi đã vào shop dự phòng"
         )
-        controller.find_first_product_in_shop = (
-            lambda *_args: (_ for _ in ()).throw(
-                RuntimeError("stop after product keyword")
-            )
+        controller.replace_shopee_search_text = lambda *_args: self.fail(
+            "Không được nhập keyword sản phẩm trong shop dự phòng"
+        )
+        controller.find_first_product_in_shop = lambda *_args: self.fail(
+            "Không được tìm sản phẩm theo keyword trong shop dự phòng"
         )
 
-        controller.shopee_fallback_by_shop_name(
-            "device-1", "Sản phẩm mẫu hiệu quả"
+        success, _message = controller.shopee_fallback_by_shop_name(
+            "device-1",
+            "Sản phẩm mẫu hiệu quả",
+            status_callback=lambda _device_id, message: statuses.append(message),
         )
 
-        self.assertEqual(
-            ["Sản phẩm mẫu hiệu quả"],
-            replaced_keywords,
+        self.assertTrue(success)
+        self.assertEqual(["Shop Mẫu"], entered_texts)
+        self.assertEqual(1, len(enter_events))
+        self.assertIn((700, 900), taps)
+        self.assertTrue(
+            any("ngẫu nhiên" in message.lower() for message in statuses)
         )
-        self.assertEqual([], natural_inputs)
 
     @patch("main.time.sleep", return_value=None)
     @patch("main.random.randint", return_value=60)

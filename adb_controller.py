@@ -1223,6 +1223,103 @@ class ADBController:
                     pass
         return coords
 
+    def find_random_product_in_shop(self, device_id):
+        """Chọn ngẫu nhiên một card sản phẩm đang hiển thị trong lưới Shop."""
+        width, height = self.get_screen_size(device_id)
+        grid_fallbacks = [
+            (int(width * 0.25), int(height * 0.58)),
+            (int(width * 0.75), int(height * 0.58)),
+            (int(width * 0.25), int(height * 0.76)),
+            (int(width * 0.75), int(height * 0.76)),
+        ]
+        safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
+        remote_xml = f"/sdcard/dump_shop_products_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_shop_products_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, dump_stdout, dump_stderr = self.execute_adb(
+            device_id,
+            ["shell", "uiautomator", "dump", remote_xml],
+        )
+        dump_message = f"{dump_stdout} {dump_stderr}".casefold()
+        if "could not get idle state" in dump_message:
+            return random.choice(grid_fallbacks)
+        if dump_code != 0:
+            return None
+
+        pull_code, _, _ = self.execute_adb(
+            device_id,
+            ["pull", remote_xml, local_xml],
+        )
+        if pull_code != 0 or not os.path.exists(local_xml):
+            return None
+
+        candidates = []
+        excluded_markers = (
+            "shop_page_shop_tab",
+            "shop_page_product_tab",
+            "shop_page_category_tab",
+            "category",
+            "see-more",
+            "back_to_top",
+            "buttonactionbar",
+            "search",
+            "cart",
+            "chat",
+            "filter",
+            "more",
+        )
+        try:
+            root = ET.parse(local_xml).getroot()
+            for elem in root.iter():
+                if elem.get("clickable", "").lower() != "true":
+                    continue
+
+                marker_text = " ".join(
+                    (
+                        elem.get("resource-id", ""),
+                        elem.get("content-desc", ""),
+                        elem.get("text", ""),
+                    )
+                ).casefold()
+                if any(marker in marker_text for marker in excluded_markers):
+                    continue
+
+                bounds = elem.get("bounds", "")
+                match = re.match(
+                    r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',
+                    bounds,
+                )
+                if not match:
+                    continue
+
+                x1, y1, x2, y2 = map(int, match.groups())
+                card_width = x2 - x1
+                card_height = y2 - y1
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+                if not (
+                    int(width * 0.28) <= card_width <= int(width * 0.60)
+                    and card_height >= int(height * 0.16)
+                    and int(height * 0.22) < cy < int(height * 0.92)
+                ):
+                    continue
+                candidates.append((cx, cy))
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+        if not candidates:
+            return None
+        return random.choice(candidates)
+
     def find_first_product_in_shop(self, device_id, keyword):
         xml_file = f"/sdcard/dump_shop_results_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
@@ -1297,7 +1394,7 @@ class ADBController:
         return coords
 
     def shopee_fallback_by_shop_name(self, device_id, keyword, status_callback=None, is_cancelled=None):
-        """Kịch bản dự phòng: Tìm kiếm tên shop, truy cập vào shop qua thẻ shop / nút Thêm kết quả, và tìm sản phẩm"""
+        """Kịch bản dự phòng: vào Shop theo tên, dạo Shop và mở ngẫu nhiên một sản phẩm."""
         def update_status(msg):
             if status_callback:
                 status_callback(device_id, msg)
@@ -1366,63 +1463,63 @@ class ADBController:
             time.sleep(4.0) # Đợi trang Shop tải
             check_cancelled()
 
-            # 4. Tìm ô tìm kiếm trong Shop (Ô kính lúp ở Đỉnh trang Shop: x=50% width, y=5.5% height)
-            update_status("[Dự phòng] Tìm ô tìm kiếm trong Shop...")
-            shop_search_x = int(width * 0.5)
-            shop_search_y = int(height * 0.055)
-            
-            shop_search_coords = self.find_shop_search_box(device_id)
-            if not shop_search_coords:
-                update_status(f"[Dự phòng] Click ô 'Tìm kiếm sản phẩm trong Shop' tại ({shop_search_x}, {shop_search_y})...")
-                self.tap(device_id, shop_search_x, shop_search_y)
-            else:
-                update_status(f"[Dự phòng] Click ô tìm kiếm trong Shop tại {shop_search_coords}...")
-                self.tap(device_id, shop_search_coords[0], shop_search_coords[1])
-                
-            time.sleep(1.5)
-            check_cancelled()
-            
-            # Click lại vào chính ô search ở đỉnh trang để chắc chắn bàn phím xuất hiện (tuyệt đối KHÔNG click y=0.14)
-            self.tap(device_id, shop_search_x, shop_search_y)
-            time.sleep(1.0)
-            check_cancelled()
-            time.sleep(1.0)
-            check_cancelled()
-
-            # 5. Xóa sạch và nhập đúng một từ khóa sản phẩm trong Shop.
-            # Không dùng input_text_naturally vì hàm đó còn gõ thêm bản không dấu.
-            update_status(
-                f"[Dự phòng] Xóa sạch & nhập một từ khóa '{keyword}' trong Shop..."
-            )
-            if not self.replace_shopee_search_text(device_id, keyword):
-                raise RuntimeError(
-                    "Không thể xóa và nhập từ khóa sản phẩm trong Shop"
-                )
-            time.sleep(1.5)
-            check_cancelled()
-            
-            update_status("[Dự phòng] Tìm kiếm sản phẩm trong Shop...")
-            self.press_enter(device_id)
-            time.sleep(3.5)
-            check_cancelled()
-
-            # 6. Tìm sản phẩm đầu tiên hiện ra trong kết quả tìm kiếm của Shop
-            update_status("[Dự phòng] Tìm sản phẩm đầu tiên trong Shop...")
-            product_coords = self.find_first_product_in_shop(device_id, keyword)
-            if not product_coords:
-                update_status("[Dự phòng] Không tìm thấy sản phẩm qua XML, thử click tọa độ dự phòng...")
-                self.tap(device_id, 300, 600)
-            else:
-                update_status(f"[Dự phòng] Click sản phẩm tại {product_coords}...")
-                self.tap(device_id, product_coords[0], product_coords[1])
-                
-            time.sleep(4.0) # Đợi trang sản phẩm tải
-            check_cancelled()
-
-            # 7. Tiến hành lướt xem album ảnh, thông tin sản phẩm và dạo Shop (giống hệt quy trình chính)
-            width, height = self.get_screen_size(device_id)
+            # 4. Dạo trang Shop trước khi chọn sản phẩm.
             cx = width // 2
-            
+            shop_swipes = random.randint(2, 4)
+            update_status(
+                f"[Dự phòng] Đã vào Shop • dạo Shop {shop_swipes} lượt..."
+            )
+            for shop_index in range(shop_swipes):
+                check_cancelled()
+                read_delay = random.uniform(2.5, 4.5)
+                update_status(
+                    f"[Dự phòng] Xem Shop lượt "
+                    f"{shop_index + 1}/{shop_swipes} ({read_delay:.1f}s)..."
+                )
+                time.sleep(read_delay)
+                self.swipe_curved(
+                    device_id,
+                    cx,
+                    int(height * 0.76) + random.randint(-35, 35),
+                    cx,
+                    int(height * 0.32) + random.randint(-35, 35),
+                    duration=random.randint(700, 950),
+                )
+
+            # 5. Chọn ngẫu nhiên một card sản phẩm đang hiển thị.
+            product_coords = None
+            for attempt in range(4):
+                check_cancelled()
+                product_coords = self.find_random_product_in_shop(device_id)
+                if product_coords:
+                    break
+                update_status(
+                    f"[Dự phòng] Chưa thấy card sản phẩm • lướt thêm "
+                    f"({attempt + 1}/4)..."
+                )
+                self.swipe_curved(
+                    device_id,
+                    cx,
+                    int(height * 0.76),
+                    cx,
+                    int(height * 0.30),
+                    duration=800,
+                )
+                time.sleep(2.0)
+
+            if not product_coords:
+                raise RuntimeError(
+                    "Không nhận diện được card sản phẩm trong Shop dự phòng"
+                )
+
+            update_status(
+                f"[Dự phòng] Chọn ngẫu nhiên sản phẩm tại {product_coords}..."
+            )
+            self.tap(device_id, product_coords[0], product_coords[1])
+            time.sleep(4.0)
+            check_cancelled()
+
+            # 6. Lướt album ảnh của sản phẩm.
             update_status("[Dự phòng] Vuốt xem album ảnh sản phẩm chi tiết...")
             for _ in range(random.randint(2, 4)):
                 check_cancelled()
@@ -1432,68 +1529,28 @@ class ADBController:
                 self.swipe(device_id, x_start, y_img, x_end, y_img, duration=random.randint(500, 700))
                 time.sleep(random.uniform(2.5, 4.0))
 
-            update_status("[Dự phòng] Đang cuộn xem thông tin chi tiết & Đánh giá...")
-            view_duration = random.randint(30, 45)
-            start_time = time.time()
-            while time.time() - start_time < view_duration:
+            # 7. Lướt xem thông tin và đánh giá rồi kết thúc quy trình.
+            detail_swipes = random.randint(4, 6)
+            update_status(
+                f"[Dự phòng] Lướt xem chi tiết & đánh giá "
+                f"{detail_swipes} lượt..."
+            )
+            for detail_index in range(detail_swipes):
                 check_cancelled()
                 y_start = int(height * 0.7) + random.randint(-40, 40)
                 y_end = int(height * 0.35) + random.randint(-40, 40)
                 self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
-                
                 read_delay = random.uniform(3.5, 6.0)
-                temp_start = time.time()
-                while time.time() - temp_start < read_delay:
-                    time.sleep(0.25)
-                    check_cancelled()
+                update_status(
+                    f"[Dự phòng] Đọc chi tiết lượt "
+                    f"{detail_index + 1}/{detail_swipes} ({read_delay:.1f}s)..."
+                )
+                time.sleep(read_delay)
 
-            # 8. Tương tác ngẫu nhiên (Thêm giỏ hàng 15% tỉ lệ)
-            if random.random() < 0.15:
-                check_cancelled()
-                update_status("[Dự phòng] Tương tác ngẫu nhiên (Thêm vào giỏ hàng)...")
-                cart_coords = self.find_element_coords_by_text(device_id, "Thêm vào giỏ hàng")
-                if cart_coords:
-                    self.tap(device_id, cart_coords[0], cart_coords[1])
-                    time.sleep(3.0)
-                    check_cancelled()
-                    self.tap(device_id, int(width * 0.3) + random.randint(-50, 50), int(height * 0.5) + random.randint(-50, 50))
-                    time.sleep(1.5)
-                    check_cancelled()
-                    self.keyevent(device_id, 4)
-                    time.sleep(2.0)
-
-            # 9. Dạo shop
-            update_status("[Dự phòng] Tìm nút Xem Shop...")
-            shop_coords = None
-            for shop_btn_text in ["Xem Shop", "View Shop", "Ghé Shop", "Xem Cửa Hàng", "Visit Shop", "Visit Store"]:
-                shop_coords = self.find_element_coords_by_text(device_id, shop_btn_text)
-                if shop_coords:
-                    break
-            if shop_coords:
-                update_status("[Dự phòng] Đang truy cập cửa hàng để dạo...")
-                self.tap(device_id, shop_coords[0], shop_coords[1])
-                time.sleep(4.5)
-                
-                shop_duration = random.randint(30, 45)
-                shop_start = time.time()
-                while time.time() - shop_start < shop_duration:
-                    check_cancelled()
-                    y_start = int(height * 0.75) + random.randint(-40, 40)
-                    y_end = int(height * 0.3) + random.randint(-40, 40)
-                    self.swipe_curved(device_id, cx, y_start, cx, y_end, duration=random.randint(700, 1000))
-                    
-                    read_delay = random.uniform(3.5, 6.0)
-                    temp_s = time.time()
-                    while time.time() - temp_s < read_delay:
-                        time.sleep(0.25)
-                        check_cancelled()
-                        
-                update_status("[Dự phòng] Hoàn thành dạo Shop. Quay lại sản phẩm...")
-                self.keyevent(device_id, 4)
-                time.sleep(3.0)
-
-            update_status("[Dự phòng] Hoàn thành quy trình tương tác sản phẩm!")
-            return True, "Thành công (Dự phòng qua tên Shop)"
+            update_status(
+                "[Dự phòng] Hoàn thành xem sản phẩm ngẫu nhiên • kết thúc quy trình!"
+            )
+            return True, "Thành công (Dạo Shop và xem sản phẩm ngẫu nhiên)"
         except Exception as e:
             return False, f"Lỗi dự phòng: {str(e)}"
 
