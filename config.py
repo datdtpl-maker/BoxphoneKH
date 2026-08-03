@@ -11,6 +11,11 @@ BASE_DIR = Path(__file__).resolve().parent
 # Token Bot Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# Cho phep tat toan bo ket noi va thong bao Telegram tu giao dien.
+TELEGRAM_NOTIFICATIONS_ENABLED = os.getenv(
+    "TELEGRAM_NOTIFICATIONS_ENABLED", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+
 # Danh sách ID người dùng được phép điều khiển bot (để trống nếu cho phép tất cả các tài khoản)
 ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = [int(uid.strip()) for uid in ALLOWED_USER_IDS_RAW.split(",") if uid.strip().isdigit()]

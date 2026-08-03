@@ -33,7 +33,19 @@ def is_cancelled():
 # Caching mapping thiết bị toàn cục để tra cứu nhanh
 cached_mapping = {}
 
+
+class _TelegramNotificationsDisabled:
+    """Gia lap ket qua gui de luong dang chay khong bi loi message_id."""
+
+    message_id = 0
+
+
+def telegram_notifications_enabled():
+    return bool(getattr(config, "TELEGRAM_NOTIFICATIONS_ENABLED", True))
+
 def safe_send_message(chat_id, text, parse_mode=None, reply_markup=None, reply_to_message_id=None):
+    if not telegram_notifications_enabled():
+        return _TelegramNotificationsDisabled()
     """Gửi tin nhắn Telegram an toàn, tự động retry nếu lỗi mạng để không làm sập luồng chính"""
     for attempt in range(3):
         try:
@@ -52,6 +64,8 @@ def safe_send_message(chat_id, text, parse_mode=None, reply_markup=None, reply_t
     return None
 
 def safe_edit_message(text, chat_id, message_id, reply_markup=None, parse_mode=None):
+    if not telegram_notifications_enabled():
+        return None
     """Sửa tin nhắn Telegram an toàn, tự động retry nếu lỗi mạng"""
     for attempt in range(3):
         try:
@@ -70,6 +84,8 @@ def safe_edit_message(text, chat_id, message_id, reply_markup=None, parse_mode=N
     return None
 
 def safe_send_photo(chat_id, photo, caption=None, reply_to_message_id=None):
+    if not telegram_notifications_enabled():
+        return None
     """Gửi ảnh Telegram an toàn, tự động retry nếu lỗi mạng"""
     for attempt in range(3):
         try:

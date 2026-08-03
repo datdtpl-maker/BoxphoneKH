@@ -162,6 +162,22 @@ class GUIApp(ctk.CTk):
         )
         self.btn_mute_all.pack(side="right", padx=(10, 0), pady=2)
 
+        self.btn_telegram_notifications = ctk.CTkButton(
+            self.brand_badge,
+            text="",
+            font=button_font,
+            width=155,
+            height=44,
+            text_color="#ffffff",
+            corner_radius=14,
+            cursor="hand2",
+            command=self.toggle_telegram_notifications,
+        )
+        self.btn_telegram_notifications.pack(
+            side="right", padx=(10, 0), pady=2
+        )
+        self._refresh_telegram_notifications_button()
+
         # ================= ROW 1: REAL-TIME ACTIVITY =================
         self.log_card = ctk.CTkFrame(
             self,
@@ -1101,6 +1117,9 @@ class GUIApp(ctk.CTk):
                 
         keys = {
             'TELEGRAM_BOT_TOKEN': token,
+            'TELEGRAM_NOTIFICATIONS_ENABLED': (
+                '1' if config.TELEGRAM_NOTIFICATIONS_ENABLED else '0'
+            ),
             'ALLOWED_USER_IDS': admin_ids,
             'ADB_PATH': adb_path,
             'SHOPEE_SHOP_NAMES': shops,
@@ -1141,6 +1160,57 @@ class GUIApp(ctk.CTk):
         
         print("[Hệ thống] Lưu cấu hình và tải lại thành công!")
         messagebox.showinfo("Thành công", "Đã lưu cấu hình và tự động nạp lại!")
+
+    def _persist_env_setting(self, key, value):
+        """Cap nhat mot khoa .env ma khong ghi de cac cau hinh khac."""
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as env_file:
+                lines = env_file.readlines()
+
+        prefix = f"{key}="
+        new_line = f"{prefix}{value}\n"
+        updated = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith(prefix):
+                if not updated:
+                    new_lines.append(new_line)
+                    updated = True
+            else:
+                new_lines.append(line)
+        if not updated:
+            new_lines.append(new_line)
+
+        with open(env_path, "w", encoding="utf-8") as env_file:
+            env_file.writelines(new_lines)
+
+    def _refresh_telegram_notifications_button(self):
+        enabled = bool(config.TELEGRAM_NOTIFICATIONS_ENABLED)
+        self.btn_telegram_notifications.configure(
+            text="Telegram: BẬT" if enabled else "Telegram: TẮT",
+            fg_color="#0f9f6e" if enabled else "#64748b",
+            hover_color="#0b815a" if enabled else "#475569",
+        )
+
+    def toggle_telegram_notifications(self):
+        enabled = not bool(config.TELEGRAM_NOTIFICATIONS_ENABLED)
+        config.TELEGRAM_NOTIFICATIONS_ENABLED = enabled
+        self._persist_env_setting(
+            "TELEGRAM_NOTIFICATIONS_ENABLED", "1" if enabled else "0"
+        )
+        self._refresh_telegram_notifications_button()
+
+        if enabled:
+            print("[Telegram] Đã bật thông báo và kết nối bot.")
+            self.start_bot_service()
+        else:
+            try:
+                main.bot.stop_polling()
+            except Exception:
+                pass
+            print("[Telegram] Đã tắt toàn bộ thông báo và kết nối bot.")
 
     def stop_all(self):
         main.cancel_flag = True
@@ -2011,12 +2081,19 @@ class GUIApp(ctk.CTk):
         self.run_in_thread(action)
 
     def start_bot_service(self):
+        if self.__dict__.get("_bot_service_started", False):
+            return
+        self._bot_service_started = True
+
         def run():
             print("[Hệ thống] Bot Telegram đang khởi động dưới nền...")
             skip_pending_on_start = True
             while True:
                 try:
-                    if config.TELEGRAM_BOT_TOKEN:
+                    if (
+                        config.TELEGRAM_NOTIFICATIONS_ENABLED
+                        and config.TELEGRAM_BOT_TOKEN
+                    ):
                         skip_pending = skip_pending_on_start
                         skip_pending_on_start = False
                         main.bot.polling(
@@ -2026,9 +2103,10 @@ class GUIApp(ctk.CTk):
                             timeout=20,
                         )
                     else:
-                        time.sleep(5)
+                        time.sleep(1)
                 except Exception as e:
-                    print(f"[Lỗi Bot] Lỗi kết nối Telegram, đang nạp lại sau 5s... Lỗi: {e}")
+                    if config.TELEGRAM_NOTIFICATIONS_ENABLED:
+                        print(f"[Lỗi Bot] Lỗi kết nối Telegram, đang nạp lại sau 5s... Lỗi: {e}")
                     time.sleep(5)
         self.run_in_thread(run)
 
