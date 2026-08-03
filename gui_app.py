@@ -1358,8 +1358,7 @@ class GUIApp(ctk.CTk):
             print("[Telegram] Đã tắt toàn bộ thông báo và kết nối bot.")
 
     def stop_all(self):
-        main.cancel_flag = True
-        main.cancel_sequential = True
+        main.cancel_all_workflows()
         print("[GUI] 🛑 ĐÃ XÓA TOÀN BỘ LUỒNG VÀ DỪNG KHẨN CẤP! Phần mềm sẵn sàng nhận lệnh mới.")
 
     def parse_targets(self, entry_widget=None):
@@ -1510,11 +1509,10 @@ class GUIApp(ctk.CTk):
         target_devices = self.parse_targets(entry_widget=self.ent_selection)
         if not target_devices:
             return
+        workflow_session = main.start_workflow_session()
             
         def action():
             nonlocal keywords
-            main.cancel_flag = False
-            main.cancel_sequential = False
             if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
@@ -1543,7 +1541,14 @@ class GUIApp(ctk.CTk):
                         def __init__(self):
                             self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
                     self.chat = DummyChat()
-            main.run_sequential_shopee_search(DummyMessage(), keywords, target_devices, click_first_item=click_first_item, use_ai=False)
+            main.run_sequential_shopee_search(
+                DummyMessage(),
+                keywords,
+                target_devices,
+                click_first_item=click_first_item,
+                use_ai=False,
+                session_id=workflow_session,
+            )
             
         self.run_in_thread(action)
 
@@ -1602,11 +1607,13 @@ class GUIApp(ctk.CTk):
         target_devices = self.parse_targets(entry_widget=self.ent_selection)
         if not target_devices:
             return
+        workflow_session = main.start_workflow_session()
+        session_is_cancelled = main.make_session_cancel_checker(
+            workflow_session
+        )
             
         def action():
             nonlocal keywords
-            main.cancel_flag = False
-            main.cancel_sequential = False
             if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
                 def status_cb(msg):
                     self.log_message(f"[Gemini AI] {msg}")
@@ -1693,7 +1700,7 @@ class GUIApp(ctk.CTk):
                     status_callback=(
                         tracker.status_callback if tracker else None
                     ),
-                    is_cancelled=lambda: main.cancel_flag or main.cancel_sequential, 
+                    is_cancelled=session_is_cancelled,
                     click_first_item=click_first_item
                 )
                 dev_duration = time.time() - dev_start
@@ -1747,8 +1754,10 @@ class GUIApp(ctk.CTk):
         channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
 
         self.bulk_disable_rotation(target_devices=target_devices)
-        main.cancel_flag = False
-        main.cancel_sequential = False
+        workflow_session = main.start_workflow_session()
+        session_is_cancelled = main.make_session_cancel_checker(
+            workflow_session
+        )
 
         print(f"[GUI] Bắt đầu chạy TikTok Tuần Tự trên {len(target_devices)} máy...")
 
@@ -1769,7 +1778,7 @@ class GUIApp(ctk.CTk):
                     tracker = None
 
             for idx, dev in enumerate(target_devices):
-                if main.is_cancelled():
+                if session_is_cancelled():
                     print("[GUI] ⏹️ Tiến trình TikTok đã bị dừng.")
                     break
                 dev_name = main.get_device_name(dev)
@@ -1796,7 +1805,7 @@ class GUIApp(ctk.CTk):
                     seed_keywords=seed_raw, 
                     target_channel=channel, 
                     status_callback=tt_status_cb,
-                    is_cancelled=main.is_cancelled
+                    is_cancelled=session_is_cancelled
                 )
                 dev_duration = time.time() - dev_start
                 if success:
@@ -1840,8 +1849,10 @@ class GUIApp(ctk.CTk):
         channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
 
         self.bulk_disable_rotation(target_devices=target_devices)
-        main.cancel_flag = False
-        main.cancel_sequential = False
+        workflow_session = main.start_workflow_session()
+        session_is_cancelled = main.make_session_cancel_checker(
+            workflow_session
+        )
 
         print(f"[GUI] Bắt đầu chạy TikTok Song Song trên {len(target_devices)} máy...")
 
@@ -1878,7 +1889,7 @@ class GUIApp(ctk.CTk):
                 seed_keywords=seed_raw, 
                 target_channel=channel, 
                 status_callback=tt_status_cb,
-                is_cancelled=main.is_cancelled
+                is_cancelled=session_is_cancelled
             )
             duration = time.time() - dev_start
             if tracker:
@@ -1945,8 +1956,10 @@ class GUIApp(ctk.CTk):
             return
 
         self.bulk_disable_rotation(target_devices=target_devices)
-        main.cancel_flag = False
-        main.cancel_sequential = False
+        workflow_session = main.start_workflow_session()
+        session_is_cancelled = main.make_session_cancel_checker(
+            workflow_session
+        )
 
         def action():
             chat_id = (
@@ -1956,7 +1969,7 @@ class GUIApp(ctk.CTk):
             )
             success_count = 0
             for index, device_id in enumerate(target_devices):
-                if main.is_cancelled():
+                if session_is_cancelled():
                     break
                 device_name = main.get_device_name(device_id)
                 tracker = None
@@ -1994,7 +2007,7 @@ class GUIApp(ctk.CTk):
                     seed_keywords=seed_raw,
                     target_pages=target_raw,
                     status_callback=fb_status_callback,
-                    is_cancelled=main.is_cancelled,
+                    is_cancelled=session_is_cancelled,
                 )
                 duration = time.time() - started_at
                 if success:
@@ -2055,8 +2068,10 @@ class GUIApp(ctk.CTk):
             return
 
         self.bulk_disable_rotation(target_devices=target_devices)
-        main.cancel_flag = False
-        main.cancel_sequential = False
+        workflow_session = main.start_workflow_session()
+        session_is_cancelled = main.make_session_cancel_checker(
+            workflow_session
+        )
         chat_id = (
             config.ALLOWED_USER_IDS[0]
             if config.ALLOWED_USER_IDS
@@ -2091,7 +2106,7 @@ class GUIApp(ctk.CTk):
                 seed_keywords=seed_raw,
                 target_pages=target_raw,
                 status_callback=fb_status_callback,
-                is_cancelled=main.is_cancelled,
+                is_cancelled=session_is_cancelled,
             )
             if tracker:
                 tracker.finish_dashboard(

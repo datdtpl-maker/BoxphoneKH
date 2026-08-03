@@ -25,6 +25,41 @@ adb = ADBController()
 cancel_sequential = False
 cancel_flag = False
 sequential_thread = None
+_workflow_session_lock = threading.Lock()
+_workflow_session_id = 0
+
+
+def start_workflow_session():
+    """Bắt đầu phiên mới và vô hiệu hóa vĩnh viễn mọi worker phiên cũ."""
+    global cancel_flag, cancel_sequential, _workflow_session_id
+    with _workflow_session_lock:
+        _workflow_session_id += 1
+        cancel_flag = False
+        cancel_sequential = False
+        return _workflow_session_id
+
+
+def cancel_all_workflows():
+    """Dừng phiên hiện tại; worker cũ không thể sống lại ở phiên sau."""
+    global cancel_flag, cancel_sequential, _workflow_session_id
+    with _workflow_session_lock:
+        _workflow_session_id += 1
+        cancel_flag = True
+        cancel_sequential = True
+        return _workflow_session_id
+
+
+def is_session_cancelled(session_id):
+    with _workflow_session_lock:
+        return (
+            cancel_flag
+            or cancel_sequential
+            or session_id != _workflow_session_id
+        )
+
+
+def make_session_cancel_checker(session_id):
+    return lambda: is_session_cancelled(session_id)
 
 def is_cancelled():
     global cancel_flag, cancel_sequential
@@ -519,10 +554,17 @@ def assign_shopee_keywords(keywords, devices):
     return assignments
 
 
-def run_sequential_shopee_search(message, keywords, devices, click_first_item=False, use_ai=True):
-    global cancel_sequential, cancel_flag
-    cancel_sequential = False
-    cancel_flag = False
+def run_sequential_shopee_search(
+    message,
+    keywords,
+    devices,
+    click_first_item=False,
+    use_ai=True,
+    session_id=None,
+):
+    if session_id is None:
+        session_id = start_workflow_session()
+    session_is_cancelled = make_session_cancel_checker(session_id)
     
     if use_ai:
         def gemini_status(msg):
@@ -571,7 +613,7 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
     success_count = 0
     
     for idx, dev in enumerate(devices):
-        if cancel_sequential or cancel_flag:
+        if session_is_cancelled():
             safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
             break
             
@@ -592,13 +634,13 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
             dev, 
             current_keyword, 
             status_callback=tracker.status_callback, 
-            is_cancelled=is_cancelled, 
+            is_cancelled=session_is_cancelled,
             click_first_item=click_first_item
         )
         
         dev_duration = time.time() - dev_start_time
         
-        if cancel_sequential or cancel_flag:
+        if session_is_cancelled():
             finish_shopee_profile_tracker(
                 tracker,
                 False,
@@ -646,10 +688,10 @@ def run_sequential_shopee_search(message, keywords, devices, click_first_item=Fa
                 next_dev_name,
                 delay,
                 reply_markup=markup,
-                is_cancelled_callback=is_cancelled,
+                is_cancelled_callback=session_is_cancelled,
             )
                 
-    if not cancel_sequential and not cancel_flag:
+    if not session_is_cancelled():
         total_duration = time.time() - total_start_time
         total_min = int(total_duration // 60)
         total_sec = int(total_duration % 60)
@@ -1163,9 +1205,11 @@ def handle_inline_callbacks(call):
             safe_send_message(chat_id, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng gõ 'dừng' trước.")
         else:
             safe_send_message(chat_id, f"🚀 **KHỞI CHẠY TUẦN TỰ {tier_label.upper()}**\n\nĐang quét trên {len(devices)} máy với {len(kws)} từ khóa AI...", parse_mode="Markdown")
+            workflow_session = start_workflow_session()
             sequential_thread = threading.Thread(
-                target=run_sequential_shopee_search, 
-                args=(call.message, kws, devices, False)
+                target=run_sequential_shopee_search,
+                args=(call.message, kws, devices, False),
+                kwargs={"session_id": workflow_session},
             )
             sequential_thread.daemon = True
             sequential_thread.start()
@@ -1180,6 +1224,10 @@ def handle_inline_callbacks(call):
         kws = job["keywords"]
         tier_label = f"Tầng {job['tier']}"
         devices = get_ordered_devices()
+        workflow_session = start_workflow_session()
+        session_is_cancelled = make_session_cancel_checker(
+            workflow_session
+        )
         
         markup = telebot.types.InlineKeyboardMarkup()
         markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
@@ -1189,7 +1237,7 @@ def handle_inline_callbacks(call):
             dev_name = get_device_name(device_id)
             current_keyword = random.choice(kws)
             dev_start = time.time()
-            success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=False)
+            success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=session_is_cancelled, click_first_item=False)
             dev_dur = time.time() - dev_start
             send_device_finished_card(chat_id, dev_name, device_id, current_keyword, success, err, dev_dur)
             return dev_name, current_keyword, success, err
@@ -1208,22 +1256,17 @@ def handle_inline_callbacks(call):
 
     elif data == "stop_all":
         bot.answer_callback_query(call.id)
-        global cancel_sequential, cancel_flag
-        cancel_sequential = True
-        cancel_flag = True
+        cancel_all_workflows()
         status_msg = safe_send_message(chat_id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
         
-        def reset_cancel_flags():
+        def finish_stop_notice():
             time.sleep(3.5)
-            global cancel_sequential, cancel_flag
-            cancel_sequential = False
-            cancel_flag = False
             try:
                 safe_edit_message("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", chat_id, status_msg.message_id)
             except Exception:
                 pass
                 
-        threading.Thread(target=reset_cancel_flags, daemon=True).start()
+        threading.Thread(target=finish_stop_notice, daemon=True).start()
 
 # Xử lý tất cả tin nhắn văn bản (Ngôn ngữ tự nhiên)
 @bot.message_handler(func=lambda message: True)
@@ -1278,19 +1321,19 @@ def handle_all_messages(message):
         is_seq = cmd.get("is_sequential", False)
         seed_kws = cmd.get("seed_keywords")
         target_ch = cmd.get("target_channel")
+        workflow_session = start_workflow_session()
+        session_is_cancelled = make_session_cancel_checker(
+            workflow_session
+        )
         
         if is_seq or len(target_devices) == 1:
             def run_seq_tt_thread():
-                global cancel_sequential, cancel_flag
-                cancel_sequential = False
-                cancel_flag = False
-                
                 tracker = TelegramRealtimeTracker(bot, message.chat.id)
                 tracker.start_dashboard(f"🎵 **BƠM TIKTOK TUẦN TỰ**\nKênh mục tiêu: `{target_ch}`\nĐang quét trên {len(target_devices)} máy...")
 
                 success_count = 0
                 for idx, dev in enumerate(target_devices):
-                    if is_cancelled():
+                    if session_is_cancelled():
                         break
                     dev_name = get_device_name(dev)
                     tracker.set_active_device(
@@ -1307,7 +1350,7 @@ def handle_all_messages(message):
                         seed_keywords=seed_kws,
                         target_channel=target_ch,
                         status_callback=tracker.status_callback,
-                        is_cancelled=is_cancelled
+                        is_cancelled=session_is_cancelled
                     )
                     dev_dur = time.time() - dev_start
                     send_device_finished_card(message.chat.id, dev_name, dev, f"TikTok: {target_ch}", success, err, dev_dur)
@@ -1346,7 +1389,7 @@ def handle_all_messages(message):
                     seed_keywords=seed_kws,
                     target_channel=target_ch,
                     status_callback=tracker.status_callback,
-                    is_cancelled=is_cancelled
+                    is_cancelled=session_is_cancelled
                 )
                 dev_dur = time.time() - dev_start
                 if success:
@@ -1404,6 +1447,10 @@ def handle_all_messages(message):
             bot.edit_message_text(f"❌ Không thể chụp màn hình máy {tgt_name}. Lỗi: {result}", message.chat.id, status_msg.message_id)
 
     elif action == "shopee_search":
+        workflow_session = start_workflow_session()
+        session_is_cancelled = make_session_cancel_checker(
+            workflow_session
+        )
         keywords = cmd["keywords"]
         def gemini_status(msg):
             safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
@@ -1423,7 +1470,7 @@ def handle_all_messages(message):
             tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
             
             dev_start = time.time()
-            success, err = adb.shopee_search_sequence(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=is_cancelled)
+            success, err = adb.shopee_search_sequence(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=session_is_cancelled)
             duration = time.time() - dev_start
             
             tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm kiếm.")
@@ -1441,7 +1488,7 @@ def handle_all_messages(message):
                 dev_name = get_device_name(device_id)
                 current_keyword = keyword_assignments[device_id]
                 dev_start = time.time()
-                success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=is_cancelled)
+                success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=session_is_cancelled)
                 dev_dur = time.time() - dev_start
                 send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
                 return dev_name, current_keyword, success, err
@@ -1457,6 +1504,10 @@ def handle_all_messages(message):
             safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
 
     elif action == "shopee_search_lamdong":
+        workflow_session = start_workflow_session()
+        session_is_cancelled = make_session_cancel_checker(
+            workflow_session
+        )
         keywords = cmd["keywords"]
         click_first = cmd.get("click_first_item", False)
         
@@ -1478,7 +1529,7 @@ def handle_all_messages(message):
             tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
             
             dev_start = time.time()
-            success, err = adb.shopee_find_and_click_lamdong(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=is_cancelled, click_first_item=click_first)
+            success, err = adb.shopee_find_and_click_lamdong(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=session_is_cancelled, click_first_item=click_first)
             duration = time.time() - dev_start
             
             tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm shop Lâm Đồng.")
@@ -1496,7 +1547,7 @@ def handle_all_messages(message):
                 dev_name = get_device_name(device_id)
                 current_keyword = keyword_assignments[device_id]
                 dev_start = time.time()
-                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=is_cancelled, click_first_item=click_first)
+                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=session_is_cancelled, click_first_item=click_first)
                 dev_dur = time.time() - dev_start
                 send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
                 return dev_name, current_keyword, success, err
@@ -1518,30 +1569,27 @@ def handle_all_messages(message):
         if sequential_thread and sequential_thread.is_alive():
             bot.reply_to(message, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng nhắn 'dừng' để hủy trước khi khởi chạy phiên mới.")
         else:
+            workflow_session = start_workflow_session()
             sequential_thread = threading.Thread(
-                target=run_sequential_shopee_search, 
-                args=(message, keywords, target_devices, click_first)
+                target=run_sequential_shopee_search,
+                args=(message, keywords, target_devices, click_first),
+                kwargs={"session_id": workflow_session},
             )
             sequential_thread.daemon = True
             sequential_thread.start()
 
     elif action == "stop_all":
-        global cancel_sequential, cancel_flag
-        cancel_sequential = True
-        cancel_flag = True
+        cancel_all_workflows()
         status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
         
-        def reset_cancel_flags():
+        def finish_stop_notice():
             time.sleep(3.5)
-            global cancel_sequential, cancel_flag
-            cancel_sequential = False
-            cancel_flag = False
             try:
                 bot.edit_message_text("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", message.chat.id, status_msg.message_id)
             except Exception:
                 pass
                 
-        threading.Thread(target=reset_cancel_flags).start()
+        threading.Thread(target=finish_stop_notice).start()
 
     elif action == "open_shopee":
         for dev in target_devices:
