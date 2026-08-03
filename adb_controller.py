@@ -174,6 +174,900 @@ class ADBController:
             return True
         return False
 
+    def is_facebook_in_foreground(self, device_id):
+        """Xác định Facebook đang là ứng dụng foreground trên thiết bị."""
+        for dumpsys_target in (
+            ["shell", "dumpsys", "window", "windows"],
+            ["shell", "dumpsys", "activity", "activities"],
+        ):
+            code, stdout, _ = self.execute_adb(device_id, dumpsys_target)
+            if code == 0 and config.FACEBOOK_PACKAGE in stdout.casefold():
+                focus_lines = [
+                    line.casefold()
+                    for line in stdout.splitlines()
+                    if "mcurrentfocus" in line.casefold()
+                    or "mfocusedapp" in line.casefold()
+                    or "mresumedactivity" in line.casefold()
+                ]
+                if any(config.FACEBOOK_PACKAGE in line for line in focus_lines):
+                    return True
+        return False
+
+    def ensure_facebook_ready(self, device_id):
+        """Giữ Facebook hiện tại hoặc mở app nếu chưa ở foreground."""
+        self.lock_portrait(device_id)
+        if self.is_facebook_in_foreground(device_id):
+            return self.ensure_facebook_home(device_id)
+        self.launch_app(device_id, config.FACEBOOK_PACKAGE)
+        time.sleep(2.5)
+        self.lock_portrait(device_id)
+        if not self.is_facebook_in_foreground(device_id):
+            return False
+        return self.ensure_facebook_home(device_id)
+
+    def is_facebook_home(self, device_id):
+        """Xác minh giao diện Home/Feed Facebook qua các marker đang hiển thị."""
+        focus_code, focus_stdout, _ = self.execute_adb(
+            device_id, ["shell", "dumpsys", "window", "windows"]
+        )
+        if focus_code == 0:
+            focused_lines = " ".join(
+                line.casefold()
+                for line in focus_stdout.splitlines()
+                if "mcurrentfocus" in line.casefold()
+                or "mfocusedapp" in line.casefold()
+            )
+            non_home_activities = (
+                "immersiveactivity",
+                "storyvieweractivity",
+                "stories.viewer",
+                "reel",
+            )
+            if config.FACEBOOK_PACKAGE in focused_lines and any(
+                marker in focused_lines for marker in non_home_activities
+            ):
+                return False
+
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_home_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_home_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        if dump_code != 0:
+            return False
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return False
+            root = ET.parse(local_xml).getroot()
+            visible_text = self._normalize_facebook_text(
+                " ".join(
+                    " ".join(
+                        (
+                            node.get("text", ""),
+                            node.get("content-desc", ""),
+                            node.get("resource-id", ""),
+                        )
+                    )
+                    for node in root.iter()
+                )
+            )
+            strong_markers = (
+                "ban dang nghi gi",
+                "create story",
+                "tao tin",
+                "news feed",
+                "bang feed",
+            )
+            has_feed_marker = any(
+                marker in visible_text for marker in strong_markers
+            )
+            has_facebook_header = "facebook" in visible_text
+            has_home_marker = any(
+                marker in visible_text
+                for marker in ("trang chu", "home tab", "home")
+            )
+            header_control_groups = (
+                ("menu",),
+                ("tao", "create"),
+                ("tim kiem", "search"),
+                ("nhan tin", "messaging"),
+            )
+            header_control_score = sum(
+                any(marker in visible_text for marker in marker_group)
+                for marker_group in header_control_groups
+            )
+            return has_feed_marker or (
+                has_facebook_header and has_home_marker
+            ) or header_control_score >= 3
+        except Exception:
+            return False
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+    def ensure_facebook_home(self, device_id):
+        """Thoát viewer/Page cũ để bắt đầu đúng tại Home Feed Facebook."""
+        if self.is_facebook_home(device_id):
+            return True
+        for _ in range(4):
+            self.keyevent(device_id, 4)
+            time.sleep(0.8)
+            if self.is_facebook_home(device_id):
+                return True
+
+        # Deep link feed là phương án có kiểm soát, tránh tap mù lên giao diện.
+        self.execute_adb(
+            device_id,
+            [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", "fb://feed",
+                "-p", config.FACEBOOK_PACKAGE,
+            ],
+        )
+        time.sleep(2.0)
+        return self.is_facebook_home(device_id)
+
+    @staticmethod
+    def _normalize_facebook_text(value):
+        """Chuẩn hóa chữ Facebook để so khớp không phân biệt dấu/hoa thường."""
+        normalized = unicodedata.normalize("NFKD", value or "")
+        without_marks = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        )
+        return " ".join(
+            re.sub(r"[^a-z0-9]+", " ", without_marks.casefold()).split()
+        )
+
+    def find_and_click_facebook_page(
+        self,
+        device_id,
+        target_phrase,
+        max_swipes=4,
+        exact_page_name=None,
+    ):
+        """Tìm và bấm Page có tên chứa đầy đủ cụm target đã nhập."""
+        target_normalized = self._normalize_facebook_text(target_phrase)
+        desired_normalized = self._normalize_facebook_text(
+            exact_page_name or target_phrase
+        )
+        target_tokens = [token for token in desired_normalized.split() if token]
+        if not target_tokens:
+            return False
+
+        width, height = self.get_screen_size(device_id)
+        for attempt in range(max(1, max_swipes)):
+            remote_xml = f"/sdcard/dump_facebook_page_{device_id}.xml"
+            local_xml = os.path.join(
+                os.path.dirname(__file__),
+                f"temp_facebook_page_{device_id}.xml",
+            )
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+            self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", remote_xml]
+            )
+            pull_code, _, _ = self.execute_adb(
+                device_id, ["pull", remote_xml, local_xml]
+            )
+
+            try:
+                if pull_code == 0 and os.path.exists(local_xml):
+                    root = ET.parse(local_xml).getroot()
+                    parent_map = {
+                        child: parent
+                        for parent in root.iter()
+                        for child in parent
+                    }
+                    candidates = []
+                    for node in root.iter():
+                        if node.get("class", "").endswith("EditText"):
+                            continue
+                        label = " ".join(
+                            part
+                            for part in (
+                                node.get("text", ""),
+                                node.get("content-desc", ""),
+                            )
+                            if part
+                        ).strip()
+                        label_normalized = self._normalize_facebook_text(label)
+                        if not label_normalized or not all(
+                            token in label_normalized.split()
+                            for token in target_tokens
+                        ):
+                            continue
+
+                        clickable = node
+                        while (
+                            clickable is not None
+                            and clickable.get("clickable", "false") != "true"
+                        ):
+                            clickable = parent_map.get(clickable)
+                        click_node = clickable if clickable is not None else node
+                        bounds = click_node.get("bounds", "")
+                        match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
+                        )
+                        if not match:
+                            continue
+                        x1, y1, x2, y2 = map(int, match.groups())
+                        if y2 <= int(height * 0.08):
+                            continue
+                        contiguous = desired_normalized in label_normalized
+                        candidates.append(
+                            (
+                                0 if contiguous else 1,
+                                -len(label_normalized),
+                                (x1 + x2) // 2,
+                                (y1 + y2) // 2,
+                            )
+                        )
+
+                    if candidates:
+                        _, _, x, y = min(candidates)
+                        self.tap(device_id, x, y)
+                        time.sleep(3.0)
+                        return True
+            except Exception as exc:
+                print(
+                    f"[Device {device_id[:6]}] Lỗi đọc kết quả Page "
+                    f"Facebook: {exc}"
+                )
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                self.execute_adb(
+                    device_id, ["shell", "rm", "-f", remote_xml]
+                )
+
+            if attempt < max(1, max_swipes) - 1:
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.78),
+                    width // 2,
+                    int(height * 0.30),
+                    duration=random.randint(650, 950),
+                )
+                time.sleep(1.5)
+        return False
+
+    def _get_facebook_search_input_state(self, device_id):
+        """Đọc ô Search Facebook ở vùng header."""
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_input_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_input_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        if dump_code != 0:
+            return None
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        if pull_code != 0 or not os.path.exists(local_xml):
+            return None
+
+        candidates = []
+        try:
+            root = ET.parse(local_xml).getroot()
+            for node in root.iter():
+                class_name = node.get("class", "").casefold()
+                resource_id = node.get("resource-id", "").casefold()
+                description = node.get("content-desc", "").casefold()
+                editable = node.get("editable", "false") == "true"
+                searchable = "search" in f"{resource_id} {description}"
+                if not (editable or "edittext" in class_name or searchable):
+                    continue
+                match = re.match(
+                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                    node.get("bounds", ""),
+                )
+                if not match:
+                    continue
+                x1, y1, x2, y2 = map(int, match.groups())
+                cy = (y1 + y2) // 2
+                if cy > 360:
+                    continue
+                focused = node.get("focused", "false") == "true"
+                candidates.append(
+                    {
+                        "score": (
+                            int(focused) * 8
+                            + int(editable) * 4
+                            + int("edittext" in class_name) * 2
+                            + int(searchable)
+                        ),
+                        "text": node.get("text", ""),
+                        "focused": focused,
+                        "coords": ((x1 + x2) // 2, cy),
+                    }
+                )
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+        if not candidates:
+            return None
+        best = max(candidates, key=lambda item: item["score"])
+        best.pop("score", None)
+        return best
+
+    def _focus_facebook_search_input(self, device_id):
+        width, height = self.get_screen_size(device_id)
+        state = self._get_facebook_search_input_state(device_id)
+        coords = state["coords"] if state else (
+            int(width * 0.45),
+            int(height * 0.055),
+        )
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(0.4)
+        return True
+
+    def find_and_click_facebook_search(self, device_id):
+        """Bấm đúng kính lúp/ô Search ở header Facebook."""
+        self.lock_portrait(device_id)
+        width, height = self.get_screen_size(device_id)
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_search_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_search_{safe_device_id}.xml",
+        )
+        for attempt in range(2):
+            coords = None
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+            self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", remote_xml]
+            )
+            pull_code, _, _ = self.execute_adb(
+                device_id, ["pull", remote_xml, local_xml]
+            )
+            try:
+                if pull_code == 0 and os.path.exists(local_xml):
+                    root = ET.parse(local_xml).getroot()
+                    for node in root.iter():
+                        haystack = " ".join(
+                            (
+                                node.get("text", ""),
+                                node.get("content-desc", ""),
+                                node.get("resource-id", ""),
+                            )
+                        ).casefold()
+                        if not any(
+                            marker in haystack
+                            for marker in (
+                                "search",
+                                "tìm kiếm",
+                                "tim kiem",
+                                "search_button",
+                            )
+                        ):
+                            continue
+                        match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                            node.get("bounds", ""),
+                        )
+                        if not match:
+                            continue
+                        x1, y1, x2, y2 = map(int, match.groups())
+                        cy = (y1 + y2) // 2
+                        if cy <= int(height * 0.18):
+                            coords = ((x1 + x2) // 2, cy)
+                            break
+            except Exception:
+                coords = None
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                self.execute_adb(
+                    device_id, ["shell", "rm", "-f", remote_xml]
+                )
+
+            if coords is None:
+                input_state = self._get_facebook_search_input_state(device_id)
+                if input_state:
+                    coords = input_state["coords"]
+                elif self.is_facebook_home(device_id):
+                    # Chỉ dùng tọa độ header sau khi đã xác minh Home Feed.
+                    coords = (int(width * 0.83), int(height * 0.055))
+
+            if coords is not None:
+                self.tap(device_id, coords[0], coords[1])
+                time.sleep(1.5)
+                self.lock_portrait(device_id)
+                input_state = self._get_facebook_search_input_state(device_id)
+                if input_state is not None:
+                    if not input_state.get("focused"):
+                        input_x, input_y = input_state["coords"]
+                        self.tap(device_id, input_x, input_y)
+                        time.sleep(0.4)
+                    return True
+
+            if attempt == 0 and self.ensure_facebook_home(device_id):
+                self.reveal_facebook_header(device_id)
+                continue
+            return False
+        return False
+
+    def replace_facebook_search_text(self, device_id, text):
+        """Xóa sạch từ khóa Facebook cũ rồi nhập nguyên cụm mới một lần."""
+        expected = self._normalize_facebook_text(text)
+        for attempt in range(2):
+            self.ensure_ime(device_id)
+            self._focus_facebook_search_input(device_id)
+            clear_code, _, _ = self.execute_adb(
+                device_id,
+                [
+                    "shell", "am", "broadcast",
+                    "-a", "XW_CLEAR_TEXT",
+                    "--receiver-foreground",
+                ],
+            )
+            if clear_code != 0:
+                continue
+            encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+            input_code, _, _ = self.execute_adb(
+                device_id,
+                [
+                    "shell", "am", "broadcast",
+                    "-a", "XW_INPUT_B64",
+                    "--es", "msg", encoded,
+                    "--receiver-foreground",
+                ],
+            )
+            if input_code != 0:
+                continue
+            time.sleep(0.5)
+            state = self._get_facebook_search_input_state(device_id)
+            if state is not None and (
+                self._normalize_facebook_text(state["text"]) == expected
+            ):
+                return True
+            if attempt == 0:
+                time.sleep(0.3)
+        raise RuntimeError(
+            f"Không thể nhập chính xác từ khóa Facebook: '{text}'"
+        )
+
+    def submit_facebook_search(self, device_id):
+        """Gửi tìm kiếm Facebook bằng Enter của bàn phím."""
+        return self.press_enter(device_id)
+
+    def facebook_loading_delay(
+        self, device_id, context, status_callback=None, is_cancelled=None
+    ):
+        """Chờ Facebook tải nội dung trước khi vuốt hoặc bấm."""
+        delay = random.uniform(5.0, 10.0)
+        labels = {
+            "seed_results": "kết quả từ khóa mồi",
+            "target_results": "kết quả Page mục tiêu",
+            "target_page": "Page mục tiêu",
+        }
+        if status_callback:
+            status_callback(
+                device_id,
+                f"Chờ {delay:.1f} giây để {labels.get(context, context)} tải...",
+            )
+        remaining = delay
+        while remaining > 0:
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("Bị dừng bởi người dùng")
+            step = min(0.25, remaining)
+            time.sleep(step)
+            remaining -= step
+        return delay
+
+    def browse_facebook_surface(
+        self,
+        device_id,
+        total_seconds,
+        label,
+        status_callback=None,
+        is_cancelled=None,
+    ):
+        """Lướt feed/kết quả/Page theo nhịp ngẫu nhiên giống người dùng."""
+        width, height = self.get_screen_size(device_id)
+        elapsed = 0
+        item_index = 1
+        label_names = {
+            "feed": "Feed Facebook",
+            "seed_results": "kết quả từ khóa mồi",
+            "target_page": "Page mục tiêu",
+            "facebook_cross_warmup": "Facebook Feed nuôi chéo",
+        }
+        label_name = label_names.get(label, label)
+        while elapsed < total_seconds:
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("Bị dừng bởi người dùng")
+            dwell = min(random.randint(6, 15), total_seconds - elapsed)
+            if status_callback:
+                status_callback(
+                    device_id,
+                    f"Xem {label_name} lượt {item_index} ({dwell}s) • "
+                    f"còn {total_seconds - elapsed}s...",
+                )
+            for _ in range(dwell):
+                time.sleep(1.0)
+                if is_cancelled and is_cancelled():
+                    raise RuntimeError("Bị dừng bởi người dùng")
+            elapsed += dwell
+            if elapsed < total_seconds:
+                x = width // 2 + random.randint(-80, 80)
+                self.swipe(
+                    device_id,
+                    x,
+                    int(height * 0.78) + random.randint(-45, 45),
+                    x + random.randint(-30, 30),
+                    int(height * 0.28) + random.randint(-45, 45),
+                    duration=random.randint(650, 1050),
+                )
+                item_index += 1
+        return True
+
+    def warmup_facebook_before_tiktok(
+        self, device_id, status_callback=None, is_cancelled=None
+    ):
+        """Nuôi Facebook Feed 3-5 phút trước khi chuyển sang TikTok."""
+        if status_callback:
+            status_callback(
+                device_id,
+                "[Nuôi chéo] Mở Facebook trước khi chạy TikTok...",
+            )
+        if not self.ensure_facebook_ready(device_id):
+            raise RuntimeError(
+                "Không mở được Facebook cho bước nuôi chéo trước TikTok"
+            )
+        total_seconds = random.randint(
+            config.SOCIAL_CROSS_WARMUP_MIN,
+            config.SOCIAL_CROSS_WARMUP_MAX,
+        )
+        if status_callback:
+            status_callback(
+                device_id,
+                f"[Nuôi chéo] Lướt Facebook Feed trong "
+                f"{total_seconds // 60} phút {total_seconds % 60:02d} giây...",
+            )
+        return self.browse_facebook_surface(
+            device_id,
+            total_seconds,
+            "facebook_cross_warmup",
+            status_callback=status_callback,
+            is_cancelled=is_cancelled,
+        )
+
+    def is_tiktok_in_foreground(self, device_id):
+        """Xác minh một trong hai package TikTok đang ở foreground."""
+        packages = (
+            config.TIKTOK_PACKAGE.casefold(),
+            config.TIKTOK_PACKAGE_ALT.casefold(),
+        )
+        for dumpsys_target in (
+            ["shell", "dumpsys", "window", "windows"],
+            ["shell", "dumpsys", "activity", "activities"],
+        ):
+            code, stdout, _ = self.execute_adb(device_id, dumpsys_target)
+            if code != 0:
+                continue
+            focus_lines = " ".join(
+                line.casefold()
+                for line in stdout.splitlines()
+                if "mcurrentfocus" in line.casefold()
+                or "mfocusedapp" in line.casefold()
+                or "mresumedactivity" in line.casefold()
+            )
+            if any(package in focus_lines for package in packages):
+                return True
+        return False
+
+    def warmup_tiktok_before_facebook(
+        self, device_id, status_callback=None, is_cancelled=None
+    ):
+        """Xem video TikTok 3-5 phút trước khi chuyển sang Facebook."""
+        if status_callback:
+            status_callback(
+                device_id,
+                "[Nuôi chéo] Mở TikTok trước khi chạy Facebook...",
+            )
+        self.launch_tiktok(device_id)
+        if not self.is_tiktok_in_foreground(device_id):
+            raise RuntimeError(
+                "Không mở được TikTok cho bước nuôi chéo trước Facebook"
+            )
+        total_seconds = random.randint(
+            config.SOCIAL_CROSS_WARMUP_MIN,
+            config.SOCIAL_CROSS_WARMUP_MAX,
+        )
+        if status_callback:
+            status_callback(
+                device_id,
+                f"[Nuôi chéo] Xem video TikTok trong "
+                f"{total_seconds // 60} phút {total_seconds % 60:02d} giây...",
+            )
+
+        elapsed = 0
+        video_index = 1
+        while elapsed < total_seconds:
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("Bị dừng bởi người dùng")
+            dwell = min(random.randint(8, 18), total_seconds - elapsed)
+            if status_callback:
+                status_callback(
+                    device_id,
+                    f"[Nuôi chéo] Xem video TikTok {video_index} "
+                    f"({dwell}s) • còn {total_seconds - elapsed}s...",
+                )
+            for _ in range(dwell):
+                time.sleep(1.0)
+                if is_cancelled and is_cancelled():
+                    raise RuntimeError("Bị dừng bởi người dùng")
+            elapsed += dwell
+            if elapsed < total_seconds:
+                self.advance_tiktok_feed(device_id)
+                video_index += 1
+        return True
+
+    def reveal_facebook_header(self, device_id):
+        """Vuốt nhẹ về phía đầu feed để thanh Search Facebook hiện lại."""
+        width, height = self.get_screen_size(device_id)
+        self.swipe(
+            device_id,
+            width // 2,
+            int(height * 0.30),
+            width // 2,
+            int(height * 0.56),
+            duration=450,
+        )
+        time.sleep(1.0)
+        return True
+
+    def is_facebook_target_page_open(
+        self, device_id, target_phrase, exact_page_name=None
+    ):
+        """Xác minh đã vào profile Page, không còn ở danh sách kết quả."""
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_profile_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_profile_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return False
+            root = ET.parse(local_xml).getroot()
+            all_text = self._normalize_facebook_text(
+                " ".join(
+                    " ".join(
+                        (node.get("text", ""), node.get("content-desc", ""))
+                    )
+                    for node in root.iter()
+                )
+            )
+            target_tokens = self._normalize_facebook_text(
+                exact_page_name or target_phrase
+            ).split()
+            has_target = all(token in all_text.split() for token in target_tokens)
+            profile_markers = (
+                "theo doi",
+                "nhan tin",
+                "bai viet",
+                "chi tiet",
+                "luot nhac",
+                "follow",
+                "message",
+                "posts",
+                "about",
+                "details",
+                "likes",
+            )
+            return has_target and any(marker in all_text for marker in profile_markers)
+        except Exception:
+            return False
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+    def facebook_automation_workflow(
+        self,
+        device_id,
+        seed_keywords,
+        target_pages,
+        status_callback=None,
+        is_cancelled=None,
+    ):
+        """Nuôi feed, tìm từ khóa mồi rồi vào đúng Page mục tiêu."""
+        def update_status(message):
+            print(f"[Device {device_id[:6]}] {message}")
+            if status_callback:
+                status_callback(device_id, message)
+
+        def check_cancelled():
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("Bị dừng bởi người dùng")
+
+        seeds = (
+            [item.strip() for item in seed_keywords.split(",") if item.strip()]
+            if isinstance(seed_keywords, str)
+            else [str(item).strip() for item in seed_keywords if str(item).strip()]
+        )
+        targets = (
+            [item.strip() for item in target_pages.split(",") if item.strip()]
+            if isinstance(target_pages, str)
+            else [str(item).strip() for item in target_pages if str(item).strip()]
+        )
+
+        try:
+            if not seeds:
+                raise RuntimeError("Chưa nhập từ khóa mồi Facebook")
+            if not targets:
+                raise RuntimeError("Chưa nhập Page target Facebook")
+            seed_keyword = random.choice(seeds)
+            target_phrase = random.choice(targets)
+            configured_exact_page = (
+                config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT.strip()
+            )
+            target_tokens = self._normalize_facebook_text(
+                target_phrase
+            ).split()
+            exact_page_name = None
+            if configured_exact_page:
+                configured_tokens = self._normalize_facebook_text(
+                    configured_exact_page
+                ).split()
+                if all(token in configured_tokens for token in target_tokens):
+                    exact_page_name = configured_exact_page
+            self.lock_portrait(device_id)
+
+            check_cancelled()
+            self.warmup_tiktok_before_facebook(
+                device_id,
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            check_cancelled()
+            update_status("[Facebook B1] Kiểm tra và mở Facebook...")
+            if not self.ensure_facebook_ready(device_id):
+                raise RuntimeError("Không mở được ứng dụng Facebook")
+            feed_total = random.randint(
+                config.FACEBOOK_STEP1_FEED_MIN,
+                config.FACEBOOK_STEP1_FEED_MAX,
+            )
+            update_status(
+                f"[Facebook B1] Nuôi Feed trong {feed_total}s (90-120s)..."
+            )
+            self.browse_facebook_surface(
+                device_id,
+                feed_total,
+                "feed",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+
+            check_cancelled()
+            self.reveal_facebook_header(device_id)
+            update_status(
+                f"[Facebook B2] Tìm từ khóa mồi '{seed_keyword}'..."
+            )
+            if not self.find_and_click_facebook_search(device_id):
+                raise RuntimeError("Không mở được ô Search Facebook")
+            self.replace_facebook_search_text(device_id, seed_keyword)
+            self.submit_facebook_search(device_id)
+            self.facebook_loading_delay(
+                device_id,
+                "seed_results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            seed_result_total = random.randint(
+                config.FACEBOOK_STEP2_RESULTS_MIN,
+                config.FACEBOOK_STEP2_RESULTS_MAX,
+            )
+            update_status(
+                f"[Facebook B2] Lướt kết quả trong {seed_result_total}s "
+                "(tối đa 60s)..."
+            )
+            self.browse_facebook_surface(
+                device_id,
+                seed_result_total,
+                "seed_results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+
+            check_cancelled()
+            update_status(
+                f"[Facebook B3] Xóa sạch từ khóa mồi và tìm Page "
+                f"'{target_phrase}'..."
+            )
+            if not self.find_and_click_facebook_search(device_id):
+                raise RuntimeError("Không mở lại được ô Search Facebook")
+            self.replace_facebook_search_text(device_id, target_phrase)
+            self.submit_facebook_search(device_id)
+            self.facebook_loading_delay(
+                device_id,
+                "target_results",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            if not self.find_and_click_facebook_page(
+                device_id,
+                target_phrase,
+                exact_page_name=exact_page_name,
+            ):
+                raise RuntimeError(
+                    f"Không tìm thấy Page Facebook chứa đủ cụm '{target_phrase}'"
+                )
+            self.facebook_loading_delay(
+                device_id,
+                "target_page",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            if not self.is_facebook_target_page_open(
+                device_id,
+                target_phrase,
+                exact_page_name=exact_page_name,
+            ):
+                raise RuntimeError(
+                    f"Đã bấm kết quả nhưng chưa vào đúng Page '{target_phrase}'"
+                )
+
+            target_total = random.randint(
+                config.FACEBOOK_STEP3_PAGE_MIN,
+                config.FACEBOOK_STEP3_PAGE_MAX,
+            )
+            update_status(
+                f"[Facebook B3] Đã vào đúng Page • lướt trong "
+                f"{target_total // 60} phút {target_total % 60:02d} giây..."
+            )
+            self.browse_facebook_surface(
+                device_id,
+                target_total,
+                "target_page",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            update_status("Hoàn thành tác vụ Bơm Facebook!")
+            return True, "Thành công"
+        except Exception as exc:
+            message = str(exc)
+            update_status(f"Lỗi Facebook: {message}")
+            return False, message
+
     def is_shopee_home_activity(self, device_id):
         """Xác minh cửa sổ đang focus chính xác là HomeActivity của Shopee."""
         code, stdout, _ = self.execute_adb(
@@ -2337,6 +3231,14 @@ class ADBController:
             # Dam bao tat xoay man hinh
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
             self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
+
+            # Nuôi chéo Facebook trước khi bắt đầu nguyên luồng TikTok cũ.
+            self.warmup_facebook_before_tiktok(
+                device_id,
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            check_cancelled()
 
             # ================= BƯỚC 1: DẠO TRANG CHỦ TIKTOK =================
             update_status("[TikTok B1] Mở ứng dụng TikTok...")

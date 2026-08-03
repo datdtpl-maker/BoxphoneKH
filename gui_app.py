@@ -22,8 +22,8 @@ class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("BoxPhoneControl")
-        self.geometry("1480x880")
-        self.minsize(1100, 720)
+        self.geometry("1680x900")
+        self.minsize(1280, 740)
         self.configure(fg_color="#edf3fa")
 
         # Design tokens: light "liquid glass" surfaces rendered with native
@@ -123,7 +123,7 @@ class GUIApp(ctk.CTk):
 
         self.platform_badge = ctk.CTkLabel(
             self.brand_badge,
-            text="SHOPEE  +  TIKTOK",
+            text="SHOPEE  +  TIKTOK  +  FACEBOOK",
             height=34,
             corner_radius=17,
             fg_color=blue_soft,
@@ -212,6 +212,7 @@ class GUIApp(ctk.CTk):
         self.ops_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=0)
         self.ops_frame.columnconfigure(0, weight=1)
         self.ops_frame.columnconfigure(1, weight=1)
+        self.ops_frame.columnconfigure(2, weight=1)
         self.ops_frame.rowconfigure(0, weight=1)
 
         scroll_style = {
@@ -237,7 +238,7 @@ class GUIApp(ctk.CTk):
             self.ops_frame,
             **scroll_style,
         )
-        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         self.shopee_heading = ctk.CTkFrame(
             self.shopee_scroll, fg_color=orange_soft, corner_radius=16
@@ -528,7 +529,7 @@ class GUIApp(ctk.CTk):
             self.ops_frame,
             **scroll_style,
         )
-        self.tiktok_scroll.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self.tiktok_scroll.grid(row=0, column=1, sticky="nsew", padx=6)
 
         self.tiktok_heading = ctk.CTkFrame(
             self.tiktok_scroll, fg_color=pink_soft, corner_radius=16
@@ -614,6 +615,7 @@ class GUIApp(ctk.CTk):
             self.tt_timeline_card,
             text=(
                 "LỘ TRÌNH TỰ ĐỘNG\n\n"
+                "00   Nuôi Facebook Feed  •  3–5 phút\n"
                 "01   Trang chủ  •  15–60 giây\n"
                 "02   Từ khóa nhiệm vụ  •  15–30 giây\n"
                 "03   Trong kênh  •  3–5 phút, đổi clip mỗi 15–30 giây"
@@ -681,6 +683,158 @@ class GUIApp(ctk.CTk):
             command=self.stop_all,
         )
         self.btn_tt_stop.pack(fill="x", padx=16, pady=(0, 12))
+
+        # ---------------- FACEBOOK AUTOMATION ----------------
+        self.facebook_scroll = ctk.CTkScrollableFrame(
+            self.ops_frame,
+            **scroll_style,
+        )
+        self.facebook_scroll.grid(
+            row=0, column=2, sticky="nsew", padx=(6, 0)
+        )
+
+        self.facebook_heading = ctk.CTkFrame(
+            self.facebook_scroll, fg_color=blue_soft, corner_radius=16
+        )
+        self.facebook_heading.pack(fill="x", padx=16, pady=(14, 10))
+
+        self.facebook_mark = ctk.CTkLabel(
+            self.facebook_heading,
+            text="F",
+            width=38,
+            height=38,
+            corner_radius=12,
+            fg_color="#ffffff",
+            text_color=blue,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+        )
+        self.facebook_mark.pack(side="left", padx=10, pady=9)
+
+        self.facebook_heading_copy = ctk.CTkFrame(
+            self.facebook_heading, fg_color="transparent"
+        )
+        self.facebook_heading_copy.pack(side="left", fill="y", pady=8)
+        ctk.CTkLabel(
+            self.facebook_heading_copy,
+            text="Facebook Automation",
+            font=title_font,
+            text_color=text,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            self.facebook_heading_copy,
+            text="Nuôi Feed và tìm đúng Page mục tiêu",
+            font=body_font,
+            text_color=muted,
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            self.facebook_scroll,
+            text="Tầng 1 • Từ khóa mồi • Phân cách bằng dấu phẩy",
+            font=label_font,
+            text_color=text,
+        ).pack(padx=16, pady=(0, 3), anchor="w")
+        self.ent_fb_seed = ctk.CTkEntry(
+            self.facebook_scroll,
+            placeholder_text="nặn mụn, chăm sóc da, skincare địa phương",
+            height=42,
+            **field_style,
+        )
+        self.ent_fb_seed.pack(fill="x", padx=16, pady=(0, 8))
+
+        ctk.CTkLabel(
+            self.facebook_scroll,
+            text="Tầng 2 • Page target • Mỗi cụm cách nhau dấu phẩy",
+            font=label_font,
+            text_color=text,
+        ).pack(padx=16, pady=(0, 3), anchor="w")
+        self.ent_fb_target = ctk.CTkEntry(
+            self.facebook_scroll,
+            placeholder_text="Tên thương hiệu hoặc cụm tên Page mục tiêu",
+            height=42,
+            **field_style,
+        )
+        self.ent_fb_target.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.fb_timeline_card = ctk.CTkFrame(
+            self.facebook_scroll,
+            fg_color=glass_tint,
+            corner_radius=14,
+            border_width=1,
+            border_color=border,
+        )
+        self.fb_timeline_card.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(
+            self.fb_timeline_card,
+            text=(
+                "LỘ TRÌNH TỰ ĐỘNG\n\n"
+                "00   Nuôi TikTok video  •  3–5 phút\n"
+                "01   Nuôi Feed  •  90–120 giây\n"
+                "02   Từ khóa mồi  •  30–60 giây\n"
+                "03   Đúng Page target  •  2–3 phút"
+            ),
+            justify="left",
+            anchor="w",
+            font=label_font,
+            text_color=text,
+        ).pack(fill="x", padx=14, pady=12)
+
+        self.ent_fb_selection = ctk.CTkEntry(
+            self.facebook_scroll,
+            placeholder_text=(
+                "Chọn máy chạy Facebook (Ví dụ: 1-5,10 hoặc trống=Tất cả)"
+            ),
+            height=42,
+            **field_style,
+        )
+        self.ent_fb_selection.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.fb_btn_grid = ctk.CTkFrame(
+            self.facebook_scroll, fg_color="transparent"
+        )
+        self.fb_btn_grid.pack(fill="x", padx=16, pady=(0, 7))
+        self.fb_btn_grid.columnconfigure(0, weight=1)
+        self.fb_btn_grid.columnconfigure(1, weight=1)
+        self.btn_fb_seq = ctk.CTkButton(
+            self.fb_btn_grid,
+            text="Chạy tuần tự",
+            font=button_font,
+            fg_color=green,
+            hover_color=green_hover,
+            text_color="#ffffff",
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_seq_facebook,
+        )
+        self.btn_fb_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        self.btn_fb_par = ctk.CTkButton(
+            self.fb_btn_grid,
+            text="Chạy song song",
+            font=button_font,
+            fg_color=blue,
+            hover_color=blue_hover,
+            text_color="#ffffff",
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=self.run_par_facebook,
+        )
+        self.btn_fb_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        self.btn_fb_stop = ctk.CTkButton(
+            self.facebook_scroll,
+            text="Dừng Facebook khẩn cấp",
+            font=button_font,
+            fg_color=red_soft,
+            hover_color="#ffe1e4",
+            text_color=red,
+            border_width=1,
+            border_color="#f4b8bd",
+            corner_radius=13,
+            height=42,
+            cursor="hand2",
+            command=self.stop_all,
+        )
+        self.btn_fb_stop.pack(fill="x", padx=16, pady=(0, 12))
 
         # ================= ROW 3: SYSTEM SETTINGS =================
         self.bottom_panel = ctk.CTkFrame(
@@ -788,6 +942,7 @@ class GUIApp(ctk.CTk):
         self._bind_glass_hover(self.log_card, border, border_hover)
         self._bind_glass_hover(self.shopee_scroll, border, "#f1b98d")
         self._bind_glass_hover(self.tiktok_scroll, border, "#e4a7c5")
+        self._bind_glass_hover(self.facebook_scroll, border, border_hover)
         self._bind_glass_hover(self.bottom_panel, border, border_hover)
         try:
             self.attributes("-alpha", 0.0)
@@ -843,6 +998,7 @@ class GUIApp(ctk.CTk):
         try:
             self.shopee_scroll._parent_canvas.yview_moveto(0)
             self.tiktok_scroll._parent_canvas.yview_moveto(0)
+            self.facebook_scroll._parent_canvas.yview_moveto(0)
             # Giữ focus khởi động ở nút header để Textbox không tự yêu cầu
             # cuộn card Shopee xuống khi cửa sổ được kích hoạt lại.
             self.btn_refresh.focus_set()
@@ -1462,6 +1618,218 @@ class GUIApp(ctk.CTk):
                     f"[GUI] ❌ TikTok Song Song KẾT THÚC CÓ LỖI: "
                     f"{success_count}/{len(target_devices)} máy thành công."
                 )
+
+        self.run_in_thread(action)
+
+    # ================= CÁC TÁC VỤ BƠM FACEBOOK =================
+    def run_seq_facebook(self):
+        seed_raw = self.ent_fb_seed.get().strip()
+        target_raw = self.ent_fb_target.get().strip()
+        if not seed_raw:
+            messagebox.showwarning(
+                "Cảnh báo", "Vui lòng nhập từ khóa mồi Facebook!"
+            )
+            return
+        if not target_raw:
+            messagebox.showwarning(
+                "Cảnh báo", "Vui lòng nhập Page target Facebook!"
+            )
+            return
+        target_devices = self.parse_targets(
+            entry_widget=self.ent_fb_selection
+        )
+        if not target_devices:
+            return
+
+        self.bulk_disable_rotation(target_devices=target_devices)
+        main.cancel_flag = False
+        main.cancel_sequential = False
+
+        def action():
+            chat_id = (
+                config.ALLOWED_USER_IDS[0]
+                if config.ALLOWED_USER_IDS
+                else None
+            )
+            success_count = 0
+            for index, device_id in enumerate(target_devices):
+                if main.is_cancelled():
+                    break
+                device_name = main.get_device_name(device_id)
+                tracker = None
+                if chat_id:
+                    try:
+                        tracker = main.TelegramRealtimeTracker(
+                            main.bot, chat_id
+                        )
+                        tracker.set_active_device(
+                            device_name,
+                            device_id,
+                            f"Facebook: {target_raw}",
+                            index + 1,
+                            len(target_devices),
+                            platform="Facebook",
+                        )
+                        tracker.start_dashboard(
+                            tracker.render_progress_text()
+                        )
+                    except Exception as exc:
+                        print(
+                            "[GUI] Không tạo được Telegram Tracker "
+                            f"Facebook: {exc}"
+                        )
+                        tracker = None
+
+                def fb_status_callback(dev, message):
+                    self.log_message(f"[Máy {device_name}] {message}")
+                    if tracker:
+                        tracker.status_callback(dev, message)
+
+                started_at = time.time()
+                success, message = main.adb.facebook_automation_workflow(
+                    device_id,
+                    seed_keywords=seed_raw,
+                    target_pages=target_raw,
+                    status_callback=fb_status_callback,
+                    is_cancelled=main.is_cancelled,
+                )
+                duration = time.time() - started_at
+                if success:
+                    success_count += 1
+                if tracker:
+                    duration_text = (
+                        f"{int(duration // 60)} phút {int(duration % 60)} giây"
+                    )
+                    tracker.finish_dashboard(
+                        (
+                            f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK**\n"
+                            f"🎯 Target: `{target_raw}`\n"
+                            f"⏱️ Thời gian: **{duration_text}**"
+                            if success
+                            else
+                            f"❌ **PROFILE {device_name} FACEBOOK THẤT BẠI**\n"
+                            f"⚠️ `{message}`"
+                        )
+                    )
+                if not success:
+                    print(
+                        f"[GUI] ❌ Facebook máy {device_name} "
+                        f"THẤT BẠI: {message}"
+                    )
+
+            summary = (
+                f"🏁 **FACEBOOK TUẦN TỰ HOÀN TẤT**\n\n"
+                f"📱 Thành công: **{success_count}/{len(target_devices)} máy**"
+            )
+            if chat_id:
+                main.safe_send_message(
+                    chat_id, summary, parse_mode="Markdown"
+                )
+            print(
+                f"[GUI] Facebook Tuần Tự: "
+                f"{success_count}/{len(target_devices)} máy thành công."
+            )
+
+        self.run_in_thread(action)
+
+    def run_par_facebook(self):
+        seed_raw = self.ent_fb_seed.get().strip()
+        target_raw = self.ent_fb_target.get().strip()
+        if not seed_raw:
+            messagebox.showwarning(
+                "Cảnh báo", "Vui lòng nhập từ khóa mồi Facebook!"
+            )
+            return
+        if not target_raw:
+            messagebox.showwarning(
+                "Cảnh báo", "Vui lòng nhập Page target Facebook!"
+            )
+            return
+        target_devices = self.parse_targets(
+            entry_widget=self.ent_fb_selection
+        )
+        if not target_devices:
+            return
+
+        self.bulk_disable_rotation(target_devices=target_devices)
+        main.cancel_flag = False
+        main.cancel_sequential = False
+        chat_id = (
+            config.ALLOWED_USER_IDS[0]
+            if config.ALLOWED_USER_IDS
+            else None
+        )
+
+        def run_device(device_id):
+            device_name = main.get_device_name(device_id)
+            tracker = None
+            if chat_id:
+                try:
+                    tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
+                    tracker.set_active_device(
+                        device_name,
+                        device_id,
+                        f"Facebook: {target_raw}",
+                        1,
+                        1,
+                        platform="Facebook",
+                    )
+                    tracker.start_dashboard(tracker.render_progress_text())
+                except Exception:
+                    tracker = None
+
+            def fb_status_callback(dev, message):
+                self.log_message(f"[Máy {device_name}] {message}")
+                if tracker:
+                    tracker.status_callback(dev, message)
+
+            success, message = main.adb.facebook_automation_workflow(
+                device_id,
+                seed_keywords=seed_raw,
+                target_pages=target_raw,
+                status_callback=fb_status_callback,
+                is_cancelled=main.is_cancelled,
+            )
+            if tracker:
+                tracker.finish_dashboard(
+                    (
+                        f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK**"
+                        if success
+                        else
+                        f"❌ **PROFILE {device_name} FACEBOOK THẤT BẠI**\n"
+                        f"⚠️ `{message}`"
+                    )
+                )
+            return device_name, success, message
+
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(
+                max_workers=len(target_devices)
+            ) as executor:
+                results = list(executor.map(run_device, target_devices))
+            success_count = sum(
+                1 for _, success, _ in results if success
+            )
+            for device_name, success, message in results:
+                if not success:
+                    print(
+                        f"[GUI] ❌ Facebook máy {device_name} "
+                        f"THẤT BẠI: {message}"
+                    )
+            summary = (
+                f"🏁 **FACEBOOK SONG SONG HOÀN TẤT**\n\n"
+                f"📱 Thành công: **{success_count}/{len(target_devices)} máy**"
+            )
+            if chat_id:
+                main.safe_send_message(
+                    chat_id, summary, parse_mode="Markdown"
+                )
+            print(
+                f"[GUI] Facebook Song Song: "
+                f"{success_count}/{len(target_devices)} máy thành công."
+            )
 
         self.run_in_thread(action)
 

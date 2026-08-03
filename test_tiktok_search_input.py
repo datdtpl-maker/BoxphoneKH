@@ -284,8 +284,15 @@ class TikTokSearchInputTests(unittest.TestCase):
         entered_keywords = []
         statuses = []
         taps_after_search = []
+        startup_order = []
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
-        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.warmup_facebook_before_tiktok = (
+            lambda _device_id, **_kwargs:
+            startup_order.append("facebook_warmup") or True
+        )
+        self.controller.launch_tiktok = (
+            lambda _device_id: startup_order.append("tiktok_workflow")
+        )
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: None
@@ -305,6 +312,10 @@ class TikTokSearchInputTests(unittest.TestCase):
         )
 
         self.assertTrue(success)
+        self.assertEqual(
+            ["facebook_warmup", "tiktok_workflow"],
+            startup_order,
+        )
         self.assertEqual(
             ["nặn mụn", "Kênh TikTok Mẫu"],
             entered_keywords,
@@ -331,6 +342,9 @@ class TikTokSearchInputTests(unittest.TestCase):
         entered_keywords = []
         opened_channels = []
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = (
+            lambda _device_id, **_kwargs: True
+        )
         self.controller.launch_tiktok = lambda _device_id: None
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
@@ -365,6 +379,9 @@ class TikTokSearchInputTests(unittest.TestCase):
         self, _sleep, _randint, _uniform
     ):
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = (
+            lambda _device_id, **_kwargs: True
+        )
         self.controller.launch_tiktok = lambda _device_id: None
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True

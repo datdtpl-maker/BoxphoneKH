@@ -1,6 +1,6 @@
 # BoxPhone Automation
 
-Ứng dụng Windows điều khiển nhiều điện thoại Android qua ADB, hỗ trợ quy trình tự động hóa Shopee, TikTok và báo cáo tiến trình theo thời gian thực qua Telegram.
+Ứng dụng Windows điều khiển nhiều điện thoại Android qua ADB, hỗ trợ quy trình tự động hóa Shopee, TikTok, Facebook và báo cáo tiến trình theo thời gian thực qua Telegram.
 
 Repository công khai không chứa token, ID Telegram, serial thiết bị, tên shop hoặc tên kênh thực tế. Toàn bộ thông tin vận hành phải được cấu hình cục bộ.
 
@@ -18,15 +18,24 @@ Repository công khai không chứa token, ID Telegram, serial thiết bị, tê
 
 ### TikTok
 
+- Trước workflow chính, mở Facebook và nuôi Feed ngẫu nhiên 3–5 phút.
 - Quy trình ba bước: lướt Trang chủ, tìm từ khóa nhiệm vụ, tìm và vào kênh mục tiêu.
 - Xóa sạch nội dung cũ trước khi nhập từ khóa mới.
 - Mở clip trong kênh và chuyển clip theo khoảng thời gian cấu hình sẵn.
 - Chạy tuần tự hoặc song song.
 
+### Facebook
+
+- Trước workflow chính, mở TikTok và xem video ngẫu nhiên 3–5 phút.
+- Nuôi Feed, tìm từ khóa mồi và vào đúng Page mục tiêu.
+- Hỗ trợ giao diện Facebook tiếng Việt và tiếng Anh.
+- Tự phục hồi về Home nếu đang ở Story, Reels hoặc Page cũ.
+- Chạy tuần tự hoặc song song.
+
 ### Telegram
 
 - Báo cáo trạng thái theo thời gian thực cho từng thiết bị.
-- Tách riêng thông báo Shopee và TikTok.
+- Tách riêng thông báo Shopee, TikTok và Facebook.
 - Bỏ lệnh tồn đọng đúng một lần khi bot khởi động.
 - Hỗ trợ dừng tác vụ khẩn cấp.
 
@@ -60,6 +69,7 @@ ALLOWED_USER_IDS=123456789
 GEMINI_API_KEY=your_gemini_api_key
 SHOPEE_SHOP_NAMES=shop_a,shop_b
 TIKTOK_TARGET_CHANNEL=kenh_tiktok_a,kenh_tiktok_b
+FACEBOOK_TARGET_PAGE_EXACT=ten_page_day_du_tuy_chon
 ```
 
 Không commit file `.env`. File này đã được khai báo trong `.gitignore`.
@@ -86,7 +96,9 @@ python -m unittest -v `
   test_shopee_keyword_generation.py `
   test_tiktok_search_input.py `
   test_gui_tiktok_status.py `
-  test_tiktok_telegram_tracker.py
+  test_tiktok_telegram_tracker.py `
+  test_facebook_automation.py `
+  test_gui_facebook_status.py
 ```
 
 ## Bảo mật
