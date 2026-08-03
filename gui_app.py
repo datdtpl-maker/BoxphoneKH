@@ -229,6 +229,24 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
         )
         self.live_badge.pack(side="right")
+
+        self._log_expanded = False
+        self.btn_toggle_log = ctk.CTkButton(
+            self.log_header,
+            text="Mở rộng",
+            width=92,
+            height=28,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#eff6ff",
+            hover_color="#dbeafe",
+            text_color=blue,
+            border_width=1,
+            border_color="#bfdbfe",
+            corner_radius=9,
+            cursor="hand2",
+            command=self.toggle_system_log,
+        )
+        self.btn_toggle_log.pack(side="right", padx=(0, 8))
         
         self.log_box = ctk.CTkTextbox(
             self.log_card,
@@ -1412,6 +1430,29 @@ class GUIApp(ctk.CTk):
         box["button"].configure(
             text="Thu nhỏ ▲" if expanded else "Mở rộng ▼"
         )
+
+    def toggle_system_log(self):
+        """Mở rộng vùng log để xem chi tiết, bấm lại để trở về bố cục gọn."""
+        self._log_expanded = not self._log_expanded
+        if self._log_expanded:
+            expanded_height = max(
+                320,
+                min(520, int(self.winfo_height() * 0.48)),
+            )
+            self.log_box.configure(height=expanded_height)
+            self.btn_toggle_log.configure(
+                text="Thu nhỏ",
+                fg_color="#dbeafe",
+                border_color="#93c5fd",
+            )
+        else:
+            self.log_box.configure(height=78)
+            self.btn_toggle_log.configure(
+                text="Mở rộng",
+                fg_color="#eff6ff",
+                border_color="#bfdbfe",
+            )
+        self.after_idle(lambda: self.log_box.see("end"))
 
     # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM SHOPEE =================
     def run_seq_search(self):
