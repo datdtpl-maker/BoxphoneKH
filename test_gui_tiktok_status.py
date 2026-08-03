@@ -32,11 +32,22 @@ class TikTokGuiStatusTests(unittest.TestCase):
         )
 
         with (
+            patch("gui_app.config.ALLOWED_USER_IDS", []),
             patch("gui_app.main.adb", fake_adb),
             patch("gui_app.main.get_device_name", return_value="1"),
+            patch("gui_app.main.TelegramRealtimeTracker") as tracker_mock,
+            patch("gui_app.main.safe_send_message") as send_mock,
+            patch.object(
+                __import__("gui_app").main.bot,
+                "send_message",
+            ) as bot_send_mock,
             patch("builtins.print") as print_mock,
         ):
             app.run_seq_tiktok()
+
+        tracker_mock.assert_not_called()
+        send_mock.assert_not_called()
+        bot_send_mock.assert_not_called()
 
         output = "\n".join(
             " ".join(str(part) for part in call.args)

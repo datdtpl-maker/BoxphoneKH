@@ -801,6 +801,9 @@ class GUIApp(ctk.CTk):
 
         # Quét thiết bị khi vừa khởi động
         self.refresh_devices_action()
+        # Thiết bị Box Phone có thể kết nối muộn hoặc tự bật lại cảm biến xoay.
+        # Kiểm tra định kỳ để Facebook, Shopee và các app luôn giữ hướng dọc.
+        self.after(15000, self._portrait_guard_tick)
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
 
@@ -966,15 +969,19 @@ class GUIApp(ctk.CTk):
         def action():
             def disable_rot(d):
                 try:
-                    main.adb.execute_adb(d, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
-                    main.adb.execute_adb(d, ["shell", "settings", "put", "system", "user_rotation", "0"])
+                    return main.adb.lock_portrait(d)
                 except Exception:
-                    pass
+                    return False
             from concurrent.futures import ThreadPoolExecutor
             if target_devices:
                 with ThreadPoolExecutor(max_workers=max(1, len(target_devices))) as executor:
                     executor.map(disable_rot, target_devices)
         self.run_in_thread(action)
+
+    def _portrait_guard_tick(self):
+        """Khóa lại hướng dọc cho mọi máy kết nối mà không chặn giao diện."""
+        self.bulk_disable_rotation()
+        self.after(30000, self._portrait_guard_tick)
 
     def toggle_shopee_keyword_box(self, box_name):
         box = self._shopee_keyword_boxes.get(box_name)

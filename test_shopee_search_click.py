@@ -9,6 +9,43 @@ import main
 
 class ShopeeSearchClickTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_search_click_keeps_shopee_in_portrait(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node resource-id="com.shopee.vn:id/inputSearchBar"
+                    bounds="[20,58][838,190]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+        events = []
+        controller.lock_portrait = (
+            lambda _device_id: events.append("portrait") or True
+        )
+        controller.tap = (
+            lambda _device_id, _x, _y: events.append("tap")
+        )
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            self.assertTrue(
+                controller.ensure_shopee_search_box_click("device-1")
+            )
+
+        self.assertEqual(["portrait", "tap", "portrait"], events)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.random.uniform", return_value=7.5)
     def test_shopee_loading_delay_is_random_between_five_and_ten_seconds(
         self,

@@ -51,6 +51,69 @@ class ADBController:
             device_args = cmd_args
         return self._run_cmd(device_args, timeout)
 
+    def lock_portrait(self, device_id, retries=2):
+        """Tắt tự xoay, khóa hướng dọc và xác minh lại trên thiết bị."""
+        for attempt in range(max(1, retries)):
+            self.execute_adb(
+                device_id,
+                [
+                    "shell", "settings", "put", "system",
+                    "accelerometer_rotation", "0",
+                ],
+            )
+            self.execute_adb(
+                device_id,
+                [
+                    "shell", "settings", "put", "system",
+                    "user_rotation", "0",
+                ],
+            )
+            # Tắt nút gợi ý xoay trên Android 9 để tránh vô tình chuyển ngang
+            # trong bất kỳ ứng dụng nào.
+            self.execute_adb(
+                device_id,
+                [
+                    "shell", "settings", "put", "secure",
+                    "show_rotation_suggestions", "0",
+                ],
+            )
+            # Android mới hỗ trợ khóa rotation qua WindowManager. Máy Android
+            # cũ có thể không nhận lệnh này; hai thiết lập system phía trên vẫn
+            # là cơ chế chính và được xác minh ngay bên dưới.
+            self.execute_adb(
+                device_id,
+                ["shell", "wm", "set-user-rotation", "lock", "0"],
+            )
+
+            auto_code, auto_value, _ = self.execute_adb(
+                device_id,
+                [
+                    "shell", "settings", "get", "system",
+                    "accelerometer_rotation",
+                ],
+            )
+            user_code, user_value, _ = self.execute_adb(
+                device_id,
+                [
+                    "shell", "settings", "get", "system",
+                    "user_rotation",
+                ],
+            )
+            if (
+                auto_code == 0
+                and user_code == 0
+                and auto_value.strip() == "0"
+                and user_value.strip() == "0"
+            ):
+                return True
+            if attempt < max(1, retries) - 1:
+                time.sleep(0.2)
+
+        print(
+            f"[Device {device_id[:6]}] Không xác minh được khóa màn hình dọc."
+        )
+        return False
+
     def get_devices(self):
         """Lấy danh sách các thiết bị đang kết nối dạng list các serial ID"""
         code, stdout, stderr = self._run_cmd(["devices"])
@@ -518,6 +581,13 @@ class ADBController:
             if status_callback:
                 status_callback(device_id, msg)
 
+        def tap_search_target(x, y):
+            # Search/IME là thời điểm một số máy Samsung dễ đọc cảm biến và
+            # đổi sang landscape. Khóa dọc cả trước lẫn ngay sau cú chạm.
+            self.lock_portrait(device_id)
+            self.tap(device_id, x, y)
+            self.lock_portrait(device_id)
+
         width, height = self.get_screen_size(device_id)
 
         def scan_search_targets():
@@ -638,7 +708,7 @@ class ADBController:
                 "Shopee Home đang bận animation • bấm vùng search "
                 "đã xác minh an toàn..."
             )
-            self.tap(device_id, guarded_x, guarded_y)
+            tap_search_target(guarded_x, guarded_y)
             time.sleep(1.2)
             return True
 
@@ -651,13 +721,13 @@ class ADBController:
                 f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm Trang chủ "
                 f"tại ({home_coords[0]}, {home_coords[1]})."
             )
-            self.tap(device_id, home_coords[0], home_coords[1])
+            tap_search_target(home_coords[0], home_coords[1])
             time.sleep(1.0)
             return True
 
         if header_coords:
             update_status("Đang ở trang chi tiết • bấm kính lúp trên header...")
-            self.tap(device_id, header_coords[0], header_coords[1])
+            tap_search_target(header_coords[0], header_coords[1])
             time.sleep(1.0)
             return True
 
@@ -675,7 +745,7 @@ class ADBController:
                 return True
             target_coords = home_coords or header_coords
             if target_coords:
-                self.tap(device_id, target_coords[0], target_coords[1])
+                tap_search_target(target_coords[0], target_coords[1])
                 time.sleep(1.0)
                 return True
 
@@ -702,7 +772,7 @@ class ADBController:
                     f"Đã nhận diện ô tìm kiếm sau phục hồi "
                     f"({attempt + 1}/3)."
                 )
-                self.tap(device_id, target_coords[0], target_coords[1])
+                tap_search_target(target_coords[0], target_coords[1])
                 time.sleep(1.0)
                 return True
             if attempt < 2:
@@ -729,9 +799,7 @@ class ADBController:
 
         try:
             check_cancelled()
-            # Dam bao tat xoay man hinh va khoa huong doc mac dinh
-            self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
-            self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
+            self.lock_portrait(device_id)
             
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
@@ -817,9 +885,7 @@ class ADBController:
 
         try:
             check_cancelled()
-            # Dam bao tat xoay man hinh va khoa huong doc mac dinh
-            self.execute_adb(device_id, ["shell", "settings", "put", "system", "accelerometer_rotation", "0"])
-            self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
+            self.lock_portrait(device_id)
             
             check_cancelled()
             update_status("Đang đưa Shopee về trang chủ...")
