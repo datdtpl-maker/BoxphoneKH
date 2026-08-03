@@ -18,6 +18,47 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.execute_adb = execute_adb
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_feed_swipe_uses_override_coordinates_when_ui_dump_is_busy(
+        self, _sleep
+    ):
+        swipes = []
+        self.controller.get_effective_screen_size = (
+            lambda _device_id: (1080, 1920)
+        )
+        self.controller.get_tiktok_feed_signature = lambda _device_id: None
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.swipe = (
+            lambda _device_id, x1, y1, x2, y2, duration=300:
+            swipes.append((x1, y1, x2, y2, duration)) or (0, "", "")
+        )
+
+        self.assertTrue(self.controller.advance_tiktok_feed("device-1"))
+        self.assertEqual([(540, 1536, 540, 384, 450)], swipes)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_home_recovery_never_backs_out_when_ui_dump_is_busy(self, _sleep):
+        taps = []
+        backs = []
+        self.controller._get_tiktok_ui_root = lambda *_args: None
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.get_effective_screen_size = (
+            lambda _device_id: (1080, 1920)
+        )
+        self.controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+        self.controller.keyevent = (
+            lambda _device_id, keycode: backs.append(keycode)
+        )
+
+        self.assertTrue(self.controller.ensure_tiktok_home_feed("device-1"))
+        self.assertGreaterEqual(len(taps), 1)
+        self.assertEqual((108, 1843), taps[0])
+        self.assertEqual([], backs)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_tiktok_input_uses_only_one_utf8_xwime_broadcast(self, _sleep):
         self.controller.ensure_ime = lambda _device_id: self.fail(
             "Không được reset IME giữa thao tác xóa và nhập TikTok"
@@ -274,6 +315,54 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertTrue(self.controller.advance_tiktok_feed("device-1"))
         self.assertEqual(2, len(swipes))
         self.assertLess(swipes[1][4], swipes[0][4])
+
+    @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MIN", 16)
+    @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MAX", 16)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_cross_warmup_recovers_when_tiktok_feed_does_not_move(
+        self, _sleep, _randint
+    ):
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.lock_portrait = lambda _device_id, retries=2: True
+        recoveries = []
+        self.controller.ensure_tiktok_home_feed = (
+            lambda device_id, force_refresh=False:
+            recoveries.append((device_id, force_refresh)) or True
+        )
+        moves = iter([False, True])
+        self.controller.advance_tiktok_feed = (
+            lambda _device_id: next(moves)
+        )
+
+        self.assertTrue(
+            self.controller.warmup_tiktok_before_facebook("device-1")
+        )
+        self.assertEqual(
+            [("device-1", False), ("device-1", True)],
+            recoveries,
+        )
+
+    def test_home_feed_accepts_tiktok_duplicate_text_and_description(self):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node content-desc="Thích video. 26 lượt thích" />
+              <node content-desc="Đọc hoặc viết bình luận. 7 bình luận" />
+              <node clickable="true" text="Trang chủ"
+                    content-desc="Trang chủ" bounds="[0,1700][210,1920]" />
+            </hierarchy>
+            """
+        )
+
+        self.assertTrue(
+            self.controller.is_tiktok_home_feed("device-1", root=root)
+        )
+        self.assertEqual(
+            (105, 1810),
+            self.controller._find_tiktok_home_navigation(root),
+        )
 
     @patch("adb_controller.random.uniform", return_value=1.0)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)

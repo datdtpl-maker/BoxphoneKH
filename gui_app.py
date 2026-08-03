@@ -147,6 +147,21 @@ class GUIApp(ctk.CTk):
         )
         self.btn_refresh.pack(side="right", padx=(14, 0), pady=2)
 
+        self.btn_mute_all = ctk.CTkButton(
+            self.brand_badge,
+            text="Tắt âm tất cả",
+            font=button_font,
+            width=145,
+            height=44,
+            fg_color=violet,
+            hover_color="#5938b8",
+            text_color="#ffffff",
+            corner_radius=14,
+            cursor="hand2",
+            command=self.mute_all_devices_action,
+        )
+        self.btn_mute_all.pack(side="right", padx=(10, 0), pady=2)
+
         # ================= ROW 1: REAL-TIME ACTIVITY =================
         self.log_card = ctk.CTkFrame(
             self,
@@ -1019,6 +1034,56 @@ class GUIApp(ctk.CTk):
                 self.bulk_disable_rotation(devices)
             else:
                 print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
+        self.run_in_thread(action)
+
+    def mute_all_devices_action(self):
+        """Tắt âm lượng media của toàn bộ điện thoại đang kết nối."""
+        devices = main.get_ordered_devices()
+        if not devices:
+            messagebox.showwarning(
+                "Chưa có thiết bị",
+                "Không có điện thoại nào đang kết nối!",
+            )
+            return
+
+        self.btn_mute_all.configure(
+            state="disabled",
+            text="Đang tắt âm...",
+        )
+
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+
+            def mute_device(device_id):
+                try:
+                    return device_id, main.adb.mute_media_volume(device_id)
+                except Exception:
+                    return device_id, False
+
+            with ThreadPoolExecutor(
+                max_workers=min(8, len(devices))
+            ) as executor:
+                results = list(executor.map(mute_device, devices))
+
+            succeeded = [device for device, ok in results if ok]
+            failed = [device for device, ok in results if not ok]
+            print(
+                f"[Âm lượng] Đã tắt âm media {len(succeeded)}/{len(devices)} máy."
+            )
+            if failed:
+                failed_names = ", ".join(
+                    main.get_device_name(device) for device in failed
+                )
+                print(f"[Âm lượng] Không tắt được: {failed_names}.")
+
+            self.after(
+                0,
+                lambda: self.btn_mute_all.configure(
+                    state="normal",
+                    text="Tắt âm tất cả",
+                ),
+            )
+
         self.run_in_thread(action)
 
     def save_settings(self):

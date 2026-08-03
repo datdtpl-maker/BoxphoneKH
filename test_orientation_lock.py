@@ -6,6 +6,19 @@ from gui_app import GUIApp
 
 
 class OrientationLockTests(unittest.TestCase):
+    def test_effective_screen_size_prefers_android_override(self):
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (
+            0,
+            "Physical size: 1440x2560\nOverride size: 1080x1920",
+            "",
+        )
+
+        self.assertEqual(
+            (1080, 1920),
+            controller.get_effective_screen_size("device-override"),
+        )
+
     def test_lock_portrait_disables_sensor_and_verifies_portrait(self):
         controller = ADBController(adb_path="adb")
         commands = []
@@ -47,6 +60,32 @@ class OrientationLockTests(unittest.TestCase):
         self.assertCountEqual(
             [call("device-1"), call("device-2")],
             lock_mock.call_args_list,
+        )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_launch_tiktok_relocks_portrait_during_app_transition(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+        controller.dismiss_tiktok_location_popup = lambda _device_id: False
+        locks = []
+        controller.lock_portrait = (
+            lambda device_id, retries=2:
+            locks.append((device_id, retries)) or True
+        )
+
+        controller.launch_tiktok("device-transition")
+
+        self.assertGreaterEqual(
+            len(locks),
+            4,
+            "Phải khóa dọc trước, trong và sau khi TikTok đổi activity",
+        )
+        self.assertTrue(
+            all(device_id == "device-transition" for device_id, _ in locks)
         )
 
 
