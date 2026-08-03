@@ -22,37 +22,37 @@ class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("BoxPhoneControl")
-        self.geometry("1680x900")
-        self.minsize(1280, 740)
-        self.configure(fg_color="#edf3fa")
+        self.geometry("1720x960")
+        self.minsize(1280, 760)
+        self.configure(fg_color="#f3f6fb")
 
         # Design tokens: light "liquid glass" surfaces rendered with native
         # CustomTkinter layers so the dashboard remains fast with many devices.
-        bg = "#edf3fa"
-        glass = "#fbfdff"
-        glass_tint = "#f5f9ff"
+        bg = "#f3f6fb"
+        glass = "#ffffff"
+        glass_tint = "#f8fafc"
         surface = "#ffffff"
-        border = "#d7e3f1"
-        border_hover = "#a9c6f7"
-        text = "#17233c"
+        border = "#e2e8f0"
+        border_hover = "#93b4ea"
+        text = "#0f172a"
         muted = "#64748b"
-        blue = "#2563eb"
-        blue_hover = "#1d4ed8"
-        blue_soft = "#eaf2ff"
-        orange = "#ea6a12"
-        orange_soft = "#fff3e8"
-        pink = "#c0266d"
-        pink_soft = "#fcecf5"
-        violet = "#6d4bd1"
-        violet_soft = "#f3efff"
-        green = "#0f9f6e"
-        green_hover = "#0b815a"
-        red = "#dc3f49"
-        red_soft = "#fff0f1"
-        input_border = "#cbd8e8"
+        blue = "#1d4ed8"
+        blue_hover = "#1e40af"
+        blue_soft = "#eff6ff"
+        orange = "#c2410c"
+        orange_soft = "#fff7ed"
+        pink = "#be185d"
+        pink_soft = "#fdf2f8"
+        violet = "#6d28d9"
+        violet_soft = "#f5f3ff"
+        green = "#047857"
+        green_hover = "#065f46"
+        red = "#c81e2b"
+        red_soft = "#fff5f5"
+        input_border = "#cbd5e1"
 
-        title_font = ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
-        section_font = ctk.CTkFont(family="Segoe UI", size=15, weight="bold")
+        title_font = ctk.CTkFont(family="Segoe UI", size=17, weight="bold")
+        section_font = ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
         label_font = ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
         body_font = ctk.CTkFont(family="Segoe UI", size=12)
         button_font = ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
@@ -79,26 +79,26 @@ class GUIApp(ctk.CTk):
         self.top_header = ctk.CTkFrame(
             self,
             fg_color=glass,
-            corner_radius=22,
+            corner_radius=18,
             border_width=1,
             border_color=border,
         )
-        self.top_header.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 10))
+        self.top_header.grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 10))
 
         self.brand_badge = ctk.CTkFrame(
             self.top_header, fg_color="transparent", corner_radius=18
         )
-        self.brand_badge.pack(fill="x", padx=16, pady=14)
+        self.brand_badge.pack(fill="x", padx=18, pady=14)
 
         self.brand_icon = ctk.CTkLabel(
             self.brand_badge,
-            text="BP",
-            width=48,
-            height=48,
-            corner_radius=16,
-            fg_color=blue_soft,
-            text_color=blue,
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text="BPC",
+            width=52,
+            height=52,
+            corner_radius=14,
+            fg_color="#0f172a",
+            text_color="#ffffff",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
         )
         self.brand_icon.pack(side="left", padx=(0, 12))
 
@@ -108,14 +108,14 @@ class GUIApp(ctk.CTk):
         self.lbl_brand = ctk.CTkLabel(
             self.brand_copy,
             text="BoxPhoneControl",
-            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=23, weight="bold"),
             text_color=text,
         )
         self.lbl_brand.pack(anchor="w")
         
         self.lbl_sub_brand = ctk.CTkLabel(
             self.brand_copy,
-            text="Trung tâm điều khiển tự động hóa đa thiết bị",
+            text="Trung tâm điều hành  •  Tự động hóa đa thiết bị",
             font=body_font,
             text_color=muted,
         )
@@ -123,14 +123,25 @@ class GUIApp(ctk.CTk):
 
         self.platform_badge = ctk.CTkLabel(
             self.brand_badge,
-            text="SHOPEE  +  TIKTOK  +  FACEBOOK",
+            text="3 QUY TRÌNH",
             height=34,
             corner_radius=17,
-            fg_color=blue_soft,
-            text_color=blue,
+            fg_color="#f1f5f9",
+            text_color="#334155",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
         )
         self.platform_badge.pack(side="right", padx=(10, 2))
+
+        self.device_status_badge = ctk.CTkLabel(
+            self.brand_badge,
+            text="ĐANG QUÉT THIẾT BỊ",
+            height=34,
+            corner_radius=10,
+            fg_color="#ecfdf5",
+            text_color=green,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.device_status_badge.pack(side="right", padx=(8, 0))
 
         self.btn_refresh = ctk.CTkButton(
             self.brand_badge,
@@ -141,7 +152,7 @@ class GUIApp(ctk.CTk):
             fg_color=blue,
             hover_color=blue_hover,
             text_color="#ffffff",
-            corner_radius=14,
+            corner_radius=12,
             cursor="hand2",
             command=self.refresh_devices_action,
         )
@@ -156,7 +167,7 @@ class GUIApp(ctk.CTk):
             fg_color=violet,
             hover_color="#5938b8",
             text_color="#ffffff",
-            corner_radius=14,
+            corner_radius=12,
             cursor="hand2",
             command=self.mute_all_devices_action,
         )
@@ -169,7 +180,7 @@ class GUIApp(ctk.CTk):
             width=155,
             height=44,
             text_color="#ffffff",
-            corner_radius=14,
+            corner_radius=12,
             cursor="hand2",
             command=self.toggle_telegram_notifications,
         )
@@ -182,18 +193,18 @@ class GUIApp(ctk.CTk):
         self.log_card = ctk.CTkFrame(
             self,
             fg_color=glass,
-            corner_radius=22,
+            corner_radius=18,
             border_width=1,
             border_color=border,
         )
-        self.log_card.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.log_card.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 10))
 
         self.log_header = ctk.CTkFrame(self.log_card, fg_color="transparent")
-        self.log_header.pack(fill="x", padx=16, pady=(12, 7))
+        self.log_header.pack(fill="x", padx=18, pady=(11, 7))
         
         self.lbl_log = ctk.CTkLabel(
             self.log_header,
-            text="Nhật ký hoạt động",
+            text="Trạng thái hệ thống",
             font=section_font,
             text_color=text,
         )
@@ -201,7 +212,7 @@ class GUIApp(ctk.CTk):
 
         self.lbl_log_hint = ctk.CTkLabel(
             self.log_header,
-            text="Theo dõi trạng thái hệ thống theo thời gian thực",
+            text="Luồng sự kiện trực tiếp từ thiết bị và các workflow đang chạy",
             font=body_font,
             text_color=muted,
         )
@@ -209,10 +220,10 @@ class GUIApp(ctk.CTk):
 
         self.live_badge = ctk.CTkLabel(
             self.log_header,
-            text="LIVE",
-            width=56,
+            text="●  LIVE",
+            width=68,
             height=26,
-            corner_radius=13,
+            corner_radius=10,
             fg_color="#e7f8f1",
             text_color=green,
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
@@ -221,18 +232,18 @@ class GUIApp(ctk.CTk):
         
         self.log_box = ctk.CTkTextbox(
             self.log_card,
-            height=104,
+            height=78,
             state="disabled",
-            fg_color=glass_tint,
-            text_color="#164e78",
-            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color="#0b1220",
+            text_color="#dbeafe",
+            font=ctk.CTkFont(family="Cascadia Mono", size=11),
             border_width=1,
-            border_color=input_border,
-            corner_radius=14,
-            scrollbar_button_color="#bed0e7",
-            scrollbar_button_hover_color="#9db8d8",
+            border_color="#1e293b",
+            corner_radius=12,
+            scrollbar_button_color="#334155",
+            scrollbar_button_hover_color="#475569",
         )
-        self.log_box.pack(fill="x", padx=16, pady=(0, 14))
+        self.log_box.pack(fill="x", padx=18, pady=(0, 14))
         
         # Redirect standard output & error to log_box
         sys.stdout = ConsoleRedirector(self.log_box)
@@ -240,27 +251,56 @@ class GUIApp(ctk.CTk):
 
         # ================= ROW 2: OPERATIONAL CARDS =================
         self.ops_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.ops_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=0)
+        self.ops_frame.grid(row=2, column=0, sticky="nsew", padx=18, pady=0)
         self.ops_frame.columnconfigure(0, weight=1)
         self.ops_frame.columnconfigure(1, weight=1)
         self.ops_frame.columnconfigure(2, weight=1)
-        self.ops_frame.rowconfigure(0, weight=1)
+        self.ops_frame.rowconfigure(0, weight=0)
+        self.ops_frame.rowconfigure(1, weight=1)
+
+        self.workspace_header = ctk.CTkFrame(
+            self.ops_frame, fg_color="transparent"
+        )
+        self.workspace_header.grid(
+            row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8)
+        )
+        ctk.CTkLabel(
+            self.workspace_header,
+            text="QUY TRÌNH TỰ ĐỘNG",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#475569",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            self.workspace_header,
+            text="Chọn nền tảng, cấu hình dữ liệu và khởi chạy theo từng nhóm thiết bị",
+            font=body_font,
+            text_color=muted,
+        ).pack(side="left", padx=12)
+        ctk.CTkLabel(
+            self.workspace_header,
+            text="SẴN SÀNG  •  3 MÔ-ĐUN",
+            height=28,
+            corner_radius=9,
+            fg_color="#ecfdf5",
+            text_color=green,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        ).pack(side="right")
 
         scroll_style = {
-            "corner_radius": 22,
+            "corner_radius": 18,
             "fg_color": glass,
             "border_width": 1,
             "border_color": border,
-            "scrollbar_button_color": "#c5d5e7",
-            "scrollbar_button_hover_color": "#a9bfd9",
+            "scrollbar_button_color": "#cbd5e1",
+            "scrollbar_button_hover_color": "#94a3b8",
         }
         field_style = {
             "fg_color": surface,
             "border_color": input_border,
             "text_color": text,
-            "placeholder_text_color": "#8a9ab0",
+            "placeholder_text_color": "#94a3b8",
             "border_width": 1,
-            "corner_radius": 12,
+            "corner_radius": 10,
             "font": body_font,
         }
 
@@ -269,7 +309,7 @@ class GUIApp(ctk.CTk):
             self.ops_frame,
             **scroll_style,
         )
-        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.shopee_scroll.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
 
         self.shopee_heading = ctk.CTkFrame(
             self.shopee_scroll, fg_color=orange_soft, corner_radius=16
@@ -292,6 +332,17 @@ class GUIApp(ctk.CTk):
             self.shopee_heading, fg_color="transparent"
         )
         self.shopee_heading_copy.pack(side="left", fill="y", pady=8)
+
+        ctk.CTkLabel(
+            self.shopee_heading,
+            text="SẴN SÀNG",
+            width=76,
+            height=26,
+            corner_radius=8,
+            fg_color="#ffffff",
+            text_color=orange,
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+        ).pack(side="right", padx=10)
 
         self.lbl_tasks = ctk.CTkLabel(
             self.shopee_heading_copy,
@@ -560,7 +611,7 @@ class GUIApp(ctk.CTk):
             self.ops_frame,
             **scroll_style,
         )
-        self.tiktok_scroll.grid(row=0, column=1, sticky="nsew", padx=6)
+        self.tiktok_scroll.grid(row=1, column=1, sticky="nsew", padx=6)
 
         self.tiktok_heading = ctk.CTkFrame(
             self.tiktok_scroll, fg_color=pink_soft, corner_radius=16
@@ -583,6 +634,17 @@ class GUIApp(ctk.CTk):
             self.tiktok_heading, fg_color="transparent"
         )
         self.tiktok_heading_copy.pack(side="left", fill="y", pady=8)
+
+        ctk.CTkLabel(
+            self.tiktok_heading,
+            text="SẴN SÀNG",
+            width=76,
+            height=26,
+            corner_radius=8,
+            fg_color="#ffffff",
+            text_color=pink,
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+        ).pack(side="right", padx=10)
 
         self.lbl_tiktok_title = ctk.CTkLabel(
             self.tiktok_heading_copy,
@@ -721,7 +783,7 @@ class GUIApp(ctk.CTk):
             **scroll_style,
         )
         self.facebook_scroll.grid(
-            row=0, column=2, sticky="nsew", padx=(6, 0)
+            row=1, column=2, sticky="nsew", padx=(6, 0)
         )
 
         self.facebook_heading = ctk.CTkFrame(
@@ -745,6 +807,16 @@ class GUIApp(ctk.CTk):
             self.facebook_heading, fg_color="transparent"
         )
         self.facebook_heading_copy.pack(side="left", fill="y", pady=8)
+        ctk.CTkLabel(
+            self.facebook_heading,
+            text="SẴN SÀNG",
+            width=76,
+            height=26,
+            corner_radius=8,
+            fg_color="#ffffff",
+            text_color=blue,
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+        ).pack(side="right", padx=10)
         ctk.CTkLabel(
             self.facebook_heading_copy,
             text="Facebook Automation",
@@ -871,20 +943,20 @@ class GUIApp(ctk.CTk):
         self.bottom_panel = ctk.CTkFrame(
             self,
             fg_color=glass,
-            corner_radius=22,
+            corner_radius=18,
             border_width=1,
             border_color=border,
         )
-        self.bottom_panel.grid(row=3, column=0, sticky="ew", padx=20, pady=(10, 18))
+        self.bottom_panel.grid(row=3, column=0, sticky="ew", padx=18, pady=(10, 16))
 
         self.settings_header = ctk.CTkFrame(
             self.bottom_panel, fg_color="transparent"
         )
-        self.settings_header.pack(fill="x", padx=16, pady=(10, 3))
+        self.settings_header.pack(fill="x", padx=18, pady=(10, 4))
         
         self.lbl_settings = ctk.CTkLabel(
             self.settings_header,
-            text="Cấu hình hệ thống",
+            text="Cấu hình & tích hợp",
             font=section_font,
             text_color=text,
         )
@@ -892,16 +964,27 @@ class GUIApp(ctk.CTk):
 
         self.lbl_settings_hint = ctk.CTkLabel(
             self.settings_header,
-            text="Thông tin kết nối được lưu cục bộ trên máy tính",
+            text="Thông tin kết nối nhạy cảm được ẩn khi hiển thị và lưu cục bộ",
             font=body_font,
             text_color=muted,
         )
         self.lbl_settings_hint.pack(side="left", padx=12)
 
+        self.settings_security_badge = ctk.CTkLabel(
+            self.settings_header,
+            text="LƯU CỤC BỘ",
+            height=26,
+            corner_radius=8,
+            fg_color="#f1f5f9",
+            text_color="#475569",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+        )
+        self.settings_security_badge.pack(side="right")
+
         self.settings_card = ctk.CTkFrame(
             self.bottom_panel, fg_color="transparent"
         )
-        self.settings_card.pack(fill="x", padx=12, pady=(2, 12))
+        self.settings_card.pack(fill="x", padx=14, pady=(2, 12))
         for column, weight in enumerate((2, 1, 2, 2, 2, 0)):
             self.settings_card.columnconfigure(column, weight=weight)
 
@@ -919,7 +1002,7 @@ class GUIApp(ctk.CTk):
                 wrapper,
                 placeholder_text=placeholder,
                 show=show or "",
-                height=38,
+                height=42,
                 **field_style,
             )
             entry.pack(fill="x")
@@ -959,13 +1042,13 @@ class GUIApp(ctk.CTk):
             fg_color=blue,
             hover_color=blue_hover,
             text_color="#ffffff",
-            corner_radius=12,
-            height=38,
+            corner_radius=10,
+            height=42,
             width=120,
             cursor="hand2",
             command=self.save_settings,
         )
-        self.btn_save.grid(row=0, column=5, padx=(8, 4), pady=(19, 0))
+        self.btn_save.grid(row=0, column=5, padx=(10, 4), pady=(19, 0))
 
         # Subtle glass border response and a short window fade-in. These are
         # presentation-only effects and do not touch automation state.
@@ -984,6 +1067,8 @@ class GUIApp(ctk.CTk):
         self.after_idle(self._reset_operation_scrolls)
         self.after(600, self._reset_operation_scrolls)
         self.after(1600, self._reset_operation_scrolls)
+        self.after(3200, self._reset_operation_scrolls)
+        self.after(5200, self._reset_operation_scrolls)
 
         # Quét thiết bị khi vừa khởi động
         self.refresh_devices_action()
@@ -1040,17 +1125,59 @@ class GUIApp(ctk.CTk):
         threading.Thread(target=func, args=args, daemon=True).start()
 
     def refresh_devices_action(self):
+        if "btn_refresh" in self.__dict__:
+            self.btn_refresh.configure(state="disabled", text="Đang quét...")
+        self._set_device_status_badge(None)
+
         def action():
-            print("[Hệ thống] Đang quét cổng thiết bị USB/ADB...")
-            devices = main.get_ordered_devices()
-            if devices:
-                print(f"[Hệ thống] ✅ Đã kết nối {len(devices)} thiết bị điện thoại Box Phone:")
-                for idx, dev in enumerate(devices):
-                    print(f"   📱 [{idx+1}] Máy {main.get_device_name(dev)} (ID: {dev})")
-                self.bulk_disable_rotation(devices)
-            else:
-                print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
+            try:
+                print("[Hệ thống] Đang quét cổng thiết bị USB/ADB...")
+                devices = main.get_ordered_devices()
+                self.after(
+                    0,
+                    lambda count=len(devices): self._set_device_status_badge(
+                        count
+                    ),
+                )
+                if devices:
+                    print(f"[Hệ thống] ✅ Đã kết nối {len(devices)} thiết bị điện thoại Box Phone:")
+                    for idx, dev in enumerate(devices):
+                        print(f"   📱 [{idx+1}] Máy {main.get_device_name(dev)} (ID: {dev})")
+                    self.bulk_disable_rotation(devices)
+                else:
+                    print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
+            finally:
+                if "btn_refresh" in self.__dict__:
+                    self.after(
+                        0,
+                        lambda: self.btn_refresh.configure(
+                            state="normal", text="Quét thiết bị"
+                        ),
+                    )
         self.run_in_thread(action)
+
+    def _set_device_status_badge(self, count):
+        badge = self.__dict__.get("device_status_badge")
+        if badge is None:
+            return
+        if count is None:
+            badge.configure(
+                text="ĐANG QUÉT THIẾT BỊ",
+                fg_color="#eff6ff",
+                text_color="#1d4ed8",
+            )
+        elif count > 0:
+            badge.configure(
+                text=f"{count} THIẾT BỊ KẾT NỐI",
+                fg_color="#ecfdf5",
+                text_color="#047857",
+            )
+        else:
+            badge.configure(
+                text="CHƯA CÓ THIẾT BỊ",
+                fg_color="#fff7ed",
+                text_color="#c2410c",
+            )
 
     def mute_all_devices_action(self):
         """Tắt âm lượng media của toàn bộ điện thoại đang kết nối."""
