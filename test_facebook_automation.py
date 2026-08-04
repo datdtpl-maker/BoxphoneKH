@@ -9,6 +9,26 @@ from adb_controller import ADBController
 
 class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_facebook_browse_never_swipes_when_another_app_is_foreground(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        swipes = []
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.is_facebook_in_foreground = lambda _device_id: False
+        controller.swipe = lambda *_args, **_kwargs: swipes.append(_args)
+
+        with self.assertRaisesRegex(RuntimeError, "Facebook.*foreground"):
+            controller.browse_facebook_surface(
+                "device-on-shopee",
+                20,
+                "facebook_cross_warmup",
+            )
+
+        self.assertEqual([], swipes)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_facebook_keyword_is_never_sent_while_tiktok_is_foreground(
         self, _sleep
     ):

@@ -22,6 +22,38 @@ def _run_immediately(captured):
 
 
 class AdaptiveGuiIntegrationTests(unittest.TestCase):
+    def test_social_queue_moves_every_target_off_shopee(self):
+        app = GUIApp.__new__(GUIApp)
+        events = []
+        fake_adb = SimpleNamespace(
+            stop_app=lambda device, package: events.append(
+                ("stop", device, package)
+            ),
+            ensure_facebook_ready=lambda device: events.append(
+                ("facebook", device)
+            ) or True,
+            launch_tiktok=lambda device: events.append(("tiktok", device)),
+            is_tiktok_in_foreground=lambda _device: True,
+        )
+
+        with patch("gui_app.main.adb", fake_adb):
+            app.prepare_social_targets(["d1", "d2"], "facebook")
+            app.prepare_social_targets(["d1", "d2"], "tiktok")
+
+        stop_events = [event for event in events if event[0] == "stop"]
+        self.assertEqual(4, len(stop_events))
+        self.assertTrue(
+            all(event[2] == "com.shopee.vn" for event in stop_events)
+        )
+        self.assertCountEqual(
+            [("facebook", "d1"), ("facebook", "d2")],
+            [event for event in events if event[0] == "facebook"],
+        )
+        self.assertCountEqual(
+            [("tiktok", "d1"), ("tiktok", "d2")],
+            [event for event in events if event[0] == "tiktok"],
+        )
+
     def test_shopee_adaptive_uses_shopee_policy(self):
         app = GUIApp.__new__(GUIApp)
         app.keyword_mode = SimpleNamespace(get=lambda: "original")

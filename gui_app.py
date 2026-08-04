@@ -1510,6 +1510,53 @@ class GUIApp(ctk.CTk):
                     executor.map(disable_rot, target_devices)
         self.run_in_thread(action)
 
+    def prepare_social_targets(
+        self, target_devices, opening_platform, is_cancelled=None
+    ):
+        """Đưa toàn bộ máy mục tiêu khỏi Shopee trước khi xếp hàng social."""
+        if not target_devices:
+            return []
+
+        def prepare_device(device_id):
+            if is_cancelled and is_cancelled():
+                return device_id, False
+            try:
+                # Máy đang chờ lượt không được giữ Shopee trên foreground.
+                main.adb.stop_app(device_id, config.SHOPEE_PACKAGE)
+                if is_cancelled and is_cancelled():
+                    return device_id, False
+                if opening_platform == "facebook":
+                    ready = main.adb.ensure_facebook_ready(device_id)
+                elif opening_platform == "tiktok":
+                    main.adb.launch_tiktok(device_id)
+                    ready = main.adb.is_tiktok_in_foreground(device_id)
+                else:
+                    raise ValueError(
+                        f"Nền tảng mở đầu không hợp lệ: {opening_platform}"
+                    )
+                return device_id, bool(ready)
+            except Exception:
+                return device_id, False
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(
+            max_workers=max(1, len(target_devices))
+        ) as executor:
+            results = list(executor.map(prepare_device, target_devices))
+
+        failed = [device_id for device_id, ready in results if not ready]
+        if failed and not (is_cancelled and is_cancelled()):
+            failed_names = ", ".join(
+                main.get_device_name(device_id) for device_id in failed
+            )
+            print(
+                f"[GUI] Cảnh báo: chưa mở được {opening_platform} trên "
+                f"máy {failed_names}; workflow sẽ thử lại và dừng an toàn "
+                "nếu vẫn sai ứng dụng."
+            )
+        return results
+
     def _portrait_guard_tick(self):
         """Khóa lại hướng dọc cho mọi máy kết nối mà không chặn giao diện."""
         self.bulk_disable_rotation()
@@ -1882,6 +1929,11 @@ class GUIApp(ctk.CTk):
         print(f"[GUI] Bắt đầu chạy TikTok Tuần Tự trên {len(target_devices)} máy...")
 
         def action():
+            self.prepare_social_targets(
+                target_devices,
+                "facebook",
+                is_cancelled=session_is_cancelled,
+            )
             success_count = 0
             tracker = None
             chat_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else None
@@ -2036,6 +2088,11 @@ class GUIApp(ctk.CTk):
             return dev_name, success, message
 
         def action():
+            self.prepare_social_targets(
+                target_devices,
+                "facebook",
+                is_cancelled=session_is_cancelled,
+            )
             if adaptive:
                 policy = PLATFORM_POLICIES["tiktok"]
                 results = run_adaptive(
@@ -2100,6 +2157,11 @@ class GUIApp(ctk.CTk):
         )
 
         def action():
+            self.prepare_social_targets(
+                target_devices,
+                "tiktok",
+                is_cancelled=session_is_cancelled,
+            )
             chat_id = (
                 config.ALLOWED_USER_IDS[0]
                 if config.ALLOWED_USER_IDS
@@ -2259,6 +2321,11 @@ class GUIApp(ctk.CTk):
             return device_name, success, message
 
         def action():
+            self.prepare_social_targets(
+                target_devices,
+                "tiktok",
+                is_cancelled=session_is_cancelled,
+            )
             if adaptive:
                 policy = PLATFORM_POLICIES["facebook"]
                 results = run_adaptive(

@@ -18,6 +18,46 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.execute_adb = execute_adb
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_feed_never_swipes_when_tiktok_is_not_foreground(self, _sleep):
+        swipes = []
+        self.controller.get_effective_screen_size = (
+            lambda _device_id: (1080, 1920)
+        )
+        self.controller.get_tiktok_feed_signature = lambda _device_id: None
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.is_tiktok_in_foreground = lambda _device_id: False
+        self.controller.swipe = (
+            lambda *_args, **_kwargs: swipes.append(_args) or (0, "", "")
+        )
+
+        self.assertFalse(self.controller.advance_tiktok_feed("device-on-shopee"))
+        self.assertEqual([], swipes)
+
+    @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MIN", 16)
+    @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MAX", 16)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_warmup_stops_if_foreground_changes_before_swipe(
+        self, _sleep, _randint
+    ):
+        self.controller.launch_tiktok = lambda _device_id: None
+        foreground = iter([True, False])
+        self.controller.is_tiktok_in_foreground = (
+            lambda _device_id: next(foreground)
+        )
+        self.controller.ensure_tiktok_home_feed = lambda *_args, **_kwargs: True
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        advances = []
+        self.controller.advance_tiktok_feed = (
+            lambda device_id: advances.append(device_id) or True
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "TikTok.*foreground"):
+            self.controller.warmup_tiktok_before_facebook("device-1")
+
+        self.assertEqual([], advances)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_feed_swipe_uses_override_coordinates_when_ui_dump_is_busy(
         self, _sleep
     ):
@@ -306,6 +346,7 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.get_tiktok_feed_signature = (
             lambda _device_id: next(signatures)
         )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
         swipes = []
         self.controller.swipe = (
             lambda _device_id, x1, y1, x2, y2, duration=300:
@@ -382,6 +423,8 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.launch_tiktok = (
             lambda _device_id: startup_order.append("tiktok_workflow")
         )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.ensure_tiktok_home_feed = lambda *_args, **_kwargs: True
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: None
@@ -435,6 +478,8 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, **_kwargs: True
         )
         self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.ensure_tiktok_home_feed = lambda *_args, **_kwargs: True
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: None
@@ -472,6 +517,8 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, **_kwargs: True
         )
         self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.ensure_tiktok_home_feed = lambda *_args, **_kwargs: True
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: None

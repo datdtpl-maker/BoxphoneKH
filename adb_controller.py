@@ -797,6 +797,11 @@ class ADBController:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
+            if not self.is_facebook_in_foreground(device_id):
+                raise RuntimeError(
+                    f"{label_name}: Facebook không ở foreground; "
+                    "đã dừng để tránh thao tác nhầm ứng dụng"
+                )
             dwell = min(random.randint(6, 15), total_seconds - elapsed)
             if status_callback:
                 status_callback(
@@ -810,6 +815,11 @@ class ADBController:
                     raise RuntimeError("Bị dừng bởi người dùng")
             elapsed += dwell
             if elapsed < total_seconds:
+                if not self.is_facebook_in_foreground(device_id):
+                    raise RuntimeError(
+                        f"{label_name}: Facebook không ở foreground; "
+                        "không thực hiện swipe"
+                    )
                 x = width // 2 + random.randint(-80, 80)
                 self.swipe(
                     device_id,
@@ -1050,6 +1060,11 @@ class ADBController:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
+            if not self.is_tiktok_in_foreground(device_id):
+                raise RuntimeError(
+                    "TikTok không ở foreground; đã dừng nuôi chéo để "
+                    "tránh thao tác nhầm ứng dụng"
+                )
             dwell = min(random.randint(8, 18), total_seconds - elapsed)
             if status_callback:
                 status_callback(
@@ -1063,6 +1078,11 @@ class ADBController:
                     raise RuntimeError("Bị dừng bởi người dùng")
             elapsed += dwell
             if elapsed < total_seconds:
+                if not self.is_tiktok_in_foreground(device_id):
+                    raise RuntimeError(
+                        "TikTok không ở foreground trước khi swipe; "
+                        "đã dừng an toàn"
+                    )
                 moved = self.advance_tiktok_feed(device_id)
                 if not moved:
                     if status_callback:
@@ -3384,6 +3404,9 @@ class ADBController:
         Bài ảnh/carousel có thể giữ cú vuốt chậm đầu tiên, vì vậy thử lại bằng
         cú fling nhanh và dài hơn ở vị trí ngang khác.
         """
+        if not self.is_tiktok_in_foreground(device_id):
+            return False
+
         width, height = self.get_effective_screen_size(device_id)
         before = self.get_tiktok_feed_signature(device_id)
         gestures = [
@@ -3394,6 +3417,8 @@ class ADBController:
 
         for x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration in gestures:
             self.lock_portrait(device_id, retries=3)
+            if not self.is_tiktok_in_foreground(device_id):
+                return False
             swipe_result = self.swipe(
                 device_id,
                 int(width * x1_ratio),
@@ -3696,6 +3721,14 @@ class ADBController:
             update_status("[TikTok B1] Mở ứng dụng TikTok...")
             self.launch_tiktok(device_id)
             check_cancelled()
+            if not self.is_tiktok_in_foreground(device_id):
+                raise RuntimeError(
+                    "Không mở được TikTok; đã dừng để tránh thao tác trên ứng dụng khác"
+                )
+            if not self.ensure_tiktok_home_feed(device_id):
+                raise RuntimeError(
+                    "Không đưa được TikTok về Home/For You trước khi bắt đầu"
+                )
 
             step1_total = random.randint(
                 config.TIKTOK_STEP1_TOTAL_MIN,
@@ -3722,6 +3755,10 @@ class ADBController:
                     check_cancelled()
                 step1_elapsed += dwell
                 if step1_elapsed < step1_total:
+                    if not self.is_tiktok_in_foreground(device_id):
+                        raise RuntimeError(
+                            "TikTok B1 mất foreground; đã dừng trước khi swipe"
+                        )
                     if not self.advance_tiktok_feed(device_id):
                         update_status(
                             "[TikTok B1] Bài ảnh chưa đổi sau 3 lần vuốt • "
@@ -3733,6 +3770,10 @@ class ADBController:
             check_cancelled()
             seed_kw = random.choice(seed_keywords)
             update_status(f"[TikTok B2] Mở Kính lúp & Tìm từ khóa mồi '{seed_kw}'...")
+            if not self.is_tiktok_in_foreground(device_id):
+                raise RuntimeError(
+                    "TikTok B2 không ở foreground; không mở ô tìm kiếm"
+                )
             
             self.find_and_click_tiktok_search(device_id)
             check_cancelled()
@@ -3770,6 +3811,10 @@ class ADBController:
                     check_cancelled()
                 step2_elapsed += dwell
                 if step2_elapsed < step2_total:
+                    if not self.is_tiktok_in_foreground(device_id):
+                        raise RuntimeError(
+                            "TikTok B2 mất foreground; đã dừng trước khi swipe"
+                        )
                     self.swipe(
                         device_id,
                         cx,
@@ -3783,6 +3828,10 @@ class ADBController:
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
             update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
+            if not self.is_tiktok_in_foreground(device_id):
+                raise RuntimeError(
+                    "TikTok B3 không ở foreground; không thao tác tìm kiếm"
+                )
             
             # 1. Bấm vào Kính lúp / Ô tìm kiếm ở đầu trang
             self.find_and_click_tiktok_search(device_id)
@@ -3845,6 +3894,10 @@ class ADBController:
                         f"[TikTok B3] Vuốt sang clip ngẫu nhiên tiếp theo "
                         f"(còn {step3_total - step3_elapsed}s)..."
                     )
+                    if not self.is_tiktok_in_foreground(device_id):
+                        raise RuntimeError(
+                            "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
+                        )
                     self.swipe(
                         device_id,
                         cx,
