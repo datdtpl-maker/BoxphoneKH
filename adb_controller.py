@@ -264,7 +264,7 @@ class ADBController:
             device_id, ["shell", "uiautomator", "dump", remote_xml]
         )
         if dump_code != 0:
-            return False
+            return None
         pull_code, _, _ = self.execute_adb(
             device_id, ["pull", remote_xml, local_xml]
         )
@@ -2067,6 +2067,150 @@ class ADBController:
         """
         return True
 
+    def extract_lamdong_product_candidates(self, root, limit=10):
+        """Lấy tối đa ``limit`` card sản phẩm có nhãn địa chỉ Lâm Đồng."""
+        candidates = []
+        seen = set()
+        for elem in root.iter():
+            normalized_text = self.remove_vietnamese_accents(
+                elem.get("text", "")
+            ).casefold()
+            if "lam dong" not in normalized_text:
+                continue
+
+            bounds = elem.get("bounds", "")
+            match = re.match(
+                r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                bounds,
+            )
+            if not match:
+                continue
+
+            x1, y1, x2, y2 = map(int, match.groups())
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            # Loại thanh tìm kiếm/bộ lọc và thanh điều hướng cuối màn hình.
+            if cx <= 0 or not 220 < cy < 1800:
+                continue
+
+            product_coords = (cx, cy)
+            if product_coords in seen:
+                continue
+            seen.add(product_coords)
+            candidates.append(product_coords)
+            if len(candidates) >= limit:
+                break
+        return candidates
+
+    def choose_lamdong_product_candidate(self, candidates):
+        """Chọn ngẫu nhiên một card Lâm Đồng đã xác minh."""
+        return random.choice(candidates) if candidates else None
+
+    def is_shopee_product_detail(self, device_id):
+        """Xác minh màn hình hiện tại vẫn là trang chi tiết sản phẩm Shopee."""
+        remote_xml = f"/sdcard/shopee_product_state_{device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_shopee_product_state_{device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id,
+            ["shell", "uiautomator", "dump", remote_xml],
+        )
+        if dump_code != 0:
+            return False
+        pull_code, _, _ = self.execute_adb(
+            device_id,
+            ["pull", remote_xml, local_xml],
+        )
+        if pull_code != 0 or not os.path.exists(local_xml):
+            return None
+
+        try:
+            root = ET.parse(local_xml).getroot()
+            markers = (
+                "labelproductpageproductname",
+                "buttonproductaddcart",
+                "sectionproductimages",
+                "buttonproductbuynow",
+            )
+            return any(
+                any(marker in elem.get("resource-id", "").casefold()
+                    for marker in markers)
+                for elem in root.iter()
+            )
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+    def return_to_shopee_product_after_shop(
+        self,
+        device_id,
+        product_coords,
+        status_callback=None,
+        is_cancelled=None,
+    ):
+        """Back khỏi Shop và tự mở lại card nếu Shopee rơi về kết quả tìm kiếm."""
+        def update_status(message):
+            if status_callback:
+                status_callback(device_id, message)
+
+        def verify_product_state():
+            state = self.is_shopee_product_detail(device_id)
+            for _ in range(2):
+                if state is not None:
+                    break
+                time.sleep(0.5)
+                state = self.is_shopee_product_detail(device_id)
+            return state
+
+        self.keyevent(device_id, 4)
+        self.shopee_loading_delay(
+            device_id,
+            "product",
+            status_callback=status_callback,
+            is_cancelled=is_cancelled,
+        )
+        product_state = verify_product_state()
+        if product_state is True:
+            return True
+        if product_state is None:
+            update_status(
+                "Chưa đọc được trạng thái Shopee sau khi rời Shop • "
+                "dừng an toàn, không bấm mù."
+            )
+            return False
+
+        update_status(
+            "Back từ Shop rơi về kết quả tìm kiếm • tự mở lại sản phẩm đã chọn..."
+        )
+        for _ in range(2):
+            if is_cancelled and is_cancelled():
+                return False
+            self.tap(device_id, product_coords[0], product_coords[1])
+            self.shopee_loading_delay(
+                device_id,
+                "product",
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+            product_state = verify_product_state()
+            if product_state is True:
+                return True
+            if product_state is None:
+                update_status(
+                    "Không xác minh được trang Shopee • dừng an toàn."
+                )
+                return False
+        update_status("Không thể mở lại trang chi tiết sản phẩm sau khi rời Shop.")
+        return False
+
     def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None, click_first_item=False):
         """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng' (hoặc bài đăng đầu tiên nếu bật click_first_item)"""
         def update_status(msg):
@@ -2250,47 +2394,20 @@ class ADBController:
                                     
                         # LOGIC QUÉT LÂM ĐỒNG THƯỜNG (Nếu không bật click_first_item hoặc không tìm thấy bài đăng đầu tiên bằng dự phòng)
                         if not found_coords:
-                            kw_clean = keyword.lower().strip()
-                            kw_words = [w for w in kw_clean.split() if len(w) > 1]
-                            if not kw_words:
-                                kw_words = [kw_clean]
-
-                            # 1. Tìm các tiêu đề sản phẩm chứa từ khóa trên màn hình
-                            product_title_nodes = []
-                            for elem in root.iter():
-                                text = elem.get('text', '').lower()
-                                if any(w in text for w in kw_words):
-                                    bounds = elem.get('bounds', '')
-                                    m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                                    if m:
-                                        x1, y1, x2, y2 = map(int, m.groups())
-                                        product_title_nodes.append(((x1 + x2) // 2, (y1 + y2) // 2, text))
-
-                            # 2. Lọc nhãn Lâm Đồng thuộc đúng sản phẩm cần tìm
-                            lamdong_candidates = []
-                            for elem in root.iter():
-                                text = elem.get('text', '')
-                                if 'Lâm Đồng' in text or 'Tỉnh Lâm Đồng' in text:
-                                    bounds = elem.get('bounds', '')
-                                    m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                                    if m:
-                                        x1, y1, x2, y2 = map(int, m.groups())
-                                        cx = (x1 + x2) // 2
-                                        cy = (y1 + y2) // 2
-                                        if cx > 0 and cy > 0:
-                                            # Đối chiếu nhãn địa điểm với tiêu đề sản phẩm ngay phía trên nó (cùng cột, Y chênh lệch < 280px)
-                                            is_valid = False
-                                            for tx, ty, t_text in product_title_nodes:
-                                                if 0 < (cy - ty) < 280 and abs(tx - cx) < 300:
-                                                    is_valid = True
-                                                    break
-                                            
-                                            if is_valid:
-                                                if (cx, cy) not in lamdong_candidates:
-                                                    lamdong_candidates.append((cx, cy))
+                            lamdong_candidates = (
+                                self.extract_lamdong_product_candidates(root)
+                            )
                             if lamdong_candidates:
-                                found_coords = random.choice(lamdong_candidates)
-                                update_status(f"Tìm thấy {len(lamdong_candidates)} shop Lâm Đồng trên màn hình. Chọn ngẫu nhiên: ({found_coords[0]}, {found_coords[1]}).")
+                                found_coords = (
+                                    self.choose_lamdong_product_candidate(
+                                        lamdong_candidates
+                                    )
+                                )
+                                update_status(
+                                    f"Tìm thấy {len(lamdong_candidates)} sản phẩm "
+                                    f"Lâm Đồng (tối đa 10) • chọn ngẫu nhiên: "
+                                    f"({found_coords[0]}, {found_coords[1]})."
+                                )
                     except Exception as e:
                         print(f"Loi phan tich XML tren may {device_id}: {e}")
                     finally:
@@ -2302,8 +2419,13 @@ class ADBController:
                 if found_coords:
                     cx, cy = found_coords
                     click_y = max(0, cy - 120)
+                    selected_product_coords = (cx, click_y)
                     update_status(f"Tìm thấy nhãn Lâm Đồng tại ({cx}, {cy}). Tiến hành click vào sản phẩm...")
-                    self.tap(device_id, cx, click_y)
+                    self.tap(
+                        device_id,
+                        selected_product_coords[0],
+                        selected_product_coords[1],
+                    )
                     self.shopee_loading_delay(
                         device_id,
                         "product",
@@ -2393,15 +2515,19 @@ class ADBController:
                                 time.sleep(0.25)
                                 check_cancelled()
                                 
-                        # Nhấn nút Back để quay lại trang sản phẩm
-                        update_status("Hoàn thành dạo Shop. Quay lại sản phẩm...")
-                        self.keyevent(device_id, 4) # Quay lại sản phẩm
-                        self.shopee_loading_delay(
+                        update_status(
+                            "Hoàn thành dạo Shop • quay lại đúng sản phẩm đã chọn..."
+                        )
+                        if not self.return_to_shopee_product_after_shop(
                             device_id,
-                            "product",
+                            product_coords=selected_product_coords,
                             status_callback=status_callback,
                             is_cancelled=is_cancelled,
-                        )
+                        ):
+                            return (
+                                False,
+                                "Không thể quay lại trang chi tiết sản phẩm sau khi dạo Shop",
+                            )
 
                     # 5. Dạo xem thêm chi tiết sản phẩm & Đánh giá sau khi quay lại (30 - 45 giây)
                     view_duration = random.randint(30, 45)

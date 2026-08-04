@@ -8,6 +8,84 @@ import main
 
 
 class ShopeeSearchClickTests(unittest.TestCase):
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
+    def test_lamdong_search_randomizes_across_up_to_ten_visible_products(
+        self,
+        _choice,
+    ):
+        nodes = []
+        for index in range(12):
+            column_x = 120 if index % 2 == 0 else 660
+            row_y = 320 + (index // 2) * 220
+            nodes.append(
+                f'<node text="Tỉnh Lâm Đồng" '
+                f'bounds="[{column_x},{row_y}]'
+                f'[{column_x + 240},{row_y + 42}]" />'
+            )
+        root = ET.fromstring(
+            "<hierarchy>" + "".join(nodes) + "</hierarchy>"
+        )
+        controller = ADBController(adb_path="adb")
+
+        candidates = controller.extract_lamdong_product_candidates(root)
+        selected = controller.choose_lamdong_product_candidate(candidates)
+
+        self.assertEqual(10, len(candidates))
+        self.assertEqual(candidates[-1], selected)
+        self.assertNotEqual(candidates[0], selected)
+
+    def test_return_from_shop_reopens_product_when_back_lands_on_results(self):
+        controller = ADBController(adb_path="adb")
+        product_checks = iter([False, True])
+        controller.is_shopee_product_detail = (
+            lambda _device_id: next(product_checks)
+        )
+        keyevents = []
+        taps = []
+        delays = []
+        controller.keyevent = (
+            lambda _device_id, keycode: keyevents.append(keycode)
+        )
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+        controller.shopee_loading_delay = (
+            lambda _device_id, context, **_kwargs:
+            delays.append(context) or 7.5
+        )
+
+        success = controller.return_to_shopee_product_after_shop(
+            "device-1",
+            product_coords=(420, 760),
+        )
+
+        self.assertTrue(success)
+        self.assertEqual([4], keyevents)
+        self.assertEqual([(420, 760)], taps)
+        self.assertEqual(["product", "product"], delays)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_return_from_shop_does_not_tap_blindly_when_ui_state_is_unknown(
+        self,
+        _sleep,
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.is_shopee_product_detail = lambda _device_id: None
+        controller.keyevent = lambda *_args: None
+        controller.shopee_loading_delay = lambda *_args, **_kwargs: 7.5
+        taps = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+
+        success = controller.return_to_shopee_product_after_shop(
+            "device-1",
+            product_coords=(420, 760),
+        )
+
+        self.assertFalse(success)
+        self.assertEqual([], taps)
+
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)

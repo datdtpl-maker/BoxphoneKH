@@ -78,9 +78,69 @@ FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = os.getenv(
 
 # API Key Gemini dùng để sinh từ khóa
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
+import urllib.error
 import urllib.request
 import json
+
+
+def _gemini_generate_url(api_key, model=None):
+    selected_model = (model or GEMINI_MODEL).strip()
+    return (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{selected_model}:generateContent?key={api_key}"
+    )
+
+
+def check_gemini_api(api_key, model=None, timeout=15):
+    """Perform a real lightweight Gemini request and classify failures."""
+    if not api_key or not api_key.strip():
+        return False, "missing_key", "Chưa nhập Gemini API Key."
+
+    selected_model = (model or GEMINI_MODEL).strip()
+    payload = {
+        "contents": [{"parts": [{"text": "Reply with OK only."}]}],
+        "generationConfig": {"maxOutputTokens": 8},
+    }
+    request = urllib.request.Request(
+        _gemini_generate_url(api_key.strip(), selected_model),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read()
+        return (
+            True,
+            "ok",
+            f"Gemini API hoạt động với model {selected_model}.",
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            message = "API Key không hợp lệ hoặc đang bị giới hạn quyền."
+            code = "invalid_key"
+        elif exc.code == 404:
+            message = f"Model {selected_model} không tồn tại hoặc đã ngừng hỗ trợ."
+            code = "model_not_found"
+        elif exc.code == 429:
+            message = "Gemini API đã hết quota hoặc đang bị giới hạn tần suất."
+            code = "quota_exceeded"
+        elif exc.code >= 500:
+            message = "Máy chủ Gemini đang gặp sự cố, hãy thử lại sau."
+            code = "server_error"
+        else:
+            message = f"Gemini API trả về lỗi HTTP {exc.code}."
+            code = "http_error"
+        return False, code, message
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return (
+            False,
+            "network_error",
+            "Không thể kết nối Gemini API. Hãy kiểm tra mạng và thử lại.",
+        )
 
 def generate_keywords_via_gemini(api_key, main_keywords, status_cb=None):
     """
@@ -129,7 +189,7 @@ def generate_keywords_via_gemini(api_key, main_keywords, status_cb=None):
         "Tuyệt đối không viết thêm lời giải thích hay bất kỳ ký tự nào ngoài định dạng JSON."
     )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = _gemini_generate_url(api_key)
     
     payload = {
         "contents": [{
@@ -226,7 +286,7 @@ def generate_keywords_tier2_via_gemini(api_key, shopee_product_titles, status_cb
             "Ví dụ Output mong đợi: [\"tu khoa 1\", \"tu khoa 2\", \"tu khoa 3\"]"
         )
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        url = _gemini_generate_url(api_key)
         
         payload = {
             "contents": [{

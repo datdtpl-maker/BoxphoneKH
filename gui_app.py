@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import config
 import main
+from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
 
 # Bright operations dashboard with a lightweight iOS-inspired glass treatment.
 ctk.set_appearance_mode("light")
@@ -579,6 +580,7 @@ class GUIApp(ctk.CTk):
         self.btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.btn_grid.columnconfigure(0, weight=1)
         self.btn_grid.columnconfigure(1, weight=1)
+        self.btn_grid.columnconfigure(2, weight=1)
         
         self.btn_seq = ctk.CTkButton(
             self.btn_grid,
@@ -606,7 +608,23 @@ class GUIApp(ctk.CTk):
             cursor="hand2",
             command=self.run_par_search,
         )
-        self.btn_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        self.btn_par.grid(row=0, column=1, padx=4, sticky="ew")
+
+        self.btn_adaptive = ctk.CTkButton(
+            self.btn_grid,
+            text="Chạy thích ứng",
+            font=button_font,
+            fg_color=violet,
+            hover_color="#5b21b6",
+            text_color="#ffffff",
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=lambda: self.run_par_search(adaptive=True),
+        )
+        self.btn_adaptive.grid(
+            row=0, column=2, padx=(4, 0), sticky="ew"
+        )
         
         self.btn_stop = ctk.CTkButton(
             self.shopee_scroll,
@@ -750,6 +768,7 @@ class GUIApp(ctk.CTk):
         self.tt_btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.tt_btn_grid.columnconfigure(0, weight=1)
         self.tt_btn_grid.columnconfigure(1, weight=1)
+        self.tt_btn_grid.columnconfigure(2, weight=1)
 
         self.btn_tt_seq = ctk.CTkButton(
             self.tt_btn_grid,
@@ -777,7 +796,23 @@ class GUIApp(ctk.CTk):
             cursor="hand2",
             command=self.run_par_tiktok,
         )
-        self.btn_tt_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        self.btn_tt_par.grid(row=0, column=1, padx=4, sticky="ew")
+
+        self.btn_tt_adaptive = ctk.CTkButton(
+            self.tt_btn_grid,
+            text="Chạy thích ứng",
+            font=button_font,
+            fg_color=violet,
+            hover_color="#5b21b6",
+            text_color="#ffffff",
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=lambda: self.run_par_tiktok(adaptive=True),
+        )
+        self.btn_tt_adaptive.grid(
+            row=0, column=2, padx=(4, 0), sticky="ew"
+        )
 
         self.btn_tt_stop = ctk.CTkButton(
             self.tiktok_scroll,
@@ -915,6 +950,7 @@ class GUIApp(ctk.CTk):
         self.fb_btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.fb_btn_grid.columnconfigure(0, weight=1)
         self.fb_btn_grid.columnconfigure(1, weight=1)
+        self.fb_btn_grid.columnconfigure(2, weight=1)
         self.btn_fb_seq = ctk.CTkButton(
             self.fb_btn_grid,
             text="Chạy tuần tự",
@@ -940,7 +976,22 @@ class GUIApp(ctk.CTk):
             cursor="hand2",
             command=self.run_par_facebook,
         )
-        self.btn_fb_par.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        self.btn_fb_par.grid(row=0, column=1, padx=4, sticky="ew")
+        self.btn_fb_adaptive = ctk.CTkButton(
+            self.fb_btn_grid,
+            text="Chạy thích ứng",
+            font=button_font,
+            fg_color=violet,
+            hover_color="#5b21b6",
+            text_color="#ffffff",
+            corner_radius=13,
+            height=44,
+            cursor="hand2",
+            command=lambda: self.run_par_facebook(adaptive=True),
+        )
+        self.btn_fb_adaptive.grid(
+            row=0, column=2, padx=(4, 0), sticky="ew"
+        )
         self.btn_fb_stop = ctk.CTkButton(
             self.facebook_scroll,
             text="Dừng Facebook khẩn cấp",
@@ -1003,7 +1054,7 @@ class GUIApp(ctk.CTk):
             self.bottom_panel, fg_color="transparent"
         )
         self.settings_card.pack(fill="x", padx=14, pady=(2, 12))
-        for column, weight in enumerate((2, 1, 2, 2, 2, 0)):
+        for column, weight in enumerate((2, 1, 2, 2, 2, 0, 0)):
             self.settings_card.columnconfigure(column, weight=weight)
 
         def make_setting_field(column, label, placeholder, show=None):
@@ -1053,6 +1104,23 @@ class GUIApp(ctk.CTk):
         )
         self.ent_gemini_key.insert(0, config.GEMINI_API_KEY or "")
 
+        self.btn_check_gemini = ctk.CTkButton(
+            self.settings_card,
+            text="Kiểm tra API",
+            font=button_font,
+            fg_color=violet,
+            hover_color="#5b21b6",
+            text_color="#ffffff",
+            corner_radius=10,
+            height=42,
+            width=112,
+            cursor="hand2",
+            command=self.check_gemini_api_action,
+        )
+        self.btn_check_gemini.grid(
+            row=0, column=5, padx=(10, 4), pady=(19, 0)
+        )
+
         self.btn_save = ctk.CTkButton(
             self.settings_card,
             text="Lưu cấu hình",
@@ -1066,7 +1134,7 @@ class GUIApp(ctk.CTk):
             cursor="hand2",
             command=self.save_settings,
         )
-        self.btn_save.grid(row=0, column=5, padx=(10, 4), pady=(19, 0))
+        self.btn_save.grid(row=0, column=6, padx=(4, 4), pady=(19, 0))
 
         # Subtle glass border response and a short window fade-in. These are
         # presentation-only effects and do not touch automation state.
@@ -1244,6 +1312,35 @@ class GUIApp(ctk.CTk):
                     text="Tắt âm tất cả",
                 ),
             )
+
+        self.run_in_thread(action)
+
+    def check_gemini_api_action(self):
+        """Kiểm tra key hiện có trong ô bằng một request Gemini thật."""
+        api_key = self.ent_gemini_key.get().strip()
+        self.btn_check_gemini.configure(
+            state="disabled",
+            text="Đang kiểm tra...",
+            fg_color="#64748b",
+        )
+
+        def action():
+            ok, code, message = config.check_gemini_api(api_key)
+            print(f"[Gemini API] {message} (mã: {code})")
+
+            def finish():
+                self.btn_check_gemini.configure(
+                    state="normal",
+                    text=("API hoạt động" if ok else "Kiểm tra lại"),
+                    fg_color=("#047857" if ok else "#c81e2b"),
+                    hover_color=("#065f46" if ok else "#a91623"),
+                )
+                if ok:
+                    messagebox.showinfo("Gemini API", message)
+                else:
+                    messagebox.showwarning("Gemini API", message)
+
+            self.after(0, finish)
 
         self.run_in_thread(action)
 
@@ -1552,7 +1649,7 @@ class GUIApp(ctk.CTk):
             
         self.run_in_thread(action)
 
-    def run_par_search(self):
+    def run_par_search(self, adaptive=False):
         click_first_item = False
         first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
         mode = self.keyword_mode.get()
@@ -1636,7 +1733,11 @@ class GUIApp(ctk.CTk):
                 for k in keywords:
                     self.txt_ai_keywords.insert("end", f"{k}\n")
             
-            print(f"[GUI] Bắt đầu tìm kiếm song song (Mở rộng từ Gemini) trên {len(target_devices)} máy...")
+            run_mode = "thích ứng" if adaptive else "song song"
+            print(
+                f"[GUI] Bắt đầu tìm kiếm {run_mode} "
+                f"(Mở rộng từ Gemini) trên {len(target_devices)} máy..."
+            )
 
             keyword_assignments = main.assign_shopee_keywords(
                 keywords,
@@ -1720,10 +1821,29 @@ class GUIApp(ctk.CTk):
                     print(f"[Profile {dev_name}] ❌ Thất bại: {err}")
                 return dev_name, current_keyword, success, err
                 
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                futures = [executor.submit(run_search_parallel, dev) for dev in target_devices]
-                results = [f.result() for f in futures]
+            if adaptive:
+                policy = PLATFORM_POLICIES["shopee"]
+                results = run_adaptive(
+                    target_devices,
+                    run_search_parallel,
+                    policy,
+                    is_cancelled=session_is_cancelled,
+                    on_wait=lambda dev, delay, position, total: print(
+                        f"[GUI] Shopee thích ứng: máy "
+                        f"{main.get_device_name(dev)} đang chờ {delay}s "
+                        f"({position + 1}/{total})."
+                    ),
+                )
+            else:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(
+                    max_workers=len(target_devices)
+                ) as executor:
+                    futures = [
+                        executor.submit(run_search_parallel, dev)
+                        for dev in target_devices
+                    ]
+                    results = [f.result() for f in futures]
                 
             success_count = sum(1 for r in results if r[2])
             fail_count = len(results) - success_count
@@ -1841,7 +1961,7 @@ class GUIApp(ctk.CTk):
 
         self.run_in_thread(action)
 
-    def run_par_tiktok(self):
+    def run_par_tiktok(self, adaptive=False):
         target_devices = self.parse_targets(entry_widget=self.ent_tt_selection)
         if not target_devices:
             return
@@ -1916,9 +2036,27 @@ class GUIApp(ctk.CTk):
             return dev_name, success, message
 
         def action():
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                results = list(executor.map(run_parallel_tt, target_devices))
+            if adaptive:
+                policy = PLATFORM_POLICIES["tiktok"]
+                results = run_adaptive(
+                    target_devices,
+                    run_parallel_tt,
+                    policy,
+                    is_cancelled=session_is_cancelled,
+                    on_wait=lambda dev, delay, position, total: print(
+                        f"[GUI] TikTok thích ứng: máy "
+                        f"{main.get_device_name(dev)} đang chờ {delay}s "
+                        f"({position + 1}/{total})."
+                    ),
+                )
+            else:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(
+                    max_workers=len(target_devices)
+                ) as executor:
+                    results = list(
+                        executor.map(run_parallel_tt, target_devices)
+                    )
 
             success_count = sum(1 for _, success, _ in results if success)
             for dev_name, success, message in results:
@@ -2048,7 +2186,7 @@ class GUIApp(ctk.CTk):
 
         self.run_in_thread(action)
 
-    def run_par_facebook(self):
+    def run_par_facebook(self, adaptive=False):
         seed_raw = self.ent_fb_seed.get().strip()
         target_raw = self.ent_fb_target.get().strip()
         if not seed_raw:
@@ -2121,12 +2259,26 @@ class GUIApp(ctk.CTk):
             return device_name, success, message
 
         def action():
-            from concurrent.futures import ThreadPoolExecutor
+            if adaptive:
+                policy = PLATFORM_POLICIES["facebook"]
+                results = run_adaptive(
+                    target_devices,
+                    run_device,
+                    policy,
+                    is_cancelled=session_is_cancelled,
+                    on_wait=lambda dev, delay, position, total: print(
+                        f"[GUI] Facebook thích ứng: máy "
+                        f"{main.get_device_name(dev)} đang chờ {delay}s "
+                        f"({position + 1}/{total})."
+                    ),
+                )
+            else:
+                from concurrent.futures import ThreadPoolExecutor
 
-            with ThreadPoolExecutor(
-                max_workers=len(target_devices)
-            ) as executor:
-                results = list(executor.map(run_device, target_devices))
+                with ThreadPoolExecutor(
+                    max_workers=len(target_devices)
+                ) as executor:
+                    results = list(executor.map(run_device, target_devices))
             success_count = sum(
                 1 for _, success, _ in results if success
             )
