@@ -22,7 +22,11 @@ PROPERTY_NAMES = {
     "facebook_target": "Facebook - Page mục tiêu",
     "note": "Ghi chú Admin",
     "last_scanned": "Lần quét gần nhất",
+    "pump_status": "Trạng thái bơm",
 }
+
+PUMP_STATUS_PROCESSING = "Đang xử lý"
+PUMP_STATUS_COMPLETED = "Hoàn thành"
 
 
 class NotionSyncError(Exception):
@@ -44,6 +48,7 @@ class NotionKeywordSchedule:
     facebook_seed_keywords: str
     facebook_target_pages: str
     admin_note: str = ""
+    pump_status: str = ""
 
 
 def _property(properties, name):
@@ -109,6 +114,11 @@ def parse_schedule_page(page):
             _property(properties, PROPERTY_NAMES["facebook_target"])
         ),
         admin_note=_plain_text(properties.get(PROPERTY_NAMES["note"], {})),
+        pump_status=(
+            (properties.get(PROPERTY_NAMES["pump_status"], {}).get("select") or {})
+            .get("name", "")
+            .strip()
+        ),
     )
 
 
@@ -218,8 +228,16 @@ def fetch_enabled_keyword_schedules(token, data_source_id, timeout=20):
         payload = {
             "page_size": 100,
             "filter": {
-                "property": PROPERTY_NAMES["active"],
-                "checkbox": {"equals": True},
+                "and": [
+                    {
+                        "property": PROPERTY_NAMES["active"],
+                        "checkbox": {"equals": True},
+                    },
+                    {
+                        "property": PROPERTY_NAMES["pump_status"],
+                        "select": {"does_not_equal": PUMP_STATUS_COMPLETED},
+                    },
+                ]
             },
         }
         if cursor:
@@ -280,3 +298,33 @@ def mark_schedule_scanned(token, page_id, timeout=20):
         timeout,
     )
     return True
+
+
+def _mark_schedule_status(token, page_id, status, timeout=20):
+    if not token or not page_id:
+        return False
+    url = f"https://api.notion.com/v1/pages/{urllib.parse.quote(page_id, safe='')}"
+    _request_json(
+        url,
+        token,
+        "PATCH",
+        {
+            "properties": {
+                PROPERTY_NAMES["pump_status"]: {"select": {"name": status}}
+            }
+        },
+        timeout,
+    )
+    return True
+
+
+def mark_schedule_processing(token, page_id, timeout=20):
+    return _mark_schedule_status(
+        token, page_id, PUMP_STATUS_PROCESSING, timeout=timeout
+    )
+
+
+def mark_schedule_completed(token, page_id, timeout=20):
+    return _mark_schedule_status(
+        token, page_id, PUMP_STATUS_COMPLETED, timeout=timeout
+    )

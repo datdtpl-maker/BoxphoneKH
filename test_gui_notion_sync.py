@@ -61,10 +61,12 @@ class GuiNotionSyncTests(unittest.TestCase):
                 "gui_app.fetch_enabled_keyword_schedules",
                 return_value=[schedule],
             ),
+            patch("gui_app.mark_schedule_processing") as processing,
             patch.object(app, "_show_notion_schedule_picker") as picker,
         ):
             app.scan_notion_keywords_action()
 
+        processing.assert_called_once_with("local-token", "page-id")
         picker.assert_called_once_with([schedule], "local-token")
         self.assertEqual("normal", app.btn_scan_notion.calls[-1]["state"])
 
@@ -78,6 +80,7 @@ class GuiNotionSyncTests(unittest.TestCase):
         app.run_in_thread = lambda action: action()
         app.after = lambda _delay, callback: callback()
         app.log_message = lambda _message: None
+        app.btn_complete_notion = _Button()
         schedule = NotionKeywordSchedule(
             page_id="page-id",
             title="Tuần hiện tại",
@@ -104,6 +107,41 @@ class GuiNotionSyncTests(unittest.TestCase):
         self.assertEqual("da khỏe, trị mụn", app.ent_fb_seed.value)
         self.assertEqual("Page A, Page B", app.ent_fb_target.value)
         mark.assert_called_once_with("local-token", "page-id")
+        self.assertEqual(schedule, app._active_notion_schedule)
+        self.assertEqual("normal", app.btn_complete_notion.calls[-1]["state"])
+        show.assert_called_once()
+
+    def test_complete_button_syncs_notion_and_disables_itself(self):
+        app = GUIApp.__new__(GUIApp)
+        schedule = NotionKeywordSchedule(
+            page_id="page-id",
+            title="Tuần hiện tại",
+            start_date=date(2026, 8, 12),
+            end_date=date(2026, 8, 18),
+            active=True,
+            shopee_keywords="a",
+            tiktok_seed_keywords="b",
+            tiktok_target_channels="c",
+            facebook_seed_keywords="d",
+            facebook_target_pages="e",
+        )
+        app._active_notion_schedule = schedule
+        app._active_notion_token = "local-token"
+        app.btn_complete_notion = _Button()
+        app.run_in_thread = lambda action: action()
+        app.after = lambda _delay, callback: callback()
+        app.log_message = lambda _message: None
+
+        with (
+            patch("gui_app.messagebox.askyesno", return_value=True),
+            patch("gui_app.messagebox.showinfo") as show,
+            patch("gui_app.mark_schedule_completed") as complete,
+        ):
+            app.complete_notion_schedule_action()
+
+        complete.assert_called_once_with("local-token", "page-id")
+        self.assertIsNone(app._active_notion_schedule)
+        self.assertEqual("disabled", app.btn_complete_notion.calls[-1]["state"])
         show.assert_called_once()
 
 

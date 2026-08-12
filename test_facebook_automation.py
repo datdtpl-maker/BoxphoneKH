@@ -9,7 +9,35 @@ from adb_controller import ADBController
 
 class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
-    def test_facebook_browse_never_swipes_when_another_app_is_foreground(
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    def test_cross_warmup_recovers_facebook_foreground_before_swipe(
+        self, _randint, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        swipes = []
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        foreground = iter([False, True, True, True])
+        controller.is_facebook_in_foreground = lambda _device_id: next(
+            foreground, True
+        )
+        recoveries = []
+        controller.ensure_facebook_ready = lambda device_id: (
+            recoveries.append(device_id) or True
+        )
+        controller.swipe = lambda *_args, **_kwargs: swipes.append(_args)
+
+        self.assertTrue(
+            controller.browse_facebook_surface(
+                "device-transition", 7, "facebook_cross_warmup"
+            )
+        )
+
+        self.assertEqual(["device-transition"], recoveries)
+        self.assertEqual(1, len(swipes))
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_cross_warmup_still_never_swipes_if_facebook_cannot_recover(
         self, _sleep
     ):
         controller = ADBController(adb_path="adb")
@@ -17,13 +45,12 @@ class FacebookAutomationTests(unittest.TestCase):
         controller.lock_portrait = lambda *_args, **_kwargs: True
         controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
         controller.is_facebook_in_foreground = lambda _device_id: False
+        controller.ensure_facebook_ready = lambda _device_id: False
         controller.swipe = lambda *_args, **_kwargs: swipes.append(_args)
 
         with self.assertRaisesRegex(RuntimeError, "Facebook.*foreground"):
             controller.browse_facebook_surface(
-                "device-on-shopee",
-                20,
-                "facebook_cross_warmup",
+                "device-on-other-app", 20, "facebook_cross_warmup"
             )
 
         self.assertEqual([], swipes)

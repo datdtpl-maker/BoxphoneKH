@@ -20,6 +20,7 @@ def _page(title="Tuần 12/08", start="2026-08-12", end="2026-08-18", active=Tru
             "Tên lịch": {"title": [{"plain_text": title}]},
             "Thời gian áp dụng": {"date": {"start": start, "end": end}},
             "Đang áp dụng": {"checkbox": active},
+            "Trạng thái bơm": {"select": None},
             "Shopee - Từ khóa gốc": {"rich_text": [{"plain_text": "kem chống nắng, sữa rửa mặt"}]},
             "TikTok - Từ khóa nhiệm vụ": {"rich_text": [{"plain_text": "chăm sóc da, skincare"}]},
             "TikTok - Kênh mục tiêu": {"rich_text": [{"plain_text": "kenh-a, kenh-b"}]},
@@ -54,6 +55,7 @@ class NotionKeywordSyncTests(unittest.TestCase):
         self.assertEqual("kem chống nắng, sữa rửa mặt", schedule.shopee_keywords)
         self.assertEqual("kenh-a, kenh-b", schedule.tiktok_target_channels)
         self.assertEqual("Page A, Page B", schedule.facebook_target_pages)
+        self.assertEqual("", schedule.pump_status)
 
     def test_selects_latest_start_when_active_ranges_overlap(self):
         older = parse_schedule_page(_page(title="Cũ", start="2026-08-01"))
@@ -95,7 +97,39 @@ class NotionKeywordSyncTests(unittest.TestCase):
         self.assertEqual("Bearer super-secret-token", request.headers["Authorization"])
         import json
         payload = json.loads(request.data.decode("utf-8"))
-        self.assertTrue(payload["filter"]["checkbox"]["equals"])
+        filters = payload["filter"]["and"]
+        self.assertTrue(filters[0]["checkbox"]["equals"])
+        self.assertEqual("Hoàn thành", filters[1]["select"]["does_not_equal"])
+
+    def test_completed_schedule_is_not_returned_by_api(self):
+        complete = _page(title="Đã xong")
+        complete["properties"]["Trạng thái bơm"] = {
+            "select": {"name": "Hoàn thành"}
+        }
+        active = _page(title="Đang chạy")
+        with patch(
+            "notion_keyword_sync.urllib.request.urlopen",
+            return_value=_Response({"results": [active], "has_more": False}),
+        ):
+            schedules = fetch_enabled_keyword_schedules("token", "source-id")
+
+        self.assertEqual(["Đang chạy"], [item.title for item in schedules])
+
+    def test_status_updates_use_notion_select_property(self):
+        from notion_keyword_sync import mark_schedule_completed
+
+        with patch(
+            "notion_keyword_sync.urllib.request.urlopen",
+            return_value=_Response({}),
+        ) as call:
+            mark_schedule_completed("token", "page-id")
+
+        import json
+        payload = json.loads(call.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(
+            "Hoàn thành",
+            payload["properties"]["Trạng thái bơm"]["select"]["name"],
+        )
 
     def test_api_classifies_auth_error_without_leaking_token(self):
         error = urllib.error.HTTPError(

@@ -18,6 +18,53 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.execute_adb = execute_adb
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_transition_relaunches_until_foreground_is_stable(self, _sleep):
+        foreground = iter([False, False, False, True, True, True])
+        self.controller.is_tiktok_in_foreground = lambda _device_id: next(
+            foreground, True
+        )
+        launches = []
+        self.controller.launch_tiktok = lambda device_id: launches.append(device_id)
+        self.controller.ensure_tiktok_home_feed = lambda _device_id: True
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+
+        self.assertTrue(
+            self.controller.ensure_tiktok_foreground_ready("device-transition")
+        )
+        self.assertEqual(["device-transition"], launches)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_transition_tolerates_temporary_focus_gap_without_relaunch(
+        self, _sleep
+    ):
+        foreground = iter([False, True, True, True])
+        self.controller.is_tiktok_in_foreground = lambda _device_id: next(
+            foreground, True
+        )
+        launches = []
+        self.controller.launch_tiktok = lambda device_id: launches.append(device_id)
+        self.controller.ensure_tiktok_home_feed = lambda _device_id: True
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+
+        self.assertTrue(
+            self.controller.ensure_tiktok_foreground_ready("device-focus-gap")
+        )
+        self.assertEqual([], launches)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_transition_fails_safely_without_swiping_wrong_app(self, _sleep):
+        self.controller.is_tiktok_in_foreground = lambda _device_id: False
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        swipes = []
+        self.controller.swipe = lambda *_args, **_kwargs: swipes.append(_args)
+
+        self.assertFalse(
+            self.controller.ensure_tiktok_foreground_ready("device-stuck")
+        )
+        self.assertEqual([], swipes)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_feed_never_swipes_when_tiktok_is_not_foreground(self, _sleep):
         swipes = []
         self.controller.get_effective_screen_size = (

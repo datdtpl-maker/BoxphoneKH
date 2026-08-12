@@ -66,7 +66,7 @@ python gui_app.py
 Tool có nút **Quét từ khóa Notion** để nạp dữ liệu vào các ô Shopee, TikTok và
 Facebook. Mỗi dòng Notion là một lịch chạy theo tuần và cần có các cột:
 
-- `Tên lịch`, `Thời gian áp dụng`, `Đang áp dụng`
+- `Tên lịch`, `Thời gian áp dụng`, `Đang áp dụng`, `Trạng thái bơm`
 - `Shopee - Từ khóa gốc`
 - `TikTok - Từ khóa nhiệm vụ`, `TikTok - Kênh mục tiêu`
 - `Facebook - Từ khóa mồi`, `Facebook - Page mục tiêu`
@@ -75,8 +75,11 @@ Facebook. Mỗi dòng Notion là một lịch chạy theo tuần và cần có c
 Nhập `NOTION API TOKEN` và link database Notion (hoặc `DATA SOURCE ID`) trong khu vực cấu hình, bấm
 **Lưu cấu hình**, sau đó bật các lịch cần dùng trên Notion. Khi quét, tool hiển
 thị các nút theo `Tên lịch` của toàn bộ dòng đã bật `Đang áp dụng`; bấm lịch nào
-thì bộ từ khóa của đúng dòng đó được nạp vào Shopee, TikTok và Facebook. Token
-chỉ được lưu trong `.env` cục bộ và không được commit lên Git.
+thì bộ từ khóa của đúng dòng đó được nạp vào Shopee, TikTok và Facebook, đồng
+thời `Trạng thái bơm` chuyển thành `Đang xử lý`. Khi kết thúc tuần, bấm
+**Hoàn thành tuần** để đồng bộ trạng thái `Hoàn thành`; lịch đã hoàn thành sẽ
+không xuất hiện trong các lần quét tiếp theo. Token chỉ được lưu trong `.env`
+cục bộ và không được commit lên Git.
 
 Tạo file `.env` tại thư mục gốc:
 

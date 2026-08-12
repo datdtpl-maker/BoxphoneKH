@@ -793,11 +793,27 @@ class ADBController:
             "facebook_cross_warmup": "Facebook Feed nuôi chéo",
         }
         label_name = label_names.get(label, label)
+
+        def ensure_safe_foreground():
+            if self.is_facebook_in_foreground(device_id):
+                return True
+            if label != "facebook_cross_warmup":
+                return False
+            if status_callback:
+                status_callback(
+                    device_id,
+                    "[Nuôi chéo] Facebook tạm mất foreground • đang mở lại Feed...",
+                )
+            if not self.ensure_facebook_ready(device_id):
+                return False
+            self.lock_portrait(device_id, retries=3)
+            return self.is_facebook_in_foreground(device_id)
+
         while elapsed < total_seconds:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
-            if not self.is_facebook_in_foreground(device_id):
+            if not ensure_safe_foreground():
                 raise RuntimeError(
                     f"{label_name}: Facebook không ở foreground; "
                     "đã dừng để tránh thao tác nhầm ứng dụng"
@@ -815,7 +831,7 @@ class ADBController:
                     raise RuntimeError("Bị dừng bởi người dùng")
             elapsed += dwell
             if elapsed < total_seconds:
-                if not self.is_facebook_in_foreground(device_id):
+                if not ensure_safe_foreground():
                     raise RuntimeError(
                         f"{label_name}: Facebook không ở foreground; "
                         "không thực hiện swipe"
@@ -1021,6 +1037,40 @@ class ADBController:
                 or "mresumedactivity" in line.casefold()
             )
             if any(package in focus_lines for package in packages):
+                return True
+        return False
+
+    def wait_for_tiktok_foreground(self, device_id, checks=3, delay=0.6):
+        """Cho activity TikTok thời gian lấy lại focus trước khi kết luận mất app."""
+        for index in range(max(1, checks)):
+            if self.is_tiktok_in_foreground(device_id):
+                return True
+            if index + 1 < max(1, checks):
+                time.sleep(delay)
+        return False
+
+    def ensure_tiktok_foreground_ready(
+        self, device_id, attempts=3, status_callback=None
+    ):
+        """Ổn định TikTok sau khi chuyển app và xác minh Home trước thao tác."""
+        for attempt in range(max(1, attempts)):
+            self.lock_portrait(device_id, retries=3)
+            if not self.wait_for_tiktok_foreground(device_id):
+                if status_callback:
+                    status_callback(
+                        device_id,
+                        f"[TikTok] Đang ổn định ứng dụng sau chuyển cảnh "
+                        f"({attempt + 1}/{max(1, attempts)})...",
+                    )
+                self.launch_tiktok(device_id)
+                self.lock_portrait(device_id, retries=3)
+                time.sleep(1.0)
+            if not self.wait_for_tiktok_foreground(device_id):
+                continue
+            if not self.ensure_tiktok_home_feed(device_id):
+                continue
+            self.lock_portrait(device_id, retries=3)
+            if self.wait_for_tiktok_foreground(device_id):
                 return True
         return False
 
@@ -3404,7 +3454,7 @@ class ADBController:
         Bài ảnh/carousel có thể giữ cú vuốt chậm đầu tiên, vì vậy thử lại bằng
         cú fling nhanh và dài hơn ở vị trí ngang khác.
         """
-        if not self.is_tiktok_in_foreground(device_id):
+        if not self.wait_for_tiktok_foreground(device_id):
             return False
 
         width, height = self.get_effective_screen_size(device_id)
@@ -3417,7 +3467,7 @@ class ADBController:
 
         for x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration in gestures:
             self.lock_portrait(device_id, retries=3)
-            if not self.is_tiktok_in_foreground(device_id):
+            if not self.wait_for_tiktok_foreground(device_id):
                 return False
             swipe_result = self.swipe(
                 device_id,
@@ -3721,13 +3771,11 @@ class ADBController:
             update_status("[TikTok B1] Mở ứng dụng TikTok...")
             self.launch_tiktok(device_id)
             check_cancelled()
-            if not self.is_tiktok_in_foreground(device_id):
+            if not self.ensure_tiktok_foreground_ready(
+                device_id, status_callback=status_callback
+            ):
                 raise RuntimeError(
                     "Không mở được TikTok; đã dừng để tránh thao tác trên ứng dụng khác"
-                )
-            if not self.ensure_tiktok_home_feed(device_id):
-                raise RuntimeError(
-                    "Không đưa được TikTok về Home/For You trước khi bắt đầu"
                 )
 
             step1_total = random.randint(
@@ -3755,9 +3803,11 @@ class ADBController:
                     check_cancelled()
                 step1_elapsed += dwell
                 if step1_elapsed < step1_total:
-                    if not self.is_tiktok_in_foreground(device_id):
+                    if not self.ensure_tiktok_foreground_ready(
+                        device_id, status_callback=status_callback
+                    ):
                         raise RuntimeError(
-                            "TikTok B1 mất foreground; đã dừng trước khi swipe"
+                            "TikTok B1 không thể phục hồi foreground; đã dừng trước khi swipe"
                         )
                     if not self.advance_tiktok_feed(device_id):
                         update_status(
@@ -3770,7 +3820,9 @@ class ADBController:
             check_cancelled()
             seed_kw = random.choice(seed_keywords)
             update_status(f"[TikTok B2] Mở Kính lúp & Tìm từ khóa mồi '{seed_kw}'...")
-            if not self.is_tiktok_in_foreground(device_id):
+            if not self.ensure_tiktok_foreground_ready(
+                device_id, status_callback=status_callback
+            ):
                 raise RuntimeError(
                     "TikTok B2 không ở foreground; không mở ô tìm kiếm"
                 )
@@ -3811,7 +3863,7 @@ class ADBController:
                     check_cancelled()
                 step2_elapsed += dwell
                 if step2_elapsed < step2_total:
-                    if not self.is_tiktok_in_foreground(device_id):
+                    if not self.wait_for_tiktok_foreground(device_id):
                         raise RuntimeError(
                             "TikTok B2 mất foreground; đã dừng trước khi swipe"
                         )
@@ -3828,7 +3880,9 @@ class ADBController:
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
             update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
-            if not self.is_tiktok_in_foreground(device_id):
+            if not self.ensure_tiktok_foreground_ready(
+                device_id, status_callback=status_callback
+            ):
                 raise RuntimeError(
                     "TikTok B3 không ở foreground; không thao tác tìm kiếm"
                 )
@@ -3894,7 +3948,7 @@ class ADBController:
                         f"[TikTok B3] Vuốt sang clip ngẫu nhiên tiếp theo "
                         f"(còn {step3_total - step3_elapsed}s)..."
                     )
-                    if not self.is_tiktok_in_foreground(device_id):
+                    if not self.wait_for_tiktok_foreground(device_id):
                         raise RuntimeError(
                             "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
                         )

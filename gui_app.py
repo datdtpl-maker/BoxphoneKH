@@ -16,7 +16,10 @@ import main
 from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
 from notion_keyword_sync import (
     NotionSyncError,
+    PUMP_STATUS_PROCESSING,
     fetch_enabled_keyword_schedules,
+    mark_schedule_completed,
+    mark_schedule_processing,
     mark_schedule_scanned,
 )
 
@@ -73,6 +76,8 @@ class GUIApp(ctk.CTk):
         
         # Lưu trữ các biến Checkbox điều khiển hàng loạt
         self.device_checkboxes = {}
+        self._active_notion_schedule = None
+        self._active_notion_token = ""
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -178,6 +183,22 @@ class GUIApp(ctk.CTk):
             command=self.scan_notion_keywords_action,
         )
         self.btn_scan_notion.pack(side="right", padx=(10, 0), pady=2)
+
+        self.btn_complete_notion = ctk.CTkButton(
+            self.brand_badge,
+            text="Hoàn thành tuần",
+            font=button_font,
+            width=150,
+            height=44,
+            fg_color="#64748b",
+            hover_color="#475569",
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            state="disabled",
+            command=self.complete_notion_schedule_action,
+        )
+        self.btn_complete_notion.pack(side="right", padx=(10, 0), pady=2)
 
         self.btn_mute_all = ctk.CTkButton(
             self.brand_badge,
@@ -1436,6 +1457,14 @@ class GUIApp(ctk.CTk):
 
     def _load_notion_schedule(self, schedule, token):
         self._apply_notion_schedule(schedule)
+        self._active_notion_schedule = schedule
+        self._active_notion_token = token
+        self.btn_complete_notion.configure(
+            state="normal",
+            text=f"Hoàn thành: {schedule.title[:18]}",
+            fg_color="#047857",
+            hover_color="#065f46",
+        )
         period = (
             f"{schedule.start_date:%d/%m/%Y} - "
             f"{schedule.end_date:%d/%m/%Y}"
@@ -1458,6 +1487,65 @@ class GUIApp(ctk.CTk):
                 )
 
         self.run_in_thread(update_scan_time)
+
+    def complete_notion_schedule_action(self):
+        schedule = self._active_notion_schedule
+        token = self._active_notion_token
+        if schedule is None:
+            messagebox.showwarning(
+                "Chưa chọn lịch",
+                "Hãy quét Notion và chọn một lịch trước khi hoàn thành.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Xác nhận hoàn thành tuần",
+            f"Đánh dấu lịch '{schedule.title}' là Hoàn thành?\n\n"
+            "Lịch này sẽ không xuất hiện trong các lần quét tiếp theo.",
+        ):
+            return
+
+        self.btn_complete_notion.configure(
+            state="disabled", text="Đang đồng bộ...", fg_color="#64748b"
+        )
+
+        def action():
+            try:
+                mark_schedule_completed(token, schedule.page_id)
+
+                def finish_success():
+                    self._active_notion_schedule = None
+                    self._active_notion_token = ""
+                    self.btn_complete_notion.configure(
+                        state="disabled",
+                        text="Hoàn thành tuần",
+                        fg_color="#64748b",
+                        hover_color="#475569",
+                    )
+                    self.log_message(
+                        f"[Notion] Đã hoàn thành lịch '{schedule.title}'. "
+                        "Lịch sẽ được loại khỏi lần quét sau."
+                    )
+                    messagebox.showinfo(
+                        "Đồng bộ hoàn tất",
+                        f"Đã chuyển '{schedule.title}' sang Hoàn thành trên Notion.",
+                    )
+
+                self.after(0, finish_success)
+            except NotionSyncError as exc:
+                self.log_message(f"[Notion] Không thể hoàn thành lịch: {exc}")
+
+                def finish_error():
+                    self.btn_complete_notion.configure(
+                        state="normal",
+                        text=f"Hoàn thành: {schedule.title[:18]}",
+                        fg_color="#047857",
+                        hover_color="#065f46",
+                    )
+                    messagebox.showwarning("Đồng bộ Notion thất bại", str(exc))
+
+                self.after(0, finish_error)
+
+        self.run_in_thread(action)
 
     def _show_notion_schedule_picker(self, schedules, token):
         picker = ctk.CTkToplevel(self)
@@ -1530,6 +1618,9 @@ class GUIApp(ctk.CTk):
         def action():
             try:
                 schedules = fetch_enabled_keyword_schedules(token, source_id)
+                for schedule in schedules:
+                    if schedule.pump_status != PUMP_STATUS_PROCESSING:
+                        mark_schedule_processing(token, schedule.page_id)
                 self.after(
                     0,
                     lambda: self._show_notion_schedule_picker(
