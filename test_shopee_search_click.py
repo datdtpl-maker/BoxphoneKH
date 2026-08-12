@@ -567,9 +567,8 @@ class ShopeeSearchClickTests(unittest.TestCase):
         controller.tap = (
             lambda _device_id, x, y: taps.append((x, y))
         )
-        controller.clear_input_field = lambda _device_id: None
-        controller.input_text = (
-            lambda _device_id, text: entered_texts.append(text)
+        controller.replace_shopee_search_text = (
+            lambda _device_id, text: entered_texts.append(text) or True
         )
         controller.submit_shopee_search = (
             lambda _device_id: enter_events.append(True)
@@ -588,9 +587,6 @@ class ShopeeSearchClickTests(unittest.TestCase):
         controller.swipe_curved = lambda *_args, **_kwargs: None
         controller.find_shop_search_box = lambda *_args: self.fail(
             "Không được bấm ô tìm kiếm sau khi đã vào shop dự phòng"
-        )
-        controller.replace_shopee_search_text = lambda *_args: self.fail(
-            "Không được nhập keyword sản phẩm trong shop dự phòng"
         )
         controller.find_first_product_in_shop = lambda *_args: self.fail(
             "Không được tìm sản phẩm theo keyword trong shop dự phòng"

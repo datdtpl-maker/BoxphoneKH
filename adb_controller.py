@@ -3017,12 +3017,11 @@ class ADBController:
             time.sleep(1.0)
             check_cancelled()
             
-            # Xóa sạch chữ cũ
-            self.clear_input_field(device_id)
-            time.sleep(0.5)
-            
             update_status(f"[Dự phòng] Nhập tên shop '{shop_name}'...")
-            self.input_text(device_id, shop_name)
+            if not self.replace_shopee_search_text(device_id, shop_name):
+                raise RuntimeError(
+                    "Không thể xóa và nhập chính xác tên shop dự phòng"
+                )
             time.sleep(1.5)
             check_cancelled()
             
@@ -3242,8 +3241,13 @@ class ADBController:
         """Tìm và bấm vào biểu tượng Kính Lúp (Search Icon) trên TikTok"""
         # Kiểm tra xử lý popup vị trí trước khi click search
         self.dismiss_tiktok_location_popup(device_id)
-        
-        width, height = self.get_effective_screen_size(device_id)
+
+        # Trên trang kết quả, ô Search đã tồn tại. Focus trực tiếp vào node đã
+        # xác minh để không chạm nhầm nút ba chấm/Filters bên phải.
+        existing_input = self.get_tiktok_search_input_state(device_id)
+        if existing_input is not None:
+            return self.focus_tiktok_search_input(device_id)
+
         xml_file = f"/sdcard/dump_tiktok_search_{device_id}.xml"
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         self.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
@@ -3276,8 +3280,9 @@ class ADBController:
                 except Exception:
                     pass
         if not coords:
-            # Tọa độ dự phòng góc Kính Lúp TikTok (x=90% width, y=5.5% height)
-            coords = (int(width * 0.90), int(height * 0.055))
+            # Fail-safe: góc phải trên một số bản TikTok là nút ba chấm.
+            # Không được tap tọa độ mù khi XML không xác minh được Search.
+            return False
             
         self.tap(device_id, coords[0], coords[1])
         time.sleep(2.0)
@@ -3464,6 +3469,51 @@ class ADBController:
         value = unicodedata.normalize("NFKC", value or "")
         value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
         return re.sub(r"\s+", " ", value).strip().casefold()
+
+    def is_tiktok_search_results_for(self, device_id, keyword):
+        """Xác minh TikTok đã mở kết quả đúng từ khóa trước khi sang B3."""
+        if not self.is_tiktok_in_foreground(device_id):
+            return False
+        root = self._get_tiktok_ui_root(device_id, "tt_search_results")
+        if root is None:
+            return False
+
+        expected = self._normalize_tiktok_text(keyword)
+        query_matches = False
+        marker_hits = set()
+        result_markers = {
+            "top", "người dùng", "users", "people", "video", "videos",
+            "ảnh", "photos", "cửa hàng", "shop", "shops",
+        }
+        for elem in root.iter():
+            class_name = elem.get("class", "").casefold()
+            resource_id = elem.get("resource-id", "").casefold()
+            text = self._normalize_tiktok_text(
+                f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            )
+            if (
+                expected
+                and expected in text
+                and (
+                    "edittext" in class_name
+                    or "search" in resource_id
+                )
+            ):
+                query_matches = True
+            for marker in result_markers:
+                if text == marker:
+                    marker_hits.add(marker)
+
+        return query_matches and len(marker_hits) >= 2
+
+    def wait_for_tiktok_search_results(self, device_id, keyword, checks=4):
+        """Chờ UI kết quả đúng từ khóa; không coi keyevent thành công là đủ."""
+        for attempt in range(max(1, checks)):
+            if self.is_tiktok_search_results_for(device_id, keyword):
+                return True
+            if attempt < checks - 1:
+                time.sleep(1.0)
+        return False
 
     def _get_tiktok_ui_root(self, device_id, prefix="state"):
         """Dump UI TikTok và trả về XML root đã parse."""
@@ -3922,9 +3972,9 @@ class ADBController:
                 )
             time.sleep(3.5)
             check_cancelled()
-            if not self.wait_for_tiktok_foreground(device_id):
+            if not self.wait_for_tiktok_search_results(device_id, seed_kw):
                 raise RuntimeError(
-                    "TikTok B2 chưa tải được kết quả từ khóa mồi"
+                    "TikTok B2 chưa hiển thị đúng kết quả từ khóa mồi"
                 )
             seed_search_completed = True
 

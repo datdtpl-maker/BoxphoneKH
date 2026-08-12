@@ -6,6 +6,55 @@ from adb_controller import ADBController
 
 
 class TikTokSearchInputTests(unittest.TestCase):
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    @patch("adb_controller.ET.parse")
+    def test_search_never_uses_blind_top_right_fallback(
+        self, parse, _exists, _remove
+    ):
+        parse.return_value.getroot.return_value = ET.fromstring(
+            '<hierarchy><node content-desc="More options" '
+            'bounds="[900,20][1060,160]" /></hierarchy>'
+        )
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        taps = []
+        self.controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+
+        self.assertFalse(
+            self.controller.find_and_click_tiktok_search("device-1")
+        )
+        self.assertEqual([], taps)
+
+    def test_seed_results_require_keyword_and_results_tabs(self):
+        good_root = ET.fromstring(
+            '<hierarchy>'
+            '<node class="android.widget.EditText" text="nặn mụn" />'
+            '<node text="Top" /><node text="Người dùng" />'
+            '<node text="Video" />'
+            '</hierarchy>'
+        )
+        stale_root = ET.fromstring(
+            '<hierarchy><node text="Dành cho bạn" /></hierarchy>'
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: good_root
+        )
+        self.assertTrue(
+            self.controller.is_tiktok_search_results_for(
+                "device-1", "nặn mụn"
+            )
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: stale_root
+        )
+        self.assertFalse(
+            self.controller.is_tiktok_search_results_for(
+                "device-1", "nặn mụn"
+            )
+        )
+
     def test_tiktok_keyword_is_never_sent_while_facebook_is_foreground(self):
         self.controller.is_tiktok_in_foreground = lambda _device_id: False
         broadcasts = []
@@ -496,6 +545,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, text: entered_keywords.append(text) or True
         )
         self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.tap = lambda _device_id, x, y: taps_after_search.append((x, y))
         self.controller.find_and_click_tiktok_channel = lambda *_args: True
         self.controller.click_random_tiktok_profile_video = lambda *_args: True
@@ -556,6 +606,7 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.submit_tiktok_search = (
             lambda _device_id: events.append("submit") or True
         )
+        self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.find_and_click_tiktok_channel = lambda *_args: True
         self.controller.click_random_tiktok_profile_video = lambda *_args: True
 
@@ -604,6 +655,35 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertEqual(["từ khóa mồi"], entered)
         self.assertIn("B2", message)
 
+    @patch("builtins.print")
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_workflow_never_enters_target_when_seed_results_are_not_verified(
+        self, _sleep, _randint, _print
+    ):
+        entered = []
+        self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
+        self.controller.advance_tiktok_feed = lambda _device_id: True
+        self.controller.find_and_click_tiktok_search = lambda _device_id: True
+        self.controller.replace_tiktok_search_text = (
+            lambda _device_id, text: entered.append(text) or True
+        )
+        self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = lambda *_args: False
+
+        success, message = self.controller.tiktok_automation_workflow(
+            "device-1",
+            seed_keywords=["từ khóa mồi"],
+            target_channel="Kênh mục tiêu",
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(["từ khóa mồi"], entered)
+        self.assertIn("đúng kết quả", message)
+
     @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
     @patch("adb_controller.random.uniform", return_value=1.0)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
@@ -627,6 +707,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, text: entered_keywords.append(text) or True
         )
         self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.find_and_click_tiktok_channel = (
             lambda _device_id, channel:
             opened_channels.append(channel) or True
@@ -664,6 +745,7 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.find_and_click_tiktok_search = lambda _device_id: True
         self.controller.replace_tiktok_search_text = lambda *_args: True
         self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.tap = lambda *_args: None
         self.controller.find_and_click_tiktok_channel = lambda *_args: False
 

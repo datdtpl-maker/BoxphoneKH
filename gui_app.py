@@ -1868,7 +1868,12 @@ class GUIApp(ctk.CTk):
                             f"Nền tảng mở đầu không hợp lệ: {opening_platform}"
                         )
                     return device_id, bool(ready)
-            except Exception:
+            except Exception as exc:
+                print(
+                    f"[GUI] Không chuẩn bị được máy "
+                    f"{main.get_device_name(device_id)} cho {opening_platform}: "
+                    f"{exc}"
+                )
                 return device_id, False
 
         from concurrent.futures import ThreadPoolExecutor
