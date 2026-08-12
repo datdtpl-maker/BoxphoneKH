@@ -1,12 +1,20 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Tải cấu hình từ file .env
-load_dotenv()
+def resolve_runtime_base_dir(module_file=None):
+    """Trả về thư mục cấu hình bền vững cho source và PyInstaller onefile."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(module_file or __file__).resolve().parent
 
-# Đường dẫn tới thư mục gốc của project
-BASE_DIR = Path(__file__).resolve().parent
+
+# Trong bản onefile, __file__ nằm ở thư mục _MEI tạm và bị xóa khi đóng app.
+# Luôn đọc/ghi .env cạnh EXE để cấu hình được giữ lại giữa các lần mở.
+BASE_DIR = resolve_runtime_base_dir()
+ENV_PATH = BASE_DIR / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 # Token Bot Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

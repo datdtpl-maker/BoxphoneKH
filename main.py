@@ -713,10 +713,10 @@ def run_sequential_shopee_search(
 
 # Hàm cập nhật ALLOWED_USER_IDS vào file .env để lưu cấu hình bảo mật lâu dài
 def save_admin_to_env(user_id):
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    env_path = config.ENV_PATH
     lines = []
-    if os.path.exists(env_path):
-        with open(env_path, 'r', encoding='utf-8') as f:
+    if env_path.exists():
+        with env_path.open('r', encoding='utf-8') as f:
             lines = f.readlines()
             
     updated = False
@@ -731,7 +731,7 @@ def save_admin_to_env(user_id):
     if not updated:
         new_lines.append(f"ALLOWED_USER_IDS={user_id}\n")
         
-    with open(env_path, 'w', encoding='utf-8') as f:
+    with env_path.open('w', encoding='utf-8') as f:
         f.writelines(new_lines)
     
     # Cập nhật trực tiếp vào cấu hình đang chạy
@@ -767,7 +767,7 @@ def save_env_shop_names(shop_names_list):
     config.SHOPEE_SHOP_NAMES = shop_names_list
     config.SHOPEE_SHOP_NAMES_RAW = shop_str
     
-    env_path = config.BASE_DIR / ".env"
+    env_path = config.ENV_PATH
     if env_path.exists():
         try:
             lines = env_path.read_text(encoding="utf-8").splitlines()

@@ -1563,10 +1563,10 @@ class GUIApp(ctk.CTk):
         notion_token = self.ent_notion_token.get().strip()
         notion_source_id = self.ent_notion_source_id.get().strip()
         
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        env_path = config.ENV_PATH
         lines = []
-        if os.path.exists(env_path):
-            with open(env_path, 'r', encoding='utf-8') as f:
+        if env_path.exists():
+            with env_path.open('r', encoding='utf-8') as f:
                 lines = f.readlines()
                 
         keys = {
@@ -1599,7 +1599,7 @@ class GUIApp(ctk.CTk):
             if k not in updated_keys:
                 new_lines.append(f"{k}={keys[k]}\n")
                 
-        with open(env_path, 'w', encoding='utf-8') as f:
+        with env_path.open('w', encoding='utf-8') as f:
             f.writelines(new_lines)
             
         # Reload config
@@ -1621,10 +1621,10 @@ class GUIApp(ctk.CTk):
 
     def _persist_env_setting(self, key, value):
         """Cap nhat mot khoa .env ma khong ghi de cac cau hinh khac."""
-        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        env_path = config.ENV_PATH
         lines = []
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as env_file:
+        if env_path.exists():
+            with env_path.open("r", encoding="utf-8") as env_file:
                 lines = env_file.readlines()
 
         prefix = f"{key}="
@@ -1641,7 +1641,7 @@ class GUIApp(ctk.CTk):
         if not updated:
             new_lines.append(new_line)
 
-        with open(env_path, "w", encoding="utf-8") as env_file:
+        with env_path.open("w", encoding="utf-8") as env_file:
             env_file.writelines(new_lines)
 
     def _refresh_telegram_notifications_button(self):
