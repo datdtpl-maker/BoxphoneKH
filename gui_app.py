@@ -14,6 +14,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import main
 from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
+from notion_keyword_sync import (
+    NotionSyncError,
+    fetch_enabled_keyword_schedules,
+    mark_schedule_scanned,
+)
 
 # Bright operations dashboard with a lightweight iOS-inspired glass treatment.
 ctk.set_appearance_mode("light")
@@ -158,6 +163,21 @@ class GUIApp(ctk.CTk):
             command=self.refresh_devices_action,
         )
         self.btn_refresh.pack(side="right", padx=(14, 0), pady=2)
+
+        self.btn_scan_notion = ctk.CTkButton(
+            self.brand_badge,
+            text="Quét từ khóa Notion",
+            font=button_font,
+            width=168,
+            height=44,
+            fg_color="#0f766e",
+            hover_color="#115e59",
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            command=self.scan_notion_keywords_action,
+        )
+        self.btn_scan_notion.pack(side="right", padx=(10, 0), pady=2)
 
         self.btn_mute_all = ctk.CTkButton(
             self.brand_badge,
@@ -1057,9 +1077,18 @@ class GUIApp(ctk.CTk):
         for column, weight in enumerate((2, 1, 2, 2, 2, 0, 0)):
             self.settings_card.columnconfigure(column, weight=weight)
 
-        def make_setting_field(column, label, placeholder, show=None):
+        def make_setting_field(
+            column, label, placeholder, show=None, row=0, columnspan=1
+        ):
             wrapper = ctk.CTkFrame(self.settings_card, fg_color="transparent")
-            wrapper.grid(row=0, column=column, sticky="ew", padx=4)
+            wrapper.grid(
+                row=row,
+                column=column,
+                columnspan=columnspan,
+                sticky="ew",
+                padx=4,
+                pady=(0, 7) if row == 0 else (5, 0),
+            )
             ctk.CTkLabel(
                 wrapper,
                 text=label,
@@ -1135,6 +1164,36 @@ class GUIApp(ctk.CTk):
             command=self.save_settings,
         )
         self.btn_save.grid(row=0, column=6, padx=(4, 4), pady=(19, 0))
+
+        self.ent_notion_token = make_setting_field(
+            0,
+            "NOTION API TOKEN",
+            "Dán token integration Notion",
+            show="*",
+            row=1,
+            columnspan=2,
+        )
+        self.ent_notion_token.insert(0, config.NOTION_API_TOKEN or "")
+
+        self.ent_notion_source_id = make_setting_field(
+            2,
+            "NOTION DATABASE URL / DATA SOURCE ID",
+            "Dán link bảng Notion hoặc Data Source ID",
+            row=1,
+            columnspan=3,
+        )
+        self.ent_notion_source_id.insert(0, config.NOTION_DATA_SOURCE_ID or "")
+
+        self.lbl_notion_hint = ctk.CTkLabel(
+            self.settings_card,
+            text="Bật lịch tuần trong Notion rồi bấm nút quét trên thanh công cụ",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=muted,
+            anchor="w",
+        )
+        self.lbl_notion_hint.grid(
+            row=1, column=5, columnspan=2, sticky="ew", padx=8, pady=(23, 0)
+        )
 
         # Subtle glass border response and a short window fade-in. These are
         # presentation-only effects and do not touch automation state.
@@ -1344,12 +1403,165 @@ class GUIApp(ctk.CTk):
 
         self.run_in_thread(action)
 
+    @staticmethod
+    def _replace_entry_value(widget, value):
+        widget.delete(0, "end")
+        widget.insert(0, value)
+
+    @staticmethod
+    def _normalize_shopee_keywords(value):
+        return "\n".join(
+            item.strip()
+            for item in re.split(r"[,\n]+", value or "")
+            if item.strip()
+        )
+
+    def _apply_notion_schedule(self, schedule):
+        self.txt_main_keywords.delete("1.0", "end")
+        self.txt_main_keywords.insert(
+            "1.0", self._normalize_shopee_keywords(schedule.shopee_keywords)
+        )
+        self._replace_entry_value(
+            self.ent_tt_seed, schedule.tiktok_seed_keywords
+        )
+        self._replace_entry_value(
+            self.ent_tt_channel, schedule.tiktok_target_channels
+        )
+        self._replace_entry_value(
+            self.ent_fb_seed, schedule.facebook_seed_keywords
+        )
+        self._replace_entry_value(
+            self.ent_fb_target, schedule.facebook_target_pages
+        )
+
+    def _load_notion_schedule(self, schedule, token):
+        self._apply_notion_schedule(schedule)
+        period = (
+            f"{schedule.start_date:%d/%m/%Y} - "
+            f"{schedule.end_date:%d/%m/%Y}"
+        )
+        self.log_message(
+            f"[Notion] Đã nạp lịch '{schedule.title}' ({period}) "
+            "vào Shopee, TikTok và Facebook."
+        )
+        messagebox.showinfo(
+            "Đã chọn lịch Notion",
+            f"Đã nạp lịch: {schedule.title}\nThời gian: {period}",
+        )
+
+        def update_scan_time():
+            try:
+                mark_schedule_scanned(token, schedule.page_id)
+            except NotionSyncError as exc:
+                self.log_message(
+                    f"[Notion] Đã nạp dữ liệu nhưng chưa ghi được lần quét: {exc}"
+                )
+
+        self.run_in_thread(update_scan_time)
+
+    def _show_notion_schedule_picker(self, schedules, token):
+        picker = ctk.CTkToplevel(self)
+        picker.title("Chọn lịch từ khóa Notion")
+        picker.geometry("620x520")
+        picker.minsize(520, 380)
+        picker.configure(fg_color="#f3f6fb")
+        picker.transient(self)
+        picker.grab_set()
+
+        ctk.CTkLabel(
+            picker,
+            text="Chọn lịch từ khóa để nạp",
+            font=ctk.CTkFont(family="Segoe UI", size=21, weight="bold"),
+            text_color="#0f172a",
+        ).pack(anchor="w", padx=22, pady=(20, 3))
+        ctk.CTkLabel(
+            picker,
+            text=(
+                f"Đã tìm thấy {len(schedules)} lịch đang áp dụng. "
+                "Bấm đúng tên lịch cần chạy."
+            ),
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color="#64748b",
+        ).pack(anchor="w", padx=22, pady=(0, 12))
+
+        schedule_list = ctk.CTkScrollableFrame(
+            picker,
+            fg_color="#ffffff",
+            border_width=1,
+            border_color="#e2e8f0",
+            corner_radius=14,
+        )
+        schedule_list.pack(fill="both", expand=True, padx=22, pady=(0, 20))
+
+        def choose(schedule):
+            picker.grab_release()
+            picker.destroy()
+            self._load_notion_schedule(schedule, token)
+
+        for schedule in schedules:
+            period = (
+                f"{schedule.start_date:%d/%m/%Y} - "
+                f"{schedule.end_date:%d/%m/%Y}"
+            )
+            ctk.CTkButton(
+                schedule_list,
+                text=f"{schedule.title}\n{period}",
+                anchor="w",
+                height=62,
+                font=ctk.CTkFont(
+                    family="Segoe UI", size=13, weight="bold"
+                ),
+                fg_color="#eff6ff",
+                hover_color="#dbeafe",
+                text_color="#1e3a8a",
+                border_width=1,
+                border_color="#bfdbfe",
+                corner_radius=11,
+                command=lambda item=schedule: choose(item),
+            ).pack(fill="x", padx=8, pady=6)
+
+    def scan_notion_keywords_action(self):
+        token = self.ent_notion_token.get().strip()
+        source_id = self.ent_notion_source_id.get().strip()
+        self.btn_scan_notion.configure(
+            state="disabled", text="Đang quét Notion..."
+        )
+
+        def action():
+            try:
+                schedules = fetch_enabled_keyword_schedules(token, source_id)
+                self.after(
+                    0,
+                    lambda: self._show_notion_schedule_picker(
+                        schedules, token
+                    ),
+                )
+            except NotionSyncError as exc:
+                self.log_message(f"[Notion] Quét thất bại: {exc}")
+                self.after(
+                    0,
+                    lambda message=str(exc): messagebox.showwarning(
+                        "Không quét được Notion", message
+                    ),
+                )
+            finally:
+                self.after(
+                    0,
+                    lambda: self.btn_scan_notion.configure(
+                        state="normal", text="Quét từ khóa Notion"
+                    ),
+                )
+
+        self.run_in_thread(action)
+
     def save_settings(self):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
         adb_path = self.ent_adb.get().strip()
         shops = self.ent_shops.get().strip()
         gemini_key = self.ent_gemini_key.get().strip()
+        notion_token = self.ent_notion_token.get().strip()
+        notion_source_id = self.ent_notion_source_id.get().strip()
         
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         lines = []
@@ -1365,7 +1577,9 @@ class GUIApp(ctk.CTk):
             'ALLOWED_USER_IDS': admin_ids,
             'ADB_PATH': adb_path,
             'SHOPEE_SHOP_NAMES': shops,
-            'GEMINI_API_KEY': gemini_key
+            'GEMINI_API_KEY': gemini_key,
+            'NOTION_API_TOKEN': notion_token,
+            'NOTION_DATA_SOURCE_ID': notion_source_id,
         }
         
         new_lines = []
@@ -1395,6 +1609,8 @@ class GUIApp(ctk.CTk):
         main.adb.adb_path = adb_path
         config.SHOPEE_SHOP_NAMES = [s.strip() for s in shops.split(',') if s.strip()]
         config.GEMINI_API_KEY = gemini_key
+        config.NOTION_API_TOKEN = notion_token
+        config.NOTION_DATA_SOURCE_ID = notion_source_id
         
         # Re-initialize bot object
         import telebot

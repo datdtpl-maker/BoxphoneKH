@@ -80,6 +80,10 @@ FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = os.getenv(
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
+# Notion chỉ cung cấp dữ liệu đầu vào; token luôn được lưu cục bộ trong .env.
+NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN", "")
+NOTION_DATA_SOURCE_ID = os.getenv("NOTION_DATA_SOURCE_ID", "")
+
 import urllib.error
 import urllib.request
 import json
