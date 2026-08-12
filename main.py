@@ -18,7 +18,41 @@ if sys.platform.startswith('win'):
 
 
 # Khởi tạo Bot Telegram và ADB Controller
-bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
+TELEGRAM_DISABLED_BOT_TOKEN = "0:disabled"
+
+
+def is_valid_telegram_token(token):
+    """Validate a token before startup/polling so the GUI cannot crash."""
+    clean_token = (token or "").strip()
+    if not re.fullmatch(r"\d+:[^\s:]+", clean_token):
+        return False
+    try:
+        telebot.util.validate_token(clean_token)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def create_telegram_bot(token):
+    """Create an offline-safe bot when Telegram has not been configured."""
+    clean_token = (token or "").strip()
+    effective_token = (
+        clean_token
+        if is_valid_telegram_token(clean_token)
+        else TELEGRAM_DISABLED_BOT_TOKEN
+    )
+    return telebot.TeleBot(effective_token)
+
+
+def configure_telegram_bot_token(token):
+    """Update the existing bot so its registered handlers are preserved."""
+    clean_token = (token or "").strip()
+    valid = is_valid_telegram_token(clean_token)
+    bot.token = clean_token if valid else TELEGRAM_DISABLED_BOT_TOKEN
+    return valid
+
+
+bot = create_telegram_bot(config.TELEGRAM_BOT_TOKEN)
 adb = ADBController()
 
 # Các biến toàn cục điều khiển chạy tuần tự và hủy bỏ tác vụ
@@ -76,7 +110,10 @@ class _TelegramNotificationsDisabled:
 
 
 def telegram_notifications_enabled():
-    return bool(getattr(config, "TELEGRAM_NOTIFICATIONS_ENABLED", True))
+    return bool(
+        getattr(config, "TELEGRAM_NOTIFICATIONS_ENABLED", True)
+        and is_valid_telegram_token(getattr(config, "TELEGRAM_BOT_TOKEN", ""))
+    )
 
 def safe_send_message(chat_id, text, parse_mode=None, reply_markup=None, reply_to_message_id=None):
     if not telegram_notifications_enabled():

@@ -35,7 +35,7 @@ class TelegramTaskRoutingTests(unittest.TestCase):
             raise KeyboardInterrupt
 
         with (
-            patch.object(gui_app.config, "TELEGRAM_BOT_TOKEN", "token"),
+            patch.object(gui_app.config, "TELEGRAM_BOT_TOKEN", "123:token"),
             patch.object(gui_app.time, "sleep", return_value=None),
             patch.object(
                 gui_app.main.bot,

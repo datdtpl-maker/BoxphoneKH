@@ -8,6 +8,20 @@ import main
 
 
 class ShopeeSearchClickTests(unittest.TestCase):
+    def test_shopee_keyword_is_never_sent_while_facebook_is_foreground(self):
+        controller = ADBController(adb_path="adb")
+        controller.is_shopee_in_foreground = lambda _device_id: False
+        broadcasts = []
+        controller.execute_adb = (
+            lambda _device_id, args, timeout=15:
+            broadcasts.append(args) or (0, "", "")
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Shopee.*foreground"):
+            controller.replace_shopee_search_text("device-facebook", "deriva")
+
+        self.assertEqual([], broadcasts)
+
     @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
     def test_lamdong_search_randomizes_across_up_to_ten_visible_products(
         self,
@@ -175,7 +189,9 @@ class ShopeeSearchClickTests(unittest.TestCase):
         controller.replace_shopee_search_text = (
             lambda *_args, **_kwargs: True
         )
-        controller.press_enter = lambda _device_id: events.append("enter")
+        controller.submit_shopee_search = (
+            lambda _device_id: events.append("enter") or True
+        )
 
         success, _message = controller.shopee_search_sequence(
             "device-1",
@@ -455,6 +471,7 @@ class ShopeeSearchClickTests(unittest.TestCase):
     def test_replace_shopee_keyword_clears_then_inputs_only_once(self, _sleep):
         controller = ADBController(adb_path="adb")
         commands = []
+        controller.is_shopee_in_foreground = lambda _device_id: True
         controller.execute_adb = (
             lambda _device_id, args, timeout=15:
             (commands.append(args) or (0, "", ""))
@@ -554,7 +571,7 @@ class ShopeeSearchClickTests(unittest.TestCase):
         controller.input_text = (
             lambda _device_id, text: entered_texts.append(text)
         )
-        controller.press_enter = (
+        controller.submit_shopee_search = (
             lambda _device_id: enter_events.append(True)
         )
         controller.find_and_click_view_shop = lambda *_args, **_kwargs: (500, 500)

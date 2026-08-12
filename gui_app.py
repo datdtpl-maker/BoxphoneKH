@@ -1653,6 +1653,9 @@ class GUIApp(ctk.CTk):
         gemini_key = self.ent_gemini_key.get().strip()
         notion_token = self.ent_notion_token.get().strip()
         notion_source_id = self.ent_notion_source_id.get().strip()
+        telegram_token_valid = main.is_valid_telegram_token(token)
+        if not telegram_token_valid:
+            config.TELEGRAM_NOTIFICATIONS_ENABLED = False
         
         env_path = config.ENV_PATH
         lines = []
@@ -1703,12 +1706,20 @@ class GUIApp(ctk.CTk):
         config.NOTION_API_TOKEN = notion_token
         config.NOTION_DATA_SOURCE_ID = notion_source_id
         
-        # Re-initialize bot object
-        import telebot
-        main.bot = telebot.TeleBot(token)
+        # Keep the existing bot so all message/callback handlers remain registered.
+        main.configure_telegram_bot_token(token)
+        if self.__dict__.get("btn_telegram_notifications") is not None:
+            self._refresh_telegram_notifications_button()
         
         print("[Hệ thống] Lưu cấu hình và tải lại thành công!")
-        messagebox.showinfo("Thành công", "Đã lưu cấu hình và tự động nạp lại!")
+        if telegram_token_valid:
+            messagebox.showinfo("Thành công", "Đã lưu cấu hình và tự động nạp lại!")
+        else:
+            messagebox.showwarning(
+                "Đã lưu cấu hình",
+                "Telegram đang tắt vì token bị trống hoặc không hợp lệ. "
+                "Các cấu hình khác vẫn đã được lưu.",
+            )
 
     def _persist_env_setting(self, key, value):
         """Cap nhat mot khoa .env ma khong ghi de cac cau hinh khac."""
@@ -1745,6 +1756,17 @@ class GUIApp(ctk.CTk):
 
     def toggle_telegram_notifications(self):
         enabled = not bool(config.TELEGRAM_NOTIFICATIONS_ENABLED)
+        if enabled and not main.is_valid_telegram_token(
+            config.TELEGRAM_BOT_TOKEN
+        ):
+            config.TELEGRAM_NOTIFICATIONS_ENABLED = False
+            self._persist_env_setting("TELEGRAM_NOTIFICATIONS_ENABLED", "0")
+            self._refresh_telegram_notifications_button()
+            messagebox.showwarning(
+                "Chưa thể bật Telegram",
+                "Vui lòng nhập token Telegram hợp lệ và bấm Lưu cấu hình.",
+            )
+            return
         config.TELEGRAM_NOTIFICATIONS_ENABLED = enabled
         self._persist_env_setting(
             "TELEGRAM_NOTIFICATIONS_ENABLED", "1" if enabled else "0"
@@ -1828,20 +1850,24 @@ class GUIApp(ctk.CTk):
             if is_cancelled and is_cancelled():
                 return device_id, False
             try:
-                # Máy đang chờ lượt không được giữ Shopee trên foreground.
-                main.adb.stop_app(device_id, config.SHOPEE_PACKAGE)
-                if is_cancelled and is_cancelled():
-                    return device_id, False
-                if opening_platform == "facebook":
-                    ready = main.adb.ensure_facebook_ready(device_id)
-                elif opening_platform == "tiktok":
-                    main.adb.launch_tiktok(device_id)
-                    ready = main.adb.is_tiktok_in_foreground(device_id)
-                else:
-                    raise ValueError(
-                        f"Nền tảng mở đầu không hợp lệ: {opening_platform}"
-                    )
-                return device_id, bool(ready)
+                # Chờ workflow cũ nhả đúng thiết bị rồi mới được đổi ứng dụng.
+                with main.adb.device_workflow_scope(device_id):
+                    if is_cancelled and is_cancelled():
+                        return device_id, False
+                    # Máy đang chờ lượt không được giữ Shopee trên foreground.
+                    main.adb.stop_app(device_id, config.SHOPEE_PACKAGE)
+                    if is_cancelled and is_cancelled():
+                        return device_id, False
+                    if opening_platform == "facebook":
+                        ready = main.adb.ensure_facebook_ready(device_id)
+                    elif opening_platform == "tiktok":
+                        main.adb.launch_tiktok(device_id)
+                        ready = main.adb.is_tiktok_in_foreground(device_id)
+                    else:
+                        raise ValueError(
+                            f"Nền tảng mở đầu không hợp lệ: {opening_platform}"
+                        )
+                    return device_id, bool(ready)
             except Exception:
                 return device_id, False
 
@@ -2801,7 +2827,9 @@ class GUIApp(ctk.CTk):
                 try:
                     if (
                         config.TELEGRAM_NOTIFICATIONS_ENABLED
-                        and config.TELEGRAM_BOT_TOKEN
+                        and main.is_valid_telegram_token(
+                            config.TELEGRAM_BOT_TOKEN
+                        )
                     ):
                         skip_pending = skip_pending_on_start
                         skip_pending_on_start = False

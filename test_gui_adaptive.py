@@ -1,4 +1,5 @@
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app = GUIApp.__new__(GUIApp)
         events = []
         fake_adb = SimpleNamespace(
+            device_workflow_scope=lambda _device: nullcontext(),
             stop_app=lambda device, package: events.append(
                 ("stop", device, package)
             ),

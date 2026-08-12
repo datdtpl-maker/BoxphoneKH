@@ -6,13 +6,39 @@ import xml.etree.ElementTree as ET
 import re
 import random
 import unicodedata
+import threading
+from contextlib import contextmanager
+from functools import wraps
 import config
 from concurrent.futures import ThreadPoolExecutor
 from config import ADB_PATH, SHOPEE_PACKAGE, SHOPEE_SEARCH_BOX_COORDS, SHOPEE_INPUT_BOX_COORDS, SHOPEE_SEARCH_BTN_COORDS
 
+
+def serialized_device_workflow(method):
+    """Prevent two platform workflows from controlling one phone concurrently."""
+    @wraps(method)
+    def wrapper(self, device_id, *args, **kwargs):
+        with self.device_workflow_scope(device_id):
+            return method(self, device_id, *args, **kwargs)
+
+    wrapper._serialized_device_workflow = True
+    return wrapper
+
 class ADBController:
     def __init__(self, adb_path=ADB_PATH):
         self.adb_path = adb_path
+        self._device_workflow_locks = {}
+        self._device_workflow_locks_guard = threading.Lock()
+
+    @contextmanager
+    def device_workflow_scope(self, device_id):
+        """Grant exclusive in-process control of a device to one workflow."""
+        with self._device_workflow_locks_guard:
+            lock = self._device_workflow_locks.setdefault(
+                device_id, threading.RLock()
+            )
+        with lock:
+            yield
 
     def _run_cmd(self, cmd_args, timeout=15):
         """Chạy lệnh hệ thống với ADB"""
@@ -182,13 +208,23 @@ class ADBController:
         return self.execute_adb(device_id, ["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
 
     def is_shopee_in_foreground(self, device_id):
-        """Kiểm tra xem ứng dụng Shopee (com.shopee.vn) có đang chạy ở mảng chính (Foreground) hay không"""
-        code, stdout, _ = self.execute_adb(device_id, ["shell", "dumpsys", "window", "displays"])
-        if "com.shopee.vn" in stdout:
-            return True
-        code2, stdout2, _ = self.execute_adb(device_id, ["shell", "dumpsys", "activity", "recents"])
-        if "com.shopee.vn" in stdout2:
-            return True
+        """Xác định Shopee thật sự đang foreground, không dựa vào recents."""
+        for dumpsys_target in (
+            ["shell", "dumpsys", "window", "windows"],
+            ["shell", "dumpsys", "activity", "activities"],
+        ):
+            code, stdout, _ = self.execute_adb(device_id, dumpsys_target)
+            if code != 0:
+                continue
+            focus_lines = [
+                line.casefold()
+                for line in stdout.splitlines()
+                if "mcurrentfocus" in line.casefold()
+                or "mfocusedapp" in line.casefold()
+                or "mresumedactivity" in line.casefold()
+            ]
+            if any(SHOPEE_PACKAGE.casefold() in line for line in focus_lines):
+                return True
         return False
 
     def is_facebook_in_foreground(self, device_id):
@@ -1231,6 +1267,7 @@ class ADBController:
                 pass
             self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
 
+    @serialized_device_workflow
     def facebook_automation_workflow(
         self,
         device_id,
@@ -1713,7 +1750,14 @@ class ADBController:
 
     def submit_tiktok_search(self, device_id):
         """Gửi đúng một phím Enter cho ô tìm kiếm TikTok."""
-        return self.keyevent(device_id, 66)
+        if not self.is_tiktok_in_foreground(device_id):
+            raise RuntimeError(
+                "TikTok không còn ở foreground; đã chặn gửi tìm kiếm"
+            )
+        result = self.keyevent(device_id, 66)
+        if isinstance(result, tuple):
+            return bool(result) and result[0] == 0
+        return result is not False
 
     def clear_input_field(self, device_id, max_chars=40):
         """Xóa sạch văn bản cũ trong ô tìm kiếm một cách triệt để"""
@@ -1725,6 +1769,10 @@ class ADBController:
 
     def replace_shopee_search_text(self, device_id, text):
         """Xóa sạch ô tìm kiếm Shopee rồi nhập đúng một từ khóa đúng một lần."""
+        if not self.is_shopee_in_foreground(device_id):
+            raise RuntimeError(
+                "Shopee không còn ở foreground; đã chặn nhập từ khóa"
+            )
         clear_code, _, _ = self.execute_adb(
             device_id,
             [
@@ -1736,6 +1784,10 @@ class ADBController:
         if clear_code != 0:
             return False
         time.sleep(0.3)
+        if not self.is_shopee_in_foreground(device_id):
+            raise RuntimeError(
+                "Shopee không còn ở foreground; đã chặn bơm từ khóa"
+            )
 
         b64_text = base64.b64encode(text.encode("utf-8")).decode("ascii")
         input_code, _, _ = self.execute_adb(
@@ -1748,6 +1800,14 @@ class ADBController:
             ],
         )
         return input_code == 0
+
+    def submit_shopee_search(self, device_id):
+        """Chỉ gửi Enter khi Shopee vẫn là ứng dụng foreground."""
+        if not self.is_shopee_in_foreground(device_id):
+            raise RuntimeError(
+                "Shopee không còn ở foreground; đã chặn gửi tìm kiếm"
+            )
+        return self.press_enter(device_id)
 
     def take_screenshot(self, device_id, local_path):
         """Chụp màn hình điện thoại và tải về máy tính"""
@@ -2051,6 +2111,7 @@ class ADBController:
         update_status("Không xác định được ô tìm kiếm Shopee an toàn.")
         return False
 
+    @serialized_device_workflow
     def shopee_search_sequence(self, device_id, keyword, status_callback=None, is_cancelled=None):
         """Quy trình tự động tìm kiếm trên Shopee cho 1 thiết bị"""
         def update_status(msg):
@@ -2115,7 +2176,7 @@ class ADBController:
             check_cancelled()
             
             update_status("Gửi lệnh tìm kiếm...")
-            self.press_enter(device_id)
+            self.submit_shopee_search(device_id)
             self.shopee_loading_delay(
                 device_id,
                 "results",
@@ -2281,6 +2342,7 @@ class ADBController:
         update_status("Không thể mở lại trang chi tiết sản phẩm sau khi rời Shop.")
         return False
 
+    @serialized_device_workflow
     def shopee_find_and_click_lamdong(self, device_id, keyword, max_swipes=10, status_callback=None, is_cancelled=None, click_first_item=False):
         """Kịch bản tìm kiếm từ khóa và tự động vuốt màn hình để tìm + click vào shop có nhãn 'Tỉnh Lâm Đồng' (hoặc bài đăng đầu tiên nếu bật click_first_item)"""
         def update_status(msg):
@@ -2349,7 +2411,7 @@ class ADBController:
             check_cancelled()
             
             update_status("Gửi lệnh tìm kiếm...")
-            self.press_enter(device_id)
+            self.submit_shopee_search(device_id)
             self.shopee_loading_delay(
                 device_id,
                 "results",
@@ -2965,7 +3027,7 @@ class ADBController:
             check_cancelled()
             
             update_status("[Dự phòng] Gửi lệnh tìm kiếm shop...")
-            self.press_enter(device_id)
+            self.submit_shopee_search(device_id)
             self.shopee_loading_delay(
                 device_id,
                 "results",
@@ -3221,7 +3283,7 @@ class ADBController:
         time.sleep(2.0)
 
         # Chỉ focus đúng EditText; không chạm theo tọa độ mù vào vùng gợi ý.
-        self.focus_tiktok_search_input(device_id)
+        return self.focus_tiktok_search_input(device_id)
 
     def get_tiktok_search_input_state(self, device_id):
         """Đọc tọa độ, nội dung và trạng thái focus của ô Search TikTok."""
@@ -3319,6 +3381,10 @@ class ADBController:
         """
         BẮT BUỘC: Xóa sạch 100% toàn bộ từ khóa cũ trong ô tìm kiếm TikTok trước khi nhập từ khóa mới.
         """
+        if not self.is_tiktok_in_foreground(device_id):
+            raise RuntimeError(
+                "TikTok không còn ở foreground; đã chặn xóa từ khóa"
+            )
         self.ensure_ime(device_id)
         for _ in range(2):
             if not self.focus_tiktok_search_input(device_id):
@@ -3347,6 +3413,10 @@ class ADBController:
 
     def input_tiktok_search_text(self, device_id, text):
         """Nhập đúng một lần qua XwIME mà không reset IME sau khi vừa xóa."""
+        if not self.is_tiktok_in_foreground(device_id):
+            raise RuntimeError(
+                "TikTok không còn ở foreground; đã chặn nhập từ khóa"
+            )
         b64_text = base64.b64encode(text.encode("utf-8")).decode("ascii")
         code, _, _ = self.execute_adb(
             device_id,
@@ -3361,6 +3431,10 @@ class ADBController:
 
     def replace_tiktok_search_text(self, device_id, text):
         """Xóa nội dung cũ, nhập đúng một lần và xác minh từ khóa mới."""
+        if not self.is_tiktok_in_foreground(device_id):
+            raise RuntimeError(
+                "TikTok không còn ở foreground; đã chặn nhập từ khóa"
+            )
         for attempt in range(2):
             if not self.clear_tiktok_search_input(device_id):
                 continue
@@ -3706,6 +3780,7 @@ class ADBController:
             )
         )
 
+    @serialized_device_workflow
     def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
         """
         Quy trình TikTok cố định:
@@ -3827,17 +3902,31 @@ class ADBController:
                     "TikTok B2 không ở foreground; không mở ô tìm kiếm"
                 )
             
-            self.find_and_click_tiktok_search(device_id)
+            if not self.find_and_click_tiktok_search(device_id):
+                raise RuntimeError(
+                    "TikTok B2 không mở/focus được ô tìm kiếm từ khóa mồi"
+                )
             check_cancelled()
 
             # Xóa nội dung cũ, nhập đúng từ khóa nhiệm vụ từ ô ent_tt_seed và xác minh.
-            self.replace_tiktok_search_text(device_id, seed_kw)
+            if not self.replace_tiktok_search_text(device_id, seed_kw):
+                raise RuntimeError(
+                    "TikTok B2 chưa nhập chính xác từ khóa mồi"
+                )
             time.sleep(1.0)
             # TikTok hiện dùng Enter để gửi tìm kiếm. Không tap góc phải vì
             # vị trí đó là nút ba chấm và sẽ mở bảng Filters.
-            self.submit_tiktok_search(device_id)
+            if not self.submit_tiktok_search(device_id):
+                raise RuntimeError(
+                    "TikTok B2 chưa gửi được tìm kiếm từ khóa mồi"
+                )
             time.sleep(3.5)
             check_cancelled()
+            if not self.wait_for_tiktok_foreground(device_id):
+                raise RuntimeError(
+                    "TikTok B2 chưa tải được kết quả từ khóa mồi"
+                )
+            seed_search_completed = True
 
             step2_total = random.randint(
                 config.TIKTOK_STEP2_TOTAL_MIN,
@@ -3879,23 +3968,36 @@ class ADBController:
 
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
+            if not seed_search_completed:
+                raise RuntimeError(
+                    "TikTok B2 chưa hoàn tất; đã chặn chuyển sang B3"
+                )
             update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
-            if not self.ensure_tiktok_foreground_ready(
-                device_id, status_callback=status_callback
-            ):
+            # Giữ nguyên trang kết quả B2. Hàm ensure_tiktok_foreground_ready
+            # chủ động đưa TikTok về Home nên không dùng ở ranh giới B2 -> B3.
+            if not self.wait_for_tiktok_foreground(device_id):
                 raise RuntimeError(
                     "TikTok B3 không ở foreground; không thao tác tìm kiếm"
                 )
             
             # 1. Bấm vào Kính lúp / Ô tìm kiếm ở đầu trang
-            self.find_and_click_tiktok_search(device_id)
+            if not self.find_and_click_tiktok_search(device_id):
+                raise RuntimeError(
+                    "TikTok B3 không mở/focus được ô tìm kiếm trên kết quả B2"
+                )
             check_cancelled()
 
             # 2-3. XÓA SẠCH từ khóa Bước 2 rồi mới nhập tên Kênh mục tiêu.
-            self.replace_tiktok_search_text(device_id, target_channel)
+            if not self.replace_tiktok_search_text(device_id, target_channel):
+                raise RuntimeError(
+                    "TikTok B3 chưa xóa sạch từ khóa mồi hoặc chưa nhập đúng tên Kênh"
+                )
             time.sleep(1.0)
             # Áp dụng cùng cơ chế cho bước 3: chỉ Enter, không chạm nút ba chấm.
-            self.submit_tiktok_search(device_id)
+            if not self.submit_tiktok_search(device_id):
+                raise RuntimeError(
+                    "TikTok B3 chưa gửi được tìm kiếm Kênh mục tiêu"
+                )
             time.sleep(3.5)
             check_cancelled()
 
