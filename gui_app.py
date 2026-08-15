@@ -3,10 +3,13 @@ import sys
 import time
 import re
 import random
+import shutil
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from pathlib import Path
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
+from dotenv import dotenv_values, load_dotenv
 
 # Đảm bảo đường dẫn module chính xác
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -31,13 +34,13 @@ class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("BoxPhoneControl")
-        self.geometry("1720x960")
-        self.minsize(1280, 760)
-        self.configure(fg_color="#f3f6fb")
+        self.geometry("1760x980")
+        self.minsize(1360, 800)
+        self.configure(fg_color="#eef3f9")
 
         # Design tokens: light "liquid glass" surfaces rendered with native
         # CustomTkinter layers so the dashboard remains fast with many devices.
-        bg = "#f3f6fb"
+        bg = "#eef3f9"
         glass = "#ffffff"
         glass_tint = "#f8fafc"
         surface = "#ffffff"
@@ -45,14 +48,14 @@ class GUIApp(ctk.CTk):
         border_hover = "#93b4ea"
         text = "#0f172a"
         muted = "#64748b"
-        blue = "#1d4ed8"
-        blue_hover = "#1e40af"
+        blue = "#2563eb"
+        blue_hover = "#1d4ed8"
         blue_soft = "#eff6ff"
         orange = "#c2410c"
         orange_soft = "#fff7ed"
         pink = "#be185d"
         pink_soft = "#fdf2f8"
-        violet = "#6d28d9"
+        violet = "#7c3aed"
         violet_soft = "#f5f3ff"
         green = "#047857"
         green_hover = "#065f46"
@@ -78,6 +81,10 @@ class GUIApp(ctk.CTk):
         self.device_checkboxes = {}
         self._active_notion_schedule = None
         self._active_notion_token = ""
+        # Hai công tắc thuộc hai module độc lập. Không dùng chung BooleanVar,
+        # nếu không thao tác ở TikTok sẽ làm Facebook tự bật (và ngược lại).
+        self.tiktok_combined_var = ctk.BooleanVar(value=False)
+        self.facebook_combined_var = ctk.BooleanVar(value=False)
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -89,10 +96,10 @@ class GUIApp(ctk.CTk):
         # ================= ROW 0: GLASS HEADER =================
         self.top_header = ctk.CTkFrame(
             self,
-            fg_color=glass,
+            fg_color="#0f172a",
             corner_radius=18,
             border_width=1,
-            border_color=border,
+            border_color="#1e293b",
         )
         self.top_header.grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 10))
 
@@ -107,7 +114,7 @@ class GUIApp(ctk.CTk):
             width=52,
             height=52,
             corner_radius=14,
-            fg_color="#0f172a",
+            fg_color="#2563eb",
             text_color="#ffffff",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
         )
@@ -120,7 +127,7 @@ class GUIApp(ctk.CTk):
             self.brand_copy,
             text="BoxPhoneControl",
             font=ctk.CTkFont(family="Segoe UI", size=23, weight="bold"),
-            text_color=text,
+            text_color="#f8fafc",
         )
         self.lbl_brand.pack(anchor="w")
         
@@ -128,7 +135,7 @@ class GUIApp(ctk.CTk):
             self.brand_copy,
             text="Trung tâm điều hành  •  Tự động hóa đa thiết bị",
             font=body_font,
-            text_color=muted,
+            text_color="#94a3b8",
         )
         self.lbl_sub_brand.pack(anchor="w", pady=(1, 0))
 
@@ -137,8 +144,8 @@ class GUIApp(ctk.CTk):
             text="3 QUY TRÌNH",
             height=34,
             corner_radius=17,
-            fg_color="#f1f5f9",
-            text_color="#334155",
+            fg_color="#1e293b",
+            text_color="#cbd5e1",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
         )
         self.platform_badge.pack(side="right", padx=(10, 2))
@@ -316,7 +323,8 @@ class GUIApp(ctk.CTk):
         self.ops_frame.columnconfigure(1, weight=1)
         self.ops_frame.columnconfigure(2, weight=1)
         self.ops_frame.rowconfigure(0, weight=0)
-        self.ops_frame.rowconfigure(1, weight=1)
+        self.ops_frame.rowconfigure(1, weight=0)
+        self.ops_frame.rowconfigure(2, weight=1)
 
         self.workspace_header = ctk.CTkFrame(
             self.ops_frame, fg_color="transparent"
@@ -346,6 +354,24 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
         ).pack(side="right")
 
+        self._module_focus_active = False
+        self._module_focus_ready = False
+        self.btn_restore_overview = ctk.CTkButton(
+            self.workspace_header,
+            text="Hiện tổng quan",
+            width=124,
+            height=30,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#ffffff",
+            hover_color="#f8fafc",
+            text_color=blue,
+            border_width=1,
+            border_color="#bfdbfe",
+            corner_radius=9,
+            cursor="hand2",
+            command=self.restore_dashboard_overview,
+        )
+
         scroll_style = {
             "corner_radius": 18,
             "fg_color": glass,
@@ -364,12 +390,154 @@ class GUIApp(ctk.CTk):
             "font": body_font,
         }
 
+        # ---------------- FACEBOOK + TIKTOK COMBINED ----------------
+        # This panel only orchestrates the two existing workflows. Their
+        # internal steps and timing remain owned by each platform module.
+        self.social_combined_panel = ctk.CTkFrame(
+            self.ops_frame,
+            fg_color="#f5f3ff",
+            corner_radius=16,
+            border_width=1,
+            border_color="#ddd6fe",
+        )
+        self.social_combined_panel.grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky="ew",
+            pady=(0, 9),
+        )
+        self.social_combined_panel.columnconfigure(1, weight=1)
+
+        self.social_combined_mark = ctk.CTkLabel(
+            self.social_combined_panel,
+            text="F + T",
+            width=54,
+            height=40,
+            corner_radius=12,
+            fg_color="#ffffff",
+            text_color=violet,
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+        )
+        self.social_combined_mark.grid(row=0, column=0, padx=(12, 10), pady=10)
+
+        self.social_combined_copy = ctk.CTkFrame(
+            self.social_combined_panel, fg_color="transparent"
+        )
+        self.social_combined_copy.grid(
+            row=0, column=1, sticky="w", padx=(0, 12), pady=8
+        )
+        ctk.CTkLabel(
+            self.social_combined_copy,
+            text="CHẠY TỔNG FACEBOOK + TIKTOK",
+            font=label_font,
+            text_color=text,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            self.social_combined_copy,
+            text="Mỗi máy chạy đủ hai quy trình • Thứ tự luân phiên ngẫu nhiên",
+            font=body_font,
+            text_color=muted,
+        ).pack(anchor="w")
+
+        self.ent_social_selection = ctk.CTkEntry(
+            self.social_combined_panel,
+            placeholder_text="Chọn máy (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+            width=290,
+            height=40,
+            **field_style,
+        )
+        self.ent_social_selection.grid(
+            row=0, column=2, sticky="ew", padx=(0, 8), pady=10
+        )
+
+        self.social_combined_actions = ctk.CTkFrame(
+            self.social_combined_panel, fg_color="transparent"
+        )
+        self.social_combined_actions.grid(
+            row=0, column=3, sticky="e", padx=(0, 12), pady=10
+        )
+        self.btn_social_combined_seq = ctk.CTkButton(
+            self.social_combined_actions,
+            text="Chạy tổng tuần tự",
+            width=138,
+            height=40,
+            font=button_font,
+            fg_color=green,
+            hover_color=green_hover,
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            command=self.run_combined_social_sequential,
+        )
+        self.btn_social_combined_seq.pack(side="left", padx=(0, 6))
+        self.btn_social_combined_par = ctk.CTkButton(
+            self.social_combined_actions,
+            text="Song song",
+            width=108,
+            height=40,
+            font=button_font,
+            fg_color=blue,
+            hover_color=blue_hover,
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            command=self.run_combined_social_parallel,
+        )
+        self.btn_social_combined_par.pack(side="left", padx=6)
+        self.btn_social_combined_adaptive = ctk.CTkButton(
+            self.social_combined_actions,
+            text="Thích ứng",
+            width=108,
+            height=40,
+            font=button_font,
+            fg_color=violet,
+            hover_color="#5b21b6",
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            command=self.run_combined_social_adaptive,
+        )
+        self.btn_social_combined_adaptive.pack(side="left", padx=(6, 0))
+
+        # Commercial workspace: one focused module at a time. This replaces
+        # the previous three cramped columns while preserving every widget and
+        # callback inside each automation module.
+        self.module_tabs = ctk.CTkTabview(
+            self.ops_frame,
+            command=self._on_module_tab_changed,
+            fg_color="transparent",
+            segmented_button_fg_color="#e2e8f0",
+            segmented_button_selected_color="#bfdbfe",
+            segmented_button_selected_hover_color="#93c5fd",
+            segmented_button_unselected_color="#e2e8f0",
+            segmented_button_unselected_hover_color="#cbd5e1",
+            text_color="#0f172a",
+            corner_radius=16,
+            border_width=0,
+        )
+        self.module_tabs.grid(
+            row=2, column=0, columnspan=3, sticky="nsew", pady=(0, 0)
+        )
+        self.shopee_tab = self.module_tabs.add("Shopee")
+        self.tiktok_tab = self.module_tabs.add("TikTok")
+        self.facebook_tab = self.module_tabs.add("Facebook")
+        self.module_tabs.set("Shopee")
+        for module_tab in (
+            self.shopee_tab,
+            self.tiktok_tab,
+            self.facebook_tab,
+        ):
+            module_tab.configure(fg_color="transparent")
+            module_tab.grid_columnconfigure(0, weight=1)
+            module_tab.grid_rowconfigure(0, weight=1)
+
         # ---------------- SHOPEE AUTOMATION ----------------
         self.shopee_scroll = ctk.CTkScrollableFrame(
-            self.ops_frame,
+            self.shopee_tab,
             **scroll_style,
         )
-        self.shopee_scroll.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
+        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
         self.shopee_heading = ctk.CTkFrame(
             self.shopee_scroll, fg_color=orange_soft, corner_radius=16
@@ -685,10 +853,10 @@ class GUIApp(ctk.CTk):
 
         # ---------------- TIKTOK AUTOMATION ----------------
         self.tiktok_scroll = ctk.CTkScrollableFrame(
-            self.ops_frame,
+            self.tiktok_tab,
             **scroll_style,
         )
-        self.tiktok_scroll.grid(row=1, column=1, sticky="nsew", padx=6)
+        self.tiktok_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
         self.tiktok_heading = ctk.CTkFrame(
             self.tiktok_scroll, fg_color=pink_soft, corner_radius=16
@@ -805,6 +973,36 @@ class GUIApp(ctk.CTk):
         )
         self.ent_tt_selection.pack(fill="x", padx=16, pady=(0, 8))
 
+        self.tt_combined_card = ctk.CTkFrame(
+            self.tiktok_scroll,
+            fg_color="#faf5ff",
+            corner_radius=13,
+            border_width=1,
+            border_color="#e9d5ff",
+        )
+        self.tt_combined_card.pack(fill="x", padx=16, pady=(1, 9))
+        self.switch_tt_combined = ctk.CTkSwitch(
+            self.tt_combined_card,
+            text="Kết hợp ngẫu nhiên TikTok + Facebook",
+            variable=self.tiktok_combined_var,
+            onvalue=True,
+            offvalue=False,
+            font=label_font,
+            text_color=text,
+            fg_color=violet,
+            progress_color=violet,
+            button_color="#ffffff",
+            button_hover_color="#f8fafc",
+        )
+        self.switch_tt_combined.pack(fill="x", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            self.tt_combined_card,
+            text="Chỉ áp dụng khi bấm nút chạy trong module TikTok",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=muted,
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 9))
+
         self.tt_btn_grid = ctk.CTkFrame(self.tiktok_scroll, fg_color="transparent")
         self.tt_btn_grid.pack(fill="x", padx=16, pady=(0, 7))
         self.tt_btn_grid.columnconfigure(0, weight=1)
@@ -873,12 +1071,10 @@ class GUIApp(ctk.CTk):
 
         # ---------------- FACEBOOK AUTOMATION ----------------
         self.facebook_scroll = ctk.CTkScrollableFrame(
-            self.ops_frame,
+            self.facebook_tab,
             **scroll_style,
         )
-        self.facebook_scroll.grid(
-            row=1, column=2, sticky="nsew", padx=(6, 0)
-        )
+        self.facebook_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
         self.facebook_heading = ctk.CTkFrame(
             self.facebook_scroll, fg_color=blue_soft, corner_radius=16
@@ -950,6 +1146,9 @@ class GUIApp(ctk.CTk):
             height=42,
             **field_style,
         )
+        self.ent_fb_target.insert(
+            0, config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT or ""
+        )
         self.ent_fb_target.pack(fill="x", padx=16, pady=(0, 8))
 
         self.fb_timeline_card = ctk.CTkFrame(
@@ -984,6 +1183,36 @@ class GUIApp(ctk.CTk):
             **field_style,
         )
         self.ent_fb_selection.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.fb_combined_card = ctk.CTkFrame(
+            self.facebook_scroll,
+            fg_color="#f5f3ff",
+            corner_radius=13,
+            border_width=1,
+            border_color="#ddd6fe",
+        )
+        self.fb_combined_card.pack(fill="x", padx=16, pady=(1, 9))
+        self.switch_fb_combined = ctk.CTkSwitch(
+            self.fb_combined_card,
+            text="Kết hợp ngẫu nhiên Facebook + TikTok",
+            variable=self.facebook_combined_var,
+            onvalue=True,
+            offvalue=False,
+            font=label_font,
+            text_color=text,
+            fg_color=violet,
+            progress_color=violet,
+            button_color="#ffffff",
+            button_hover_color="#f8fafc",
+        )
+        self.switch_fb_combined.pack(fill="x", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            self.fb_combined_card,
+            text="Chỉ áp dụng khi bấm nút chạy trong module Facebook",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=muted,
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 9))
 
         self.fb_btn_grid = ctk.CTkFrame(
             self.facebook_scroll, fg_color="transparent"
@@ -1090,6 +1319,39 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
         )
         self.settings_security_badge.pack(side="right")
+
+        self.btn_import_env = ctk.CTkButton(
+            self.settings_header,
+            text="Import .env",
+            font=button_font,
+            fg_color="#0f766e",
+            hover_color="#115e59",
+            text_color="#ffffff",
+            corner_radius=10,
+            height=34,
+            width=108,
+            cursor="hand2",
+            command=self.import_env_action,
+        )
+        self.btn_import_env.pack(side="right", padx=(8, 8))
+
+        self._settings_expanded = False
+        self.btn_toggle_settings = ctk.CTkButton(
+            self.settings_header,
+            text="Mở cấu hình",
+            font=button_font,
+            fg_color="#eff6ff",
+            hover_color="#dbeafe",
+            text_color=blue,
+            border_width=1,
+            border_color="#bfdbfe",
+            corner_radius=10,
+            height=34,
+            width=116,
+            cursor="hand2",
+            command=self.toggle_settings_panel,
+        )
+        self.btn_toggle_settings.pack(side="right", padx=(8, 0))
 
         self.settings_card = ctk.CTkFrame(
             self.bottom_panel, fg_color="transparent"
@@ -1216,9 +1478,13 @@ class GUIApp(ctk.CTk):
             row=1, column=5, columnspan=2, sticky="ew", padx=8, pady=(23, 0)
         )
 
+        # Progressive disclosure: configuration is available from the fixed
+        # footer but no longer consumes a large part of the operations canvas.
+        self.settings_card.pack_forget()
+
         # Subtle glass border response and a short window fade-in. These are
         # presentation-only effects and do not touch automation state.
-        self._bind_glass_hover(self.top_header, border, border_hover)
+        self._bind_glass_hover(self.top_header, "#1e293b", "#334155")
         self._bind_glass_hover(self.log_card, border, border_hover)
         self._bind_glass_hover(self.shopee_scroll, border, "#f1b98d")
         self._bind_glass_hover(self.tiktok_scroll, border, "#e4a7c5")
@@ -1235,6 +1501,7 @@ class GUIApp(ctk.CTk):
         self.after(1600, self._reset_operation_scrolls)
         self.after(3200, self._reset_operation_scrolls)
         self.after(5200, self._reset_operation_scrolls)
+        self.after_idle(self._finish_module_ui_setup)
 
         # Quét thiết bị khi vừa khởi động
         self.refresh_devices_action()
@@ -1286,6 +1553,56 @@ class GUIApp(ctk.CTk):
             self.btn_refresh.focus_set()
         except Exception:
             pass
+
+    def _finish_module_ui_setup(self):
+        """Chọn tab mặc định trước khi bật callback Focus Workspace."""
+        try:
+            self.module_tabs.set("Shopee")
+        finally:
+            self._module_focus_ready = True
+
+    def _on_module_tab_changed(self):
+        """Bung module được chọn ra toàn bộ vùng làm việc, không cần cuộn trang."""
+        if not self.__dict__.get("_module_focus_ready", False):
+            return
+        self._set_module_focus(True)
+        selected = self.module_tabs.get().lower()
+        scroll = self.__dict__.get(f"{selected}_scroll")
+        if scroll is not None:
+            self.after_idle(lambda widget=scroll: widget._parent_canvas.yview_moveto(0))
+
+    def _set_module_focus(self, enabled):
+        self._module_focus_active = bool(enabled)
+        if enabled:
+            self.log_card.grid_remove()
+            self.social_combined_panel.grid_remove()
+            if self.__dict__.get("_settings_expanded", False):
+                self.settings_card.pack_forget()
+                self._settings_expanded = False
+                self.btn_toggle_settings.configure(
+                    text="Mở cấu hình",
+                    fg_color="#eff6ff",
+                    border_color="#bfdbfe",
+                )
+            if not self.btn_restore_overview.winfo_manager():
+                self.btn_restore_overview.pack(side="right", padx=(0, 10))
+        else:
+            self.log_card.grid(
+                row=1, column=0, sticky="ew", padx=18, pady=(0, 10)
+            )
+            self.social_combined_panel.grid(
+                row=1,
+                column=0,
+                columnspan=3,
+                sticky="ew",
+                pady=(0, 9),
+            )
+            self.btn_restore_overview.pack_forget()
+        self.after_idle(self._reset_operation_scrolls)
+
+    def restore_dashboard_overview(self):
+        """Hiện lại log và bảng chạy kết hợp sau khi xem module toàn màn hình."""
+        self._set_module_focus(False)
 
     def run_in_thread(self, func, *args):
         threading.Thread(target=func, args=args, daemon=True).start()
@@ -1645,6 +1962,123 @@ class GUIApp(ctk.CTk):
 
         self.run_in_thread(action)
 
+    @staticmethod
+    def _set_entry_value(entry, value):
+        entry.delete(0, "end")
+        entry.insert(0, value or "")
+
+    def _apply_imported_env(self, values):
+        """Nạp các khóa .env đã import vào runtime và các ô cấu hình."""
+        get_value = lambda key, fallback="": str(values.get(key) or fallback)
+
+        config.TELEGRAM_BOT_TOKEN = get_value("TELEGRAM_BOT_TOKEN")
+        config.TELEGRAM_NOTIFICATIONS_ENABLED = get_value(
+            "TELEGRAM_NOTIFICATIONS_ENABLED", "1"
+        ).strip().lower() not in {"0", "false", "no", "off"}
+        admin_ids = get_value("ALLOWED_USER_IDS")
+        config.ALLOWED_USER_IDS = [
+            int(item.strip())
+            for item in admin_ids.split(",")
+            if item.strip().isdigit()
+        ]
+        config.ADB_PATH = get_value(
+            "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+        )
+        shops = get_value("SHOPEE_SHOP_NAMES")
+        config.SHOPEE_SHOP_NAMES = [
+            item.strip() for item in shops.split(",") if item.strip()
+        ]
+        config.GEMINI_API_KEY = get_value("GEMINI_API_KEY")
+        config.GEMINI_MODEL = get_value("GEMINI_MODEL", "gemini-flash-latest")
+        config.NOTION_API_TOKEN = get_value("NOTION_API_TOKEN")
+        config.NOTION_DATA_SOURCE_ID = get_value("NOTION_DATA_SOURCE_ID")
+        config.TIKTOK_TARGET_CHANNEL_DEFAULT = get_value("TIKTOK_TARGET_CHANNEL")
+        config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = get_value(
+            "FACEBOOK_TARGET_PAGE_EXACT"
+        )
+
+        main.adb.adb_path = config.ADB_PATH
+        main.configure_telegram_bot_token(config.TELEGRAM_BOT_TOKEN)
+
+        field_values = {
+            "ent_token": config.TELEGRAM_BOT_TOKEN,
+            "ent_admins": admin_ids,
+            "ent_adb": config.ADB_PATH,
+            "ent_shops": shops,
+            "ent_gemini_key": config.GEMINI_API_KEY,
+            "ent_notion_token": config.NOTION_API_TOKEN,
+            "ent_notion_source_id": config.NOTION_DATA_SOURCE_ID,
+            "ent_tt_channel": config.TIKTOK_TARGET_CHANNEL_DEFAULT,
+            "ent_fb_target": config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT,
+        }
+        for attribute, value in field_values.items():
+            entry = self.__dict__.get(attribute)
+            if entry is not None:
+                self._set_entry_value(entry, value)
+
+        if self.__dict__.get("btn_telegram_notifications") is not None:
+            self._refresh_telegram_notifications_button()
+
+    def _import_env_file(self, source_path):
+        """Kiểm tra, sao chép và nạp một file .env mà không in secret ra log."""
+        source = Path(source_path).expanduser().resolve()
+        if not source.is_file():
+            raise ValueError("Không tìm thấy file .env đã chọn.")
+        if source.name.lower() != ".env" and source.suffix.lower() != ".env":
+            raise ValueError("Vui lòng chọn đúng file .env.")
+
+        values = dict(dotenv_values(source))
+        supported_keys = {
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_NOTIFICATIONS_ENABLED",
+            "ALLOWED_USER_IDS",
+            "ADB_PATH",
+            "SHOPEE_SHOP_NAMES",
+            "GEMINI_API_KEY",
+            "GEMINI_MODEL",
+            "NOTION_API_TOKEN",
+            "NOTION_DATA_SOURCE_ID",
+            "TIKTOK_TARGET_CHANNEL",
+            "FACEBOOK_TARGET_PAGE_EXACT",
+        }
+        recognized = supported_keys.intersection(values)
+        if not recognized:
+            raise ValueError(
+                "File .env không có khóa cấu hình nào mà BoxPhoneControl hỗ trợ."
+            )
+
+        target = Path(config.ENV_PATH).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source != target:
+            shutil.copy2(source, target)
+        load_dotenv(dotenv_path=target, override=True)
+        self._apply_imported_env(values)
+        return len(recognized), target
+
+    def import_env_action(self):
+        source_path = filedialog.askopenfilename(
+            parent=self,
+            title="Chọn file cấu hình .env",
+            filetypes=(("Environment file", "*.env"), ("Tất cả file", "*.*")),
+        )
+        if not source_path:
+            return
+        try:
+            key_count, target = self._import_env_file(source_path)
+        except Exception as exc:
+            messagebox.showerror("Import .env thất bại", str(exc))
+            return
+
+        self.log_message(
+            f"[Cấu hình] Đã import an toàn {key_count} nhóm cấu hình từ .env."
+        )
+        messagebox.showinfo(
+            "Import .env thành công",
+            "Đã nạp cấu hình vào BoxPhoneControl và lưu cạnh ứng dụng.\n"
+            "Các giá trị nhạy cảm không được hiển thị trong log.\n\n"
+            f"Vị trí lưu: {target}",
+        )
+
     def save_settings(self):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
@@ -1934,6 +2368,25 @@ class GUIApp(ctk.CTk):
                 border_color="#bfdbfe",
             )
         self.after_idle(lambda: self.log_box.see("end"))
+
+    def toggle_settings_panel(self):
+        """Đóng/mở panel cấu hình mà không thay đổi giá trị người dùng đã nhập."""
+        self._settings_expanded = not self._settings_expanded
+        if self._settings_expanded:
+            self.settings_card.pack(fill="x", padx=14, pady=(2, 12))
+            self.btn_toggle_settings.configure(
+                text="Thu gọn",
+                fg_color="#dbeafe",
+                border_color="#93c5fd",
+            )
+        else:
+            self.settings_card.pack_forget()
+            self.btn_toggle_settings.configure(
+                text="Mở cấu hình",
+                fg_color="#eff6ff",
+                border_color="#bfdbfe",
+            )
+        self.after_idle(self._reset_operation_scrolls)
 
     # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM SHOPEE =================
     def run_seq_search(self):
@@ -2250,8 +2703,255 @@ class GUIApp(ctk.CTk):
             
         self.run_in_thread(action)
 
+    @staticmethod
+    def _random_social_order():
+        order = ["tiktok", "facebook"]
+        random.shuffle(order)
+        return order
+
+    def _social_combined_enabled(self, source_module=None):
+        """Trả trạng thái kết hợp riêng của module đã phát lệnh chạy."""
+        variable_name = {
+            "tiktok": "tiktok_combined_var",
+            "facebook": "facebook_combined_var",
+        }.get(source_module)
+        if variable_name is None:
+            return False
+        variable = self.__dict__.get(variable_name)
+        return bool(variable and variable.get())
+
+    def _log_social_adaptive_wave(
+        self, label, devices, wave_number, total_devices
+    ):
+        device_names = ", ".join(
+            main.get_device_name(device_id) for device_id in devices
+        )
+        self.log_message(
+            f"[{label} thích ứng] Đợt {wave_number}: chọn ngẫu nhiên "
+            f"{len(devices)} máy tại các vị trí {device_names} "
+            f"(tổng {total_devices} máy; tất cả sẽ lần lượt được chạy)."
+        )
+
+    def run_combined_social_sequential(self):
+        """Run both social modules one device at a time."""
+        self.run_combined_social(self.ent_social_selection)
+
+    def run_combined_social_parallel(self):
+        """Run both social modules on all selected devices concurrently."""
+        self.run_combined_social(
+            self.ent_social_selection,
+            parallel=True,
+        )
+
+    def run_combined_social_adaptive(self):
+        """Run both social modules with the existing adaptive scheduler."""
+        self.run_combined_social(
+            self.ent_social_selection,
+            adaptive=True,
+        )
+
+    def run_combined_social(
+        self, entry_widget, parallel=False, adaptive=False
+    ):
+        """Run both social workflows in a random per-device order."""
+        tt_seed = self.ent_tt_seed.get().strip()
+        tt_channel = (
+            self.ent_tt_channel.get().strip()
+            or config.TIKTOK_TARGET_CHANNEL_DEFAULT
+        )
+        fb_seed = self.ent_fb_seed.get().strip()
+        fb_target = self.ent_fb_target.get().strip()
+        missing = []
+        if not tt_seed:
+            missing.append("từ khóa TikTok")
+        if not tt_channel:
+            missing.append("kênh TikTok")
+        if not fb_seed:
+            missing.append("từ khóa mồi Facebook")
+        if not fb_target:
+            missing.append("Page target Facebook")
+        if missing:
+            messagebox.showwarning(
+                "Thiếu dữ liệu chạy kết hợp",
+                "Vui lòng nhập: " + ", ".join(missing),
+            )
+            return
+
+        target_devices = self.parse_targets(entry_widget=entry_widget)
+        if not target_devices:
+            return
+        self.bulk_disable_rotation(target_devices=target_devices)
+        workflow_session = main.start_workflow_session()
+        is_cancelled = main.make_session_cancel_checker(workflow_session)
+
+        def run_device(device_id):
+            device_name = main.get_device_name(device_id)
+            order = self._random_social_order()
+            order_text = " → ".join(
+                "TikTok" if item == "tiktok" else "Facebook"
+                for item in order
+            )
+            self.log_message(
+                f"[Máy {device_name}] Kết hợp ngẫu nhiên: {order_text}"
+            )
+            chat_id = (
+                config.ALLOWED_USER_IDS[0]
+                if config.ALLOWED_USER_IDS
+                else None
+            )
+            tracker = None
+            if chat_id:
+                try:
+                    tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
+                    tracker.set_active_device(
+                        device_name,
+                        device_id,
+                        f"Social: {order_text}",
+                        1,
+                        1,
+                        platform="Social",
+                    )
+                    tracker.start_dashboard(tracker.render_progress_text())
+                except Exception:
+                    tracker = None
+
+            results = []
+            for platform_index, platform in enumerate(order, start=1):
+                if is_cancelled():
+                    return device_name, False, "Bị dừng bởi người dùng"
+
+                platform_label = (
+                    "TIKTOK" if platform == "tiktok" else "FACEBOOK"
+                )
+                platform_plan = (
+                    "nuôi chéo Facebook → TikTok B1-B3"
+                    if platform == "tiktok"
+                    else (
+                        "nuôi chéo TikTok → Facebook B1-B3 "
+                        "(từ khóa mồi → Page target)"
+                    )
+                )
+                phase_message = (
+                    f"[Kết hợp {platform_index}/2] BẮT ĐẦU MODULE "
+                    f"{platform_label} ĐẦY ĐỦ • {platform_plan}."
+                )
+                self.log_message(f"[Máy {device_name}] {phase_message}")
+                if tracker:
+                    tracker.status_callback(device_id, phase_message)
+
+                def status_callback(dev, message, current=platform):
+                    label = "TikTok" if current == "tiktok" else "Facebook"
+                    self.log_message(
+                        f"[Máy {device_name}][{label}] {message}"
+                    )
+                    if tracker:
+                        tracker.status_callback(dev, f"[{label}] {message}")
+
+                try:
+                    if platform == "tiktok":
+                        success, message = main.adb.tiktok_automation_workflow(
+                            device_id,
+                            seed_keywords=tt_seed,
+                            target_channel=tt_channel,
+                            status_callback=status_callback,
+                            is_cancelled=is_cancelled,
+                        )
+                    else:
+                        success, message = main.adb.facebook_automation_workflow(
+                            device_id,
+                            seed_keywords=fb_seed,
+                            target_pages=fb_target,
+                            status_callback=status_callback,
+                            is_cancelled=is_cancelled,
+                        )
+                except Exception as exc:
+                    success = False
+                    message = f"Lỗi ngoài dự kiến: {exc}"
+                results.append((platform, success, message))
+
+                result_message = (
+                    f"[Kết hợp {platform_index}/2] "
+                    f"{'HOÀN TẤT' if success else 'KẾT THÚC CÓ LỖI'} "
+                    f"MODULE {platform_label}: {message}"
+                )
+                self.log_message(f"[Máy {device_name}] {result_message}")
+                if tracker:
+                    tracker.status_callback(device_id, result_message)
+
+                if platform_index < len(order):
+                    next_platform = (
+                        "TIKTOK" if order[platform_index] == "tiktok"
+                        else "FACEBOOK"
+                    )
+                    transition_message = (
+                        f"[Kết hợp] CHUYỂN SANG MODULE {next_platform} "
+                        "ĐẦY ĐỦ cho cùng máy."
+                    )
+                    self.log_message(
+                        f"[Máy {device_name}] {transition_message}"
+                    )
+                    if tracker:
+                        tracker.status_callback(
+                            device_id, transition_message
+                        )
+
+            success = len(results) == 2 and all(item[1] for item in results)
+            message = "Thành công cả TikTok và Facebook" if success else "; ".join(
+                f"{platform}: {detail}"
+                for platform, ok, detail in results
+                if not ok
+            )
+            if tracker:
+                tracker.finish_dashboard(
+                    f"{'✅' if success else '❌'} **MÁY {device_name} "
+                    f"KẾT HỢP {'HOÀN THÀNH' if success else 'THẤT BẠI'}**\n"
+                    f"Thứ tự: `{order_text}`\n`{message}`"
+                )
+            return device_name, success, message
+
+        def action():
+            if adaptive:
+                results = run_adaptive(
+                    target_devices,
+                    run_device,
+                    PLATFORM_POLICIES["social"],
+                    is_cancelled=is_cancelled,
+                    randomize_queue=True,
+                    randomize_wave_size=True,
+                    on_wave=lambda devices, wave, total: (
+                        self._log_social_adaptive_wave(
+                            "Social kết hợp", devices, wave, total
+                        )
+                    ),
+                    on_wait=lambda dev, delay, position, total: (
+                        self.log_message(
+                            f"[Social thích ứng] Máy "
+                            f"{main.get_device_name(dev)} chờ {delay}s "
+                            f"trước khi bắt đầu ({position + 1}/{total})."
+                        )
+                    ),
+                )
+            elif parallel:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(
+                    max_workers=len(target_devices)
+                ) as executor:
+                    results = list(executor.map(run_device, target_devices))
+            else:
+                results = [run_device(device) for device in target_devices]
+            success_count = sum(1 for _, success, _ in results if success)
+            print(
+                f"[GUI] Social kết hợp: {success_count}/"
+                f"{len(target_devices)} máy hoàn thành cả hai mô-đun."
+            )
+
+        self.run_in_thread(action)
+
     # ================= CÁC TÁC VỤ BƠM TIKTOK =================
     def run_seq_tiktok(self):
+        if self._social_combined_enabled("tiktok"):
+            self.run_combined_social(self.ent_tt_selection)
+            return
         target_devices = self.parse_targets(entry_widget=self.ent_tt_selection)
         if not target_devices:
             return
@@ -2352,6 +3052,13 @@ class GUIApp(ctk.CTk):
         self.run_in_thread(action)
 
     def run_par_tiktok(self, adaptive=False):
+        if self._social_combined_enabled("tiktok"):
+            self.run_combined_social(
+                self.ent_tt_selection,
+                parallel=not adaptive,
+                adaptive=adaptive,
+            )
+            return
         target_devices = self.parse_targets(entry_widget=self.ent_tt_selection)
         if not target_devices:
             return
@@ -2432,7 +3139,7 @@ class GUIApp(ctk.CTk):
                 is_cancelled=session_is_cancelled,
             )
             if adaptive:
-                policy = PLATFORM_POLICIES["tiktok"]
+                policy = PLATFORM_POLICIES["social"]
                 results = run_adaptive(
                     target_devices,
                     run_parallel_tt,
@@ -2442,6 +3149,13 @@ class GUIApp(ctk.CTk):
                         f"[GUI] TikTok thích ứng: máy "
                         f"{main.get_device_name(dev)} đang chờ {delay}s "
                         f"({position + 1}/{total})."
+                    ),
+                    randomize_queue=True,
+                    randomize_wave_size=True,
+                    on_wave=lambda devices, wave, total: (
+                        self._log_social_adaptive_wave(
+                            "TikTok", devices, wave, total
+                        )
                     ),
                 )
             else:
@@ -2470,6 +3184,9 @@ class GUIApp(ctk.CTk):
 
     # ================= CÁC TÁC VỤ BƠM FACEBOOK =================
     def run_seq_facebook(self):
+        if self._social_combined_enabled("facebook"):
+            self.run_combined_social(self.ent_fb_selection)
+            return
         seed_raw = self.ent_fb_seed.get().strip()
         target_raw = self.ent_fb_target.get().strip()
         if not seed_raw:
@@ -2587,6 +3304,13 @@ class GUIApp(ctk.CTk):
         self.run_in_thread(action)
 
     def run_par_facebook(self, adaptive=False):
+        if self._social_combined_enabled("facebook"):
+            self.run_combined_social(
+                self.ent_fb_selection,
+                parallel=not adaptive,
+                adaptive=adaptive,
+            )
+            return
         seed_raw = self.ent_fb_seed.get().strip()
         target_raw = self.ent_fb_target.get().strip()
         if not seed_raw:
@@ -2665,7 +3389,7 @@ class GUIApp(ctk.CTk):
                 is_cancelled=session_is_cancelled,
             )
             if adaptive:
-                policy = PLATFORM_POLICIES["facebook"]
+                policy = PLATFORM_POLICIES["social"]
                 results = run_adaptive(
                     target_devices,
                     run_device,
@@ -2675,6 +3399,13 @@ class GUIApp(ctk.CTk):
                         f"[GUI] Facebook thích ứng: máy "
                         f"{main.get_device_name(dev)} đang chờ {delay}s "
                         f"({position + 1}/{total})."
+                    ),
+                    randomize_queue=True,
+                    randomize_wave_size=True,
+                    on_wave=lambda devices, wave, total: (
+                        self._log_social_adaptive_wave(
+                            "Facebook", devices, wave, total
+                        )
                     ),
                 )
             else:

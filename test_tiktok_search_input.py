@@ -6,6 +6,47 @@ from adb_controller import ADBController
 
 
 class TikTokSearchInputTests(unittest.TestCase):
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_phone_popup_is_closed_before_home_feed(self, _sleep):
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        popup_root = ET.fromstring(
+            '<hierarchy><node text="Thêm số điện thoại" />'
+            '<node clickable="true" content-desc="Close" '
+            'bounds="[930,900][1040,1010]" /></hierarchy>'
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: popup_root
+        )
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.dismiss_tiktok_blocking_popup("device-popup")
+        )
+        self.assertEqual([(985, 955)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_unknown_modal_uses_back_not_blind_tap(self, _sleep):
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        popup_root = ET.fromstring(
+            '<hierarchy><node text="Add phone number" />'
+            '<node text="Continue" bounds="[100,1400][980,1530]" />'
+            '</hierarchy>'
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: popup_root
+        )
+        keys = []
+        self.controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
+        self.controller.tap = lambda *_args: self.fail("must not blind tap")
+
+        self.assertTrue(
+            self.controller.dismiss_tiktok_blocking_popup("device-popup")
+        )
+        self.assertEqual([4], keys)
+
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
     @patch("adb_controller.ET.parse")
@@ -26,6 +67,54 @@ class TikTokSearchInputTests(unittest.TestCase):
             self.controller.find_and_click_tiktok_search("device-1")
         )
         self.assertEqual([], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_search_recovers_when_video_ui_dump_has_no_search_node(
+        self, _sleep
+    ):
+        self.controller._get_tiktok_ui_root = lambda *_args: None
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id: "com.ss.android.ugc.aweme.splash.SplashActivity"
+        )
+        self.controller.focus_tiktok_search_input = lambda _device_id: True
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        self.controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_search("device-profile")
+        )
+        self.assertEqual([(1015, 124)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_search_does_not_use_header_fallback_on_search_activity(self, _sleep):
+        self.controller._get_tiktok_ui_root = lambda *_args: None
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id: "com.ss.android.ugc.aweme.search.SearchResultActivity"
+        )
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertFalse(
+            self.controller.find_and_click_tiktok_search("device-search")
+        )
+        self.assertEqual([], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_focus_search_requires_verified_input_after_fallback(self, _sleep):
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertFalse(
+            self.controller.focus_tiktok_search_input("device-no-input")
+        )
+        self.assertGreaterEqual(len(taps), 1)
 
     def test_seed_results_require_keyword_and_results_tabs(self):
         good_root = ET.fromstring(

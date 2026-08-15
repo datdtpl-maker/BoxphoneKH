@@ -29,7 +29,9 @@ ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = [int(uid.strip()) for uid in ALLOWED_USER_IDS_RAW.split(",") if uid.strip().isdigit()]
 
 # Đường dẫn đến công cụ adb.exe của phần mềm xiaowei
-ADB_PATH = r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+ADB_PATH = os.getenv(
+    "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+)
 
 # Cấu hình tự động hóa Shopee (Cho màn hình 1080x1920)
 # Tọa độ ô tìm kiếm trên trang chủ Shopee (x, y)

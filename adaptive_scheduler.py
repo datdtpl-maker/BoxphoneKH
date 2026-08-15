@@ -16,6 +16,7 @@ PLATFORM_POLICIES = {
     "shopee": AdaptivePolicy(max_workers=2, stagger_seconds=(30, 90)),
     "facebook": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),
     "tiktok": AdaptivePolicy(max_workers=4, stagger_seconds=(30, 90)),
+    "social": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),
 }
 
 
@@ -37,6 +38,10 @@ def run_adaptive(
     on_wait=None,
     sleep_fn=time.sleep,
     randint_fn=random.randint,
+    shuffle_fn=random.shuffle,
+    randomize_queue=False,
+    randomize_wave_size=False,
+    on_wave=None,
 ):
     """Run one platform with bounded concurrency and staggered starts.
 
@@ -47,11 +52,70 @@ def run_adaptive(
     if not queued:
         return []
 
+    if randomize_queue:
+        shuffle_fn(queued)
+
     max_workers = max(1, min(policy.max_workers, len(queued)))
-    active = {}
     results = {}
-    next_position = 0
     has_started = False
+
+    if randomize_wave_size:
+        total_devices = len(queued)
+        started_position = 0
+        wave_number = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while queued and not is_cancelled():
+                wave_limit = min(max_workers, len(queued))
+                wave_size = max(
+                    1,
+                    min(randint_fn(1, wave_limit), wave_limit),
+                )
+                wave = [queued.pop(0) for _ in range(wave_size)]
+                wave_number += 1
+                if on_wave:
+                    on_wave(
+                        [device_id for _, device_id in wave],
+                        wave_number,
+                        total_devices,
+                    )
+
+                active = {}
+                for index, device_id in wave:
+                    if is_cancelled():
+                        break
+                    if has_started:
+                        delay = randint_fn(*policy.stagger_seconds)
+                        if on_wait:
+                            on_wait(
+                                device_id,
+                                delay,
+                                started_position,
+                                total_devices,
+                            )
+                        if not _interruptible_sleep(
+                            delay, is_cancelled, sleep_fn
+                        ):
+                            break
+
+                    future = executor.submit(worker, device_id)
+                    active[future] = index
+                    started_position += 1
+                    has_started = True
+
+                while active:
+                    done, _ = wait(
+                        tuple(active),
+                        timeout=0.25,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        index = active.pop(future)
+                        results[index] = future.result()
+
+        return [results[index] for index in sorted(results)]
+
+    active = {}
+    next_position = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while next_position < len(queued) or active:

@@ -68,6 +68,46 @@ class AdaptiveSchedulerTests(unittest.TestCase):
         self.assertEqual(["S1"], started)
         self.assertEqual(["S1"], results)
 
+    def test_randomized_waves_shuffle_positions_and_run_every_device(self):
+        started = []
+        waves = []
+        randint_calls = []
+
+        def deterministic_randint(low, high):
+            randint_calls.append((low, high))
+            if low == 1:
+                return min(2, high)
+            return 0
+
+        def reverse_in_place(items):
+            items.reverse()
+
+        results = run_adaptive(
+            ["S1", "S2", "S3", "S4", "S5"],
+            lambda device_id: started.append(device_id) or device_id,
+            AdaptivePolicy(3, (0, 0)),
+            sleep_fn=lambda _seconds: None,
+            randint_fn=deterministic_randint,
+            shuffle_fn=reverse_in_place,
+            randomize_queue=True,
+            randomize_wave_size=True,
+            on_wave=lambda devices, wave, total: waves.append(
+                (list(devices), wave, total)
+            ),
+        )
+
+        self.assertEqual(["S5", "S4", "S3", "S2", "S1"], started)
+        self.assertEqual(["S1", "S2", "S3", "S4", "S5"], results)
+        self.assertEqual(
+            [
+                (["S5", "S4"], 1, 5),
+                (["S3", "S2"], 2, 5),
+                (["S1"], 3, 5),
+            ],
+            waves,
+        )
+        self.assertIn((1, 3), randint_calls)
+
 
 if __name__ == "__main__":
     unittest.main()

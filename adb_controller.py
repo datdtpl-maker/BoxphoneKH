@@ -357,6 +357,59 @@ class ADBController:
                 pass
             self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
 
+    def get_facebook_feed_signature(self, device_id):
+        """Return visible Feed content used to detect a white/stalled surface."""
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_feed_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_feed_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        if dump_code != 0:
+            return None
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return None
+            root = ET.parse(local_xml).getroot()
+            signature = []
+            ignored = {
+                "facebook", "home", "trang chu", "menu", "search",
+                "tim kiem", "notifications", "thong bao", "messaging",
+                "nhan tin", "create", "tao",
+            }
+            for node in root.iter():
+                bounds = node.get("bounds", "")
+                match = re.match(
+                    r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds
+                )
+                if not match:
+                    continue
+                _x1, y1, _x2, y2 = map(int, match.groups())
+                if y2 < 180:
+                    continue
+                text = self._normalize_facebook_text(
+                    f"{node.get('text', '')} {node.get('content-desc', '')}"
+                )
+                if not text or text in ignored:
+                    continue
+                signature.append((text, y1, y2))
+            return tuple(signature) if len(signature) >= 2 else None
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
     def ensure_facebook_home(self, device_id):
         """Thoát viewer/Page cũ để bắt đầu đúng tại Home Feed Facebook."""
         if self.is_facebook_home(device_id):
@@ -394,14 +447,16 @@ class ADBController:
         time.sleep(0.4)
         self.launch_app(device_id, config.FACEBOOK_PACKAGE)
         self.lock_portrait(device_id, retries=3)
-        time.sleep(1.0)
-        self.lock_portrait(device_id, retries=3)
-        time.sleep(2.5)
-        self.lock_portrait(device_id, retries=3)
-        return (
-            self.is_facebook_in_foreground(device_id)
-            and self.is_facebook_home(device_id)
-        )
+        for _ in range(8):
+            time.sleep(1.0)
+            self.lock_portrait(device_id, retries=3)
+            if (
+                self.is_facebook_in_foreground(device_id)
+                and self.is_facebook_home(device_id)
+                and self.get_facebook_feed_signature(device_id) is not None
+            ):
+                return True
+        return False
 
     @staticmethod
     def _normalize_facebook_text(value):
@@ -854,6 +909,24 @@ class ADBController:
                     f"{label_name}: Facebook không ở foreground; "
                     "đã dừng để tránh thao tác nhầm ứng dụng"
                 )
+            current_signature = None
+            skip_if_stalled = label in ("facebook_cross_warmup", "feed")
+            if skip_if_stalled:
+                current_signature = self.get_facebook_feed_signature(device_id)
+                if current_signature is None:
+                    if status_callback:
+                        next_step = (
+                            "chuyển sang TikTok"
+                            if label == "facebook_cross_warmup"
+                            else "chuyển sang Facebook B2 tìm từ khóa mồi"
+                        )
+                        status_callback(
+                            device_id,
+                            f"[{label_name}] Feed trắng/chưa tải • "
+                            f"xác nhận đã làm nóng, bỏ qua và {next_step}...",
+                        )
+                    self.lock_portrait(device_id, retries=3)
+                    return True
             dwell = min(random.randint(6, 15), total_seconds - elapsed)
             if status_callback:
                 status_callback(
@@ -872,6 +945,7 @@ class ADBController:
                         f"{label_name}: Facebook không ở foreground; "
                         "không thực hiện swipe"
                     )
+                before = current_signature
                 x = width // 2 + random.randint(-80, 80)
                 self.swipe(
                     device_id,
@@ -882,6 +956,23 @@ class ADBController:
                     duration=random.randint(650, 1050),
                 )
                 self.lock_portrait(device_id, retries=3)
+                if skip_if_stalled:
+                    time.sleep(1.0)
+                    after = self.get_facebook_feed_signature(device_id)
+                    if before is None or after is None or after == before:
+                        if status_callback:
+                            next_step = (
+                                "chuyển sang TikTok"
+                                if label == "facebook_cross_warmup"
+                                else "chuyển sang Facebook B2 tìm từ khóa mồi"
+                            )
+                            status_callback(
+                                device_id,
+                                f"[{label_name}] Feed trắng/đứng • "
+                                f"xác nhận đã làm nóng, bỏ qua và {next_step}...",
+                            )
+                        self.lock_portrait(device_id, retries=3)
+                        return True
                 item_index += 1
         self.lock_portrait(device_id, retries=3)
         return True
@@ -998,6 +1089,7 @@ class ADBController:
 
     def ensure_tiktok_home_feed(self, device_id, force_refresh=False):
         """Thoát Search/Profile và đưa TikTok về Home/For You có xác minh."""
+        self.dismiss_tiktok_blocking_popup(device_id)
         refresh_pending = bool(force_refresh)
         missing_root_attempts = 0
         fallback_home_taps = 0
@@ -3221,6 +3313,69 @@ class ADBController:
             return True
         return False
 
+    def dismiss_tiktok_blocking_popup(self, device_id):
+        """Close account/security prompts before TikTok Home automation."""
+        if not self.is_tiktok_in_foreground(device_id):
+            return False
+        root = self._get_tiktok_ui_root(device_id, "tt_blocking_popup")
+        if root is None:
+            return False
+
+        parent_map = {
+            child: parent for parent in root.iter() for child in parent
+        }
+        popup_markers = (
+            "them so dien thoai",
+            "add phone number",
+            "cap nhat so dien thoai",
+            "update phone number",
+            "bat thong bao",
+            "turn on notifications",
+            "dong bo danh ba",
+            "sync contacts",
+        )
+        close_markers = {
+            "close", "dong", "not now", "de sau", "later", "skip",
+            "bo qua", "cancel", "huy",
+        }
+        popup_found = False
+        close_coords = None
+        for node in root.iter():
+            label = self._normalize_facebook_text(
+                f"{node.get('text', '')} {node.get('content-desc', '')}"
+            )
+            if (
+                any(marker in label for marker in popup_markers)
+                or (
+                    "thoai" in label
+                    and any(marker in label for marker in ("them", "cap nhat"))
+                )
+            ):
+                popup_found = True
+            if label not in close_markers:
+                continue
+            clickable = node
+            while (
+                clickable is not None
+                and clickable.get("clickable", "false") != "true"
+            ):
+                clickable = parent_map.get(clickable)
+            close_coords = self._element_center(
+                clickable if clickable is not None else node
+            )
+            if close_coords:
+                break
+
+        if close_coords:
+            self.tap(device_id, close_coords[0], close_coords[1])
+        elif popup_found:
+            self.keyevent(device_id, 4)
+        else:
+            return False
+        time.sleep(0.8)
+        self.lock_portrait(device_id, retries=3)
+        return True
+
     def launch_tiktok(self, device_id):
         """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
         self.lock_portrait(device_id, retries=3)
@@ -3235,7 +3390,41 @@ class ADBController:
         self.lock_portrait(device_id, retries=3)
         # Tự động từ chối popup vị trí nếu hiển thị lúc mở app
         self.dismiss_tiktok_location_popup(device_id)
+        self.dismiss_tiktok_blocking_popup(device_id)
         self.lock_portrait(device_id, retries=3)
+
+    def get_tiktok_foreground_activity(self, device_id):
+        """Return the focused TikTok activity even when UIAutomator is busy."""
+        packages = (
+            config.TIKTOK_PACKAGE.casefold(),
+            config.TIKTOK_PACKAGE_ALT.casefold(),
+        )
+        for dumpsys_target in (
+            ["shell", "dumpsys", "window", "windows"],
+            ["shell", "dumpsys", "activity", "activities"],
+        ):
+            code, stdout, _ = self.execute_adb(device_id, dumpsys_target)
+            if code != 0:
+                continue
+            for line in stdout.splitlines():
+                folded = line.casefold()
+                if not any(
+                    marker in folded
+                    for marker in (
+                        "mcurrentfocus",
+                        "mfocusedapp",
+                        "mresumedactivity",
+                    )
+                ):
+                    continue
+                for package in packages:
+                    match = re.search(
+                        rf"{re.escape(package)}/([^\s}}]+)",
+                        folded,
+                    )
+                    if match:
+                        return match.group(1)
+        return None
 
     def find_and_click_tiktok_search(self, device_id):
         """Tìm và bấm vào biểu tượng Kính Lúp (Search Icon) trên TikTok"""
@@ -3280,9 +3469,15 @@ class ADBController:
                 except Exception:
                     pass
         if not coords:
-            # Fail-safe: góc phải trên một số bản TikTok là nút ba chấm.
-            # Không được tap tọa độ mù khi XML không xác minh được Search.
-            return False
+            # Video TikTok trên một số Android 8 làm UIAutomator báo
+            # "could not get idle state", dù nút Search vẫn hiển thị. Khi
+            # đó chỉ dùng header fallback nếu dumpsys xác minh đúng
+            # TikTok và không phải SearchActivity (nơi góc phải là Filters).
+            activity = self.get_tiktok_foreground_activity(device_id)
+            if not activity or "search" in activity.casefold():
+                return False
+            width, height = self.get_effective_screen_size(device_id)
+            coords = (int(width * 0.94), int(height * 0.065))
             
         self.tap(device_id, coords[0], coords[1])
         time.sleep(2.0)
@@ -3365,7 +3560,7 @@ class ADBController:
         return best
 
     def focus_tiktok_search_input(self, device_id):
-        """Focus đúng EditText của TikTok, có tọa độ dự phòng khi XML không đọc được."""
+        """Focus đúng EditText TikTok và chỉ pass khi UI xác minh được."""
         width, height = self.get_effective_screen_size(device_id)
         state = self.get_tiktok_search_input_state(device_id)
         coords = state["coords"] if state else (
@@ -3373,14 +3568,18 @@ class ADBController:
             int(height * 0.055),
         )
         self.tap(device_id, coords[0], coords[1])
-        time.sleep(0.5)
-
-        verified = self.get_tiktok_search_input_state(device_id)
-        if verified and not verified["focused"]:
-            self.tap(device_id, verified["coords"][0], verified["coords"][1])
-            time.sleep(0.4)
+        for _ in range(3):
+            time.sleep(0.5)
             verified = self.get_tiktok_search_input_state(device_id)
-        return verified is None or verified["focused"]
+            if verified and verified["focused"]:
+                return True
+            if verified:
+                self.tap(
+                    device_id,
+                    verified["coords"][0],
+                    verified["coords"][1],
+                )
+        return False
 
     def clear_tiktok_search_input(self, device_id):
         """

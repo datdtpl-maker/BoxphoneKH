@@ -10,6 +10,63 @@ from adb_controller import ADBController
 class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    def test_cross_warmup_skips_blank_feed_without_restarting_app(
+        self, _randint, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.swipe = lambda *_args, **_kwargs: (0, "", "")
+        controller.get_facebook_feed_signature = lambda _device_id: None
+        restarts = []
+        controller.restart_facebook_home = (
+            lambda device_id: restarts.append(device_id) or True
+        )
+        statuses = []
+
+        self.assertTrue(
+            controller.browse_facebook_surface(
+                "device-blank",
+                13,
+                "facebook_cross_warmup",
+                status_callback=lambda _device_id, message: statuses.append(message),
+            )
+        )
+
+        self.assertEqual([], restarts)
+        self.assertTrue(any("bỏ qua" in message for message in statuses))
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    def test_facebook_main_feed_skips_to_seed_when_stalled(
+        self, _randint, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.swipe = lambda *_args, **_kwargs: (0, "", "")
+        controller.get_facebook_feed_signature = lambda _device_id: None
+        restarts = []
+        controller.restart_facebook_home = (
+            lambda device_id: restarts.append(device_id) or False
+        )
+        statuses = []
+
+        self.assertTrue(
+            controller.browse_facebook_surface(
+                "device-blank",
+                13,
+                "feed",
+                status_callback=lambda _device_id, message: statuses.append(message),
+            )
+        )
+        self.assertEqual([], restarts)
+        self.assertTrue(any("Facebook B2" in message for message in statuses))
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     def test_cross_warmup_recovers_facebook_foreground_before_swipe(
         self, _randint, _sleep
     ):
@@ -26,6 +83,10 @@ class FacebookAutomationTests(unittest.TestCase):
             recoveries.append(device_id) or True
         )
         controller.swipe = lambda *_args, **_kwargs: swipes.append(_args)
+        signatures = iter([("feed-a",), ("feed-b",), ("feed-b",)])
+        controller.get_facebook_feed_signature = (
+            lambda _device_id: next(signatures)
+        )
 
         self.assertTrue(
             controller.browse_facebook_surface(
