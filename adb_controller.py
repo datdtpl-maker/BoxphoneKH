@@ -4917,11 +4917,11 @@ class ADBController:
         return True
 
     def find_and_click_google_maps_target(
-        self, device_id, target_names, status_callback=None, max_attempts=5
+        self, device_id, target_names, locations=None, status_callback=None, max_attempts=5
     ):
         """
         Quét tìm và click vào profile mục tiêu:
-        - Ưu tiên 1: Quét tìm ngay trên màn hình hiện tại (kể cả widget Doanh nghiệp ở trang đầu). Nếu thấy tên có "khai hoan" / "nhà thuốc khải hoàn skincare" thì bấm ngay lập tức!
+        - Ưu tiên 1: Quét tìm ngay trên màn hình hiện tại (kể cả widget Doanh nghiệp/Local Pack ở trang đầu). Nếu thấy tên có "khai hoan" / "nhà thuốc khải hoàn skincare" thì bấm ngay lập tức!
         - Ưu tiên 2: Nếu không có ở trang đầu, mới bấm vào "Doanh nghiệp khác" hoặc "Các địa điểm khác" / "More places" để mở rộng tìm kiếm.
         - Ưu tiên 3: Cuộn trang để tìm tiếp các kết quả phía sau và bấm đúng profile mục tiêu.
         """
@@ -4939,6 +4939,7 @@ class ADBController:
             "khai hoan skincare",
             "nha thuoc khai hoan",
             "khai hoan",
+            "khaihoan",
         ]:
             if fallback not in normalized_targets:
                 normalized_targets.append(fallback)
@@ -4966,8 +4967,8 @@ class ADBController:
                 return False, "", None
 
             is_hit = False
-            # Nếu chứa 'khai hoan' là mục tiêu chính xác 100%
-            if "khai hoan" in norm:
+            # Nếu chứa 'khai hoan' hoặc 'khaihoan' là mục tiêu chính xác 100%
+            if "khai hoan" in norm or "khaihoan" in norm:
                 is_hit = True
             elif any(t in norm or norm in t for t in normalized_targets if len(t) >= 6):
                 is_hit = True
@@ -4979,51 +4980,65 @@ class ADBController:
                     x1, y1, x2, y2 = map(int, m.groups())
                     # Bỏ qua nếu là thanh omnibox/URL bar phía trên cùng
                     if y2 > int(height * 0.12):
-                        return True, text, ((x1 + x2) // 2, (y1 + y2) // 2)
+                        h_node = y2 - y1
+                        # Nếu node container quá cao (>30% màn hình), click vào phần đầu của card
+                        if h_node > int(height * 0.30):
+                            click_y = y1 + int(height * 0.08)
+                        else:
+                            click_y = (y1 + y2) // 2
+                        return True, text, ((x1 + x2) // 2, click_y)
             return False, "", None
 
+        # Chờ 2.0s để trang kết quả tìm kiếm và Local Pack render ổn định hoàn toàn
+        time.sleep(2.0)
+
         for attempt in range(max_attempts):
-            root = self._get_maps_ui_root(device_id, prefix=f"maps_res_{attempt}")
-            if root is not None:
-                # 1. Quét tìm trực tiếp profile mục tiêu trước tiên
-                for elem in root.iter():
-                    is_target, raw_text, coords = _check_node_is_target(elem)
-                    if is_target and coords:
-                        if status_callback:
-                            status_callback(
-                                device_id,
-                                f"[Google Maps B3] Đã tìm thấy đúng profile '{raw_text}' • Click vào profile...",
-                            )
-                        self.tap(device_id, coords[0], coords[1])
-                        time.sleep(3.5)
-                        return True
+            # Thử quét 2 lần tại chỗ trước khi cuộn
+            for scan_pass in range(2):
+                root = self._get_maps_ui_root(device_id, prefix=f"maps_res_{attempt}_{scan_pass}")
+                if root is not None:
+                    # 1. Quét tìm trực tiếp profile mục tiêu trước tiên
+                    for elem in root.iter():
+                        is_target, raw_text, coords = _check_node_is_target(elem)
+                        if is_target and coords:
+                            if status_callback:
+                                status_callback(
+                                    device_id,
+                                    f"[Google Maps B3] Đã tìm thấy đúng profile '{raw_text}' • Click vào profile...",
+                                )
+                            self.tap(device_id, coords[0], coords[1])
+                            time.sleep(3.5)
+                            return True
 
-                # 2. CHỈ KHI KHÔNG CÓ TRÊN MÀN HÌNH MỚI tìm nút "Doanh nghiệp khác" / "Các địa điểm khác"
-                clicked_more = False
-                for elem in root.iter():
-                    text = (
-                        elem.get("text", "") or elem.get("content-desc", "")
-                    ).strip()
-                    norm = self._normalize_maps_text(text)
-                    if any(op in norm for op in other_places_keywords):
-                        bounds = elem.get("bounds", "")
-                        m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                        if m:
-                            x1, y1, x2, y2 = map(int, m.groups())
-                            if y2 > int(height * 0.15):
-                                if status_callback:
-                                    status_callback(
-                                        device_id,
-                                        f"[Google Maps B3] Chưa thấy ở trang đầu • Bấm '{text}' để xem thêm các địa điểm khác...",
-                                    )
-                                self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                                time.sleep(3.0)
-                                clicked_more = True
-                                break
+                    # 2. CHỈ KHI KHÔNG CÓ TRÊN MÀN HÌNH MỚI tìm nút "Doanh nghiệp khác" / "Các địa điểm khác"
+                    clicked_more = False
+                    for elem in root.iter():
+                        text = (
+                            elem.get("text", "") or elem.get("content-desc", "")
+                        ).strip()
+                        norm = self._normalize_maps_text(text)
+                        if any(op in norm for op in other_places_keywords):
+                            bounds = elem.get("bounds", "")
+                            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                            if m:
+                                x1, y1, x2, y2 = map(int, m.groups())
+                                if y2 > int(height * 0.15):
+                                    if status_callback:
+                                        status_callback(
+                                            device_id,
+                                            f"[Google Maps B3] Chưa thấy ở trang đầu • Bấm '{text}' để xem thêm các địa điểm khác...",
+                                        )
+                                    self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
+                                    time.sleep(3.0)
+                                    clicked_more = True
+                                    break
 
-                # Nếu vừa bấm nút xem thêm địa điểm, quét lại ngay trong lượt tiếp theo
-                if clicked_more:
-                    continue
+                    # Nếu vừa bấm nút xem thêm địa điểm, quét lại ngay
+                    if clicked_more:
+                        break
+
+                if scan_pass == 0:
+                    time.sleep(1.2)
 
             # 3. Cuộn thêm danh sách kết quả lên trên để tìm tiếp
             if status_callback:
@@ -5305,10 +5320,8 @@ class ADBController:
         selected_keyword = random.choice(kw_list)
         selected_location = random.choice(loc_list) if loc_list else ""
 
-        if selected_location and self._normalize_maps_text(selected_location) not in self._normalize_maps_text(selected_keyword):
-            search_query = f"{selected_keyword} {selected_location}"
-        else:
-            search_query = selected_keyword
+        # CHỈ TÌM ĐÚNG TỪ KHÓA BỐC TỪ Ô "Từ khóa theo dõi"
+        search_query = selected_keyword
 
         dwell_min = min_dwell if min_dwell is not None else getattr(config, "GOOGLE_MAPS_DWELL_MIN", 120)
         dwell_max = max_dwell if max_dwell is not None else getattr(config, "GOOGLE_MAPS_DWELL_MAX", 180)
@@ -5334,7 +5347,7 @@ class ADBController:
             check_cancelled()
 
             # ================= BƯỚC 2: TÌM KIẾM TỪ KHÓA TRÊN GOOGLE CHROME =================
-            loc_msg = f" • Khu vực: '{selected_location}'" if selected_location else ""
+            loc_msg = f" (Khu vực tham chiếu: '{selected_location}')" if selected_location else ""
             update_status(
                 f"[Google Chrome B2] Bốc từ khóa ngẫu nhiên '{selected_keyword}'{loc_msg} • Đang tìm kiếm trên Google..."
             )
@@ -5350,6 +5363,7 @@ class ADBController:
             found_profile = self.find_and_click_google_maps_target(
                 device_id,
                 target_names=[target_name, "Khải Hoàn Skincare", "Nhà thuốc Khải Hoàn"],
+                locations=[selected_location] if selected_location else None,
                 status_callback=status_callback,
                 max_attempts=4,
             )

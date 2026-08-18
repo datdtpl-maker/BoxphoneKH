@@ -87,6 +87,38 @@ class GoogleMapsAutomationTests(unittest.TestCase):
         self.assertTrue(any("Hoàn thành" in s for s in status_updates))
 
     @patch("time.sleep", return_value=None)
+    @patch.object(ADBController, "lock_portrait", return_value=True)
+    @patch.object(ADBController, "launch_chrome", return_value=True)
+    @patch.object(ADBController, "dismiss_chrome_popups", return_value=True)
+    @patch.object(ADBController, "ensure_chrome_ready", return_value=True)
+    @patch.object(ADBController, "find_and_search_chrome", return_value=True)
+    @patch.object(ADBController, "find_and_click_google_maps_target", return_value=True)
+    @patch.object(ADBController, "browse_google_maps_profile", return_value=True)
+    @patch.object(ADBController, "interact_google_maps_profile_actions", return_value=True)
+    def test_workflow_searches_only_keyword_without_location(
+        self,
+        mock_actions,
+        mock_browse,
+        mock_find_target,
+        mock_search_chrome,
+        mock_ready,
+        mock_popups,
+        mock_launch,
+        mock_lock,
+        mock_sleep,
+    ):
+        self.adb.google_maps_automation_workflow(
+            "dev_01",
+            keywords=["nặn mụn Phan Thiết"],
+            target_name="Nhà thuốc Khải Hoàn Skincare",
+            locations=["Phan Thiết, Lâm Đồng"],
+        )
+        mock_search_chrome.assert_called_once()
+        self.assertEqual(mock_search_chrome.call_args[0][1], "nặn mụn Phan Thiết")
+        self.assertTrue(mock_find_target.called)
+        self.assertEqual(mock_find_target.call_args[1].get("locations"), ["Phan Thiết, Lâm Đồng"])
+
+    @patch("time.sleep", return_value=None)
     @patch.object(ADBController, "get_effective_screen_size", return_value=(720, 1280))
     @patch.object(ADBController, "tap", return_value=True)
     @patch.object(ADBController, "clear_input_field", return_value=True)

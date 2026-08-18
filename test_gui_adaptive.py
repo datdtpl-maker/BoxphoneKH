@@ -243,7 +243,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app = GUIApp.__new__(GUIApp)
         app._set_maps_results = lambda _lines: None
         app.log_message = lambda _message: None
-        app.bulk_disable_rotation = lambda _devices: None
+        app.bulk_disable_rotation = lambda _devices, *args, **kwargs: None
         captured = []
 
         with (

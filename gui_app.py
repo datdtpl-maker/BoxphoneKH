@@ -2068,7 +2068,7 @@ class GUIApp(ctk.CTk):
             
         return result
 
-    def bulk_disable_rotation(self, target_devices=None):
+    def bulk_disable_rotation(self, target_devices=None, sync=False):
         if target_devices is None:
             target_devices = main.get_ordered_devices()
         def action():
@@ -2080,8 +2080,11 @@ class GUIApp(ctk.CTk):
             from concurrent.futures import ThreadPoolExecutor
             if target_devices:
                 with ThreadPoolExecutor(max_workers=max(1, len(target_devices))) as executor:
-                    executor.map(disable_rot, target_devices)
-        self.run_in_thread(action)
+                    list(executor.map(disable_rot, target_devices))
+        if sync:
+            action()
+        else:
+            self.run_in_thread(action)
 
     def prepare_social_targets(
         self, target_devices, opening_platform, is_cancelled=None
@@ -2253,7 +2256,7 @@ class GUIApp(ctk.CTk):
         tasks = self._assign_maps_tasks(keywords, locations, target_devices)
         workflow_session = main.start_workflow_session()
         is_cancelled = main.make_session_cancel_checker(workflow_session)
-        self.bulk_disable_rotation(target_devices)
+        self.bulk_disable_rotation(target_devices, sync=True)
 
         chat_id = (
             config.ALLOWED_USER_IDS[0]
