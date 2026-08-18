@@ -214,14 +214,11 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         self.assertTrue(kwargs["randomize_wave_size"])
         self.assertTrue(callable(kwargs["on_wave"]))
 
-    def test_social_queue_moves_every_target_off_shopee(self):
+    def test_social_queue_prepares_only_requested_social_platform(self):
         app = GUIApp.__new__(GUIApp)
         events = []
         fake_adb = SimpleNamespace(
             device_workflow_scope=lambda _device: nullcontext(),
-            stop_app=lambda device, package: events.append(
-                ("stop", device, package)
-            ),
             ensure_facebook_ready=lambda device: events.append(
                 ("facebook", device)
             ) or True,
@@ -233,11 +230,6 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             app.prepare_social_targets(["d1", "d2"], "facebook")
             app.prepare_social_targets(["d1", "d2"], "tiktok")
 
-        stop_events = [event for event in events if event[0] == "stop"]
-        self.assertEqual(4, len(stop_events))
-        self.assertTrue(
-            all(event[2] == "com.shopee.vn" for event in stop_events)
-        )
         self.assertCountEqual(
             [("facebook", "d1"), ("facebook", "d2")],
             [event for event in events if event[0] == "facebook"],
@@ -247,31 +239,51 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             [event for event in events if event[0] == "tiktok"],
         )
 
-    def test_shopee_adaptive_uses_shopee_policy(self):
+    def test_google_maps_adaptive_uses_maps_policy(self):
         app = GUIApp.__new__(GUIApp)
-        app.keyword_mode = SimpleNamespace(get=lambda: "original")
-        app.txt_main_keywords = _Entry("keyword-1\nkeyword-2")
-        app.ent_selection = _Entry("1-2")
-        app.parse_targets = lambda entry_widget=None: ["d1", "d2"]
-        app.run_in_thread = lambda action: action()
+        app._set_maps_results = lambda _lines: None
+        app.log_message = lambda _message: None
+        app.bulk_disable_rotation = lambda _devices: None
         captured = []
-        fake_adb = SimpleNamespace(
-            shopee_find_and_click_lamdong=(
-                lambda *_args, **_kwargs: (True, "")
-            )
-        )
 
         with (
-            patch("gui_app.config.ALLOWED_USER_IDS", []),
-            patch("gui_app.main.adb", fake_adb),
-            patch("gui_app.main.get_device_name", side_effect=lambda d: d),
+            patch("gui_app.main.adb.google_maps_automation_workflow", return_value=(True, None)),
             patch("gui_app.run_adaptive", side_effect=_run_immediately(captured)),
-            patch("builtins.print"),
         ):
-            app.run_par_search(adaptive=True)
+            app._run_maps_automation(
+                (
+                    ["keyword-1", "keyword-2"],
+                    "Target",
+                    ["Location A", "Location B"],
+                    ["d1", "d2"],
+                ),
+                "thích ứng",
+            )
 
-        self.assertEqual(2, captured[0][1].max_workers)
-        self.assertEqual((30, 90), captured[0][1].stagger_seconds)
+        self.assertEqual(3, captured[0][1].max_workers)
+        self.assertEqual((2, 5), captured[0][1].stagger_seconds)
+
+    def test_google_maps_assigns_one_keyword_and_location_to_every_device(self):
+        tasks = GUIApp._assign_maps_tasks(
+            ["keyword-1", "keyword-2"],
+            ["Phan Thiết", "Lâm Đồng"],
+            ["d1", "d2", "d3"],
+        )
+
+        self.assertEqual(["d1", "d2", "d3"], [item[0] for item in tasks])
+        self.assertEqual(3, len(tasks))
+        self.assertTrue(
+            all(
+                keyword in {"keyword-1", "keyword-2"}
+                for _, keyword, _ in tasks
+            )
+        )
+        self.assertTrue(
+            all(
+                location in {"Phan Thiết", "Lâm Đồng"}
+                for _, _, location in tasks
+            )
+        )
 
     def test_tiktok_adaptive_uses_random_social_policy(self):
         app = GUIApp.__new__(GUIApp)

@@ -58,7 +58,6 @@ adb = ADBController()
 # Các biến toàn cục điều khiển chạy tuần tự và hủy bỏ tác vụ
 cancel_sequential = False
 cancel_flag = False
-sequential_thread = None
 _workflow_session_lock = threading.Lock()
 _workflow_session_id = 0
 
@@ -190,7 +189,7 @@ class TelegramRealtimeTracker:
         self.keyword = ""
         self.current_idx = 0
         self.total_devices = 0
-        self.platform = "Shopee"
+        self.platform = "System"
 
     def start_dashboard(self, initial_text):
         msg = safe_send_message(self.chat_id, initial_text, parse_mode="Markdown", reply_markup=self.reply_markup)
@@ -199,7 +198,7 @@ class TelegramRealtimeTracker:
             self.last_text = initial_text
             self.last_edit_time = time.time()
 
-    def set_active_device(self, dev_name, dev_serial, keyword, current_idx, total_devices, platform="Shopee"):
+    def set_active_device(self, dev_name, dev_serial, keyword, current_idx, total_devices, platform="System"):
         self.device_name = dev_name
         self.device_serial = dev_serial
         self.keyword = keyword
@@ -292,101 +291,6 @@ def send_device_finished_card(chat_id, dev_name, dev_id, keyword, success, err, 
             f"⚠️ Lỗi: `{err}`"
         )
     safe_send_message(chat_id, text, parse_mode="Markdown")
-
-
-def start_shopee_profile_tracker(
-    chat_id,
-    dev_name,
-    dev_id,
-    keyword,
-    current_idx,
-    total_devices,
-    reply_markup=None,
-):
-    """Tạo một tin log Telegram mới, độc lập cho từng profile Shopee."""
-    tracker = TelegramRealtimeTracker(
-        bot,
-        chat_id,
-        reply_markup=reply_markup,
-    )
-    tracker.set_active_device(
-        dev_name,
-        dev_id,
-        keyword,
-        current_idx,
-        total_devices,
-        platform="Shopee",
-    )
-    tracker.start_dashboard(tracker.render_progress_text())
-    return tracker
-
-
-def finish_shopee_profile_tracker(
-    tracker,
-    success,
-    err,
-    duration_sec,
-):
-    """Chốt log live thành báo cáo profile ngay tại đúng vị trí tin nhắn."""
-    minutes = int(duration_sec // 60)
-    seconds = int(duration_sec % 60)
-    duration_text = (
-        f"{minutes} phút {seconds} giây"
-        if minutes
-        else f"{seconds} giây"
-    )
-    report = (
-        f"📊 **BÁO CÁO CHI TIẾT: PROFILE {tracker.device_name}**\n\n"
-        f"🤖 Kịch bản: **Shopee Automation**\n"
-        f"📱 Profile: **{tracker.device_name}** "
-        f"(ID: `{tracker.device_serial[:10]}`)\n"
-        f"🔑 Từ khóa: `{tracker.keyword}`\n"
-        f"⏱️ Tổng thời gian: **{duration_text}**\n"
-        "----------------------------------------\n"
-    )
-    if success:
-        report += "✅ **HOÀN THÀNH THÀNH CÔNG!**"
-    else:
-        report += (
-            "❌ **KỊCH BẢN CHẠY THẤT BẠI**\n"
-            f"⚠️ Lỗi: `{err}`"
-        )
-    tracker.finish_dashboard(report)
-
-
-def send_shopee_rest_countdown(
-    chat_id,
-    next_dev_name,
-    delay,
-    reply_markup=None,
-    is_cancelled_callback=None,
-):
-    """Tạo countdown riêng dưới báo cáo profile vừa hoàn tất."""
-    rest_tracker = TelegramRealtimeTracker(
-        bot,
-        chat_id,
-        reply_markup=reply_markup,
-    )
-    rest_tracker.start_dashboard(
-        f"⏳ **CHỜ CHUYỂN SANG PROFILE {next_dev_name}**\n\n"
-        f"Thời gian nghỉ: **{delay} giây**"
-    )
-    for remaining in range(delay, 0, -1):
-        if is_cancelled_callback and is_cancelled_callback():
-            rest_tracker.finish_dashboard(
-                "⏹️ **ĐÃ DỪNG TRONG THỜI GIAN NGHỈ**"
-            )
-            return False
-        rest_tracker.update_rest_countdown(
-            next_dev_name,
-            remaining,
-        )
-        time.sleep(1)
-    rest_tracker.finish_dashboard(
-        f"✅ **HẾT THỜI GIAN NGHỈ • "
-        f"CHUYỂN SANG PROFILE {next_dev_name}**"
-    )
-    return True
 
 
 def get_xiaowei_leveldb_dirs():
@@ -562,193 +466,6 @@ def get_device_name(serial):
     return serial
 
 
-def assign_shopee_keywords(keywords, devices):
-    """Random từ khóa riêng cho từng máy, không lặp cho đến khi hết kho."""
-    unique_keywords = []
-    seen = set()
-    for keyword in keywords:
-        clean_keyword = str(keyword).strip()
-        normalized = clean_keyword.casefold()
-        if clean_keyword and normalized not in seen:
-            seen.add(normalized)
-            unique_keywords.append(clean_keyword)
-
-    if not unique_keywords:
-        return {}
-
-    assignments = {}
-    device_index = 0
-    while device_index < len(devices):
-        shuffled_batch = random.sample(
-            unique_keywords,
-            len(unique_keywords),
-        )
-        for keyword in shuffled_batch:
-            if device_index >= len(devices):
-                break
-            assignments[devices[device_index]] = keyword
-            device_index += 1
-    return assignments
-
-
-def run_sequential_shopee_search(
-    message,
-    keywords,
-    devices,
-    click_first_item=False,
-    use_ai=True,
-    session_id=None,
-):
-    if session_id is None:
-        session_id = start_workflow_session()
-    session_is_cancelled = make_session_cancel_checker(session_id)
-    
-    if use_ai:
-        def gemini_status(msg):
-            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
-            
-        expanded_keywords = config.generate_keywords_via_gemini(
-            config.GEMINI_API_KEY, 
-            keywords, 
-            status_cb=gemini_status
-        )
-    else:
-        expanded_keywords = keywords
-
-    if not expanded_keywords:
-        safe_send_message(
-            message.chat.id,
-            "❌ Không có từ khóa Shopee hợp lệ để chạy.",
-        )
-        return
-
-    keyword_assignments = assign_shopee_keywords(
-        expanded_keywords,
-        devices,
-    )
-        
-    # Tạo nút dừng dạng Inline Keyboard đính kèm trực tiếp dưới tin nhắn
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-    
-    initial_text = (
-        f"⏳ **BẮT ĐẦU CHẠY TUẦN TỰ SHOPEE**\n\n"
-        f"🔑 Kho từ khóa: **{len(expanded_keywords)} từ khóa**\n"
-        f"📱 Tổng số profile: **{len(devices)}**\n"
-        f"🎲 Phân phối: **Random riêng, không lặp khi kho còn đủ**\n"
-        f"Nghỉ giữa mỗi phiên: **60 - 90 giây**\n\n"
-        f"_(Mỗi profile có một log thời gian thực riêng bên dưới)_"
-    )
-    safe_send_message(
-        message.chat.id,
-        initial_text,
-        parse_mode="Markdown",
-        reply_markup=markup,
-    )
-    
-    total_start_time = time.time()
-    success_count = 0
-    
-    for idx, dev in enumerate(devices):
-        if session_is_cancelled():
-            safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
-            break
-            
-        dev_name = get_device_name(dev)
-        current_keyword = keyword_assignments[dev]
-        tracker = start_shopee_profile_tracker(
-            message.chat.id,
-            dev_name,
-            dev,
-            current_keyword,
-            idx + 1,
-            len(devices),
-            reply_markup=markup,
-        )
-        dev_start_time = time.time()
-        
-        success, err = adb.shopee_find_and_click_lamdong(
-            dev, 
-            current_keyword, 
-            status_callback=tracker.status_callback, 
-            is_cancelled=session_is_cancelled,
-            click_first_item=click_first_item
-        )
-        
-        dev_duration = time.time() - dev_start_time
-        
-        if session_is_cancelled():
-            finish_shopee_profile_tracker(
-                tracker,
-                False,
-                "Bị dừng bởi người dùng",
-                dev_duration,
-            )
-            safe_send_message(message.chat.id, "⏹️ **ĐÃ DỪNG CHẠY TUẦN TỰ** theo yêu cầu của bạn.")
-            break
-
-        finish_shopee_profile_tracker(
-            tracker,
-            success,
-            err,
-            dev_duration,
-        )
-
-        if success:
-            success_count += 1
-        else:
-            if "Captcha" in err or "bị chặn" in err.lower():
-                temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
-                os.makedirs(temp_dir, exist_ok=True)
-                screenshot_path = os.path.join(temp_dir, f"captcha_alert_{dev_name}.png")
-                sc_success, _ = adb.take_screenshot(dev, screenshot_path)
-                if sc_success:
-                    try:
-                        with open(screenshot_path, 'rb') as photo:
-                            safe_send_photo(
-                                message.chat.id, 
-                                photo, 
-                                caption=f"🚨 **CẢNH BÁO CAPTCHA - MÁY {dev_name}**\n\nVui lòng giải tay máy này trên phần mềm xiaowei!"
-                            )
-                    except Exception as pe:
-                        print(f"Error sending photo: {pe}")
-                    try:
-                        os.remove(screenshot_path)
-                    except Exception:
-                        pass
-            
-        if idx < len(devices) - 1:
-            next_dev_name = get_device_name(devices[idx + 1])
-            delay = random.randint(60, 90)
-            send_shopee_rest_countdown(
-                message.chat.id,
-                next_dev_name,
-                delay,
-                reply_markup=markup,
-                is_cancelled_callback=session_is_cancelled,
-            )
-                
-    if not session_is_cancelled():
-        total_duration = time.time() - total_start_time
-        total_min = int(total_duration // 60)
-        total_sec = int(total_duration % 60)
-        total_time_str = f"{total_min} phút {total_sec} giây" if total_min > 0 else f"{total_sec} giây"
-        
-        final_summary = (
-            f"🏁 **HOÀN THÀNH QUY TRÌNH CHẠY TUẦN TỰ**\n"
-            f"----------------------------------------\n"
-            f"📊 Tổng xử lý: **{len(devices)}/{len(devices)} máy**\n"
-            f"🟢 Thành công: **{success_count} máy**\n"
-            f"⏱️ Tổng thời gian: **{total_time_str}**"
-        )
-        safe_send_message(
-            message.chat.id,
-            final_summary,
-            parse_mode="Markdown",
-        )
-
-
-# Hàm cập nhật ALLOWED_USER_IDS vào file .env để lưu cấu hình bảo mật lâu dài
 def save_admin_to_env(user_id):
     env_path = config.ENV_PATH
     lines = []
@@ -797,62 +514,42 @@ def check_auth(message):
         
     return True
 
-# Cập nhật cấu hình Shop dự phòng vào file .env
-def save_env_shop_names(shop_names_list):
-    """Cập nhật danh sách shop vào config và lưu xuống file .env"""
-    shop_str = ", ".join(shop_names_list)
-    config.SHOPEE_SHOP_NAMES = shop_names_list
-    config.SHOPEE_SHOP_NAMES_RAW = shop_str
-    
-    env_path = config.ENV_PATH
-    if env_path.exists():
-        try:
-            lines = env_path.read_text(encoding="utf-8").splitlines()
-            new_lines = []
-            found = False
-            for line in lines:
-                if line.startswith("SHOPEE_SHOP_NAMES="):
-                    new_lines.append(f'SHOPEE_SHOP_NAMES="{shop_str}"')
-                    found = True
-                else:
-                    new_lines.append(line)
-            if not found:
-                new_lines.append(f'SHOPEE_SHOP_NAMES="{shop_str}"')
-            env_path.write_text("\n".join(new_lines), encoding="utf-8")
-        except Exception as e:
-            print(f"[ERROR] Không thể lưu file .env: {e}")
-    else:
-        try:
-            env_path.write_text(f'SHOPEE_SHOP_NAMES="{shop_str}"\n', encoding="utf-8")
-        except Exception as e:
-            print(f"[ERROR] Không thể tạo file .env: {e}")
-
-# Lưu trữ tạm thời các phiên sinh từ khóa AI để chạy bằng Inline Button
-ai_keyword_jobs = {}
-
-def create_job_id():
-    return str(int(time.time() * 1000))[-6:]
-
 # Hàm phân tích lệnh từ ngôn ngữ tự nhiên tiếng Việt
 def parse_natural_command(text):
     text_lower = text.lower().strip()
     
-    # 0. Lệnh Sinh từ khóa Tầng 1 / Tầng 2
-    if text_lower.startswith("/t1 ") or text_lower.startswith("sinh tầng 1 ") or text_lower.startswith("tầng 1 "):
-        kw_text = re.sub(r"^(?:/t1|sinh tầng 1|tầng 1)\s+", "", text, flags=re.IGNORECASE).strip()
-        return {"action": "generate_t1", "raw_text": kw_text}
+    # Lệnh Bơm Google Maps
+    if any(k in text_lower for k in ["/maps", "/google_maps", "bơm google map", "bơm google maps", "bơm maps", "chạy google map", "chạy google maps", "google maps"]):
+        is_seq = any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt"])
+        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
+        device_idx = int(m_device.group(1)) if m_device else None
 
-    if text_lower.startswith("/t2 ") or text_lower.startswith("sinh tầng 2 ") or text_lower.startswith("tầng 2 "):
-        kw_text = re.sub(r"^(?:/t2|sinh tầng 2|tầng 2)\s+", "", text, flags=re.IGNORECASE).strip()
-        return {"action": "generate_t2", "raw_text": kw_text}
+        raw = re.sub(
+            r"^(?:/maps_seq|/maps|/google_maps|bơm google maps tuần tự|bơm google map tuần tự|bơm google maps|bơm google map|bơm maps|chạy google maps|chạy google map)\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+        raw = re.sub(
+            r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+",
+            "",
+            raw,
+            flags=re.IGNORECASE,
+        ).strip()
 
-    # Lệnh Cấu hình Shop dự phòng
-    if text_lower.startswith("/setshop ") or text_lower.startswith("cấu hình shop ") or text_lower.startswith("đặt shop ") or text_lower.startswith("set shop "):
-        shops_raw = re.sub(r"^(?:/setshop|cấu hình shop|đặt shop|set shop)\s+", "", text, flags=re.IGNORECASE).strip()
-        return {"action": "set_shop", "shops_raw": shops_raw}
+        parts = [p.strip() for p in raw.split("|") if p.strip()]
+        keywords = parts[0] if parts else "chăm sóc da, trị mụn, spa lấy mụn"
+        target_name = parts[1] if len(parts) > 1 else (config.GOOGLE_MAPS_TARGET_NAME or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT)
+        locations = parts[2] if len(parts) > 2 else (config.GOOGLE_MAPS_LOCATION_TEXT or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT)
 
-    if text_lower in ["/shop", "danh sách shop", "xem shop", "shop"]:
-        return {"action": "get_shop"}
+        return {
+            "action": "google_maps_automation",
+            "is_sequential": is_seq,
+            "keywords": keywords,
+            "target_name": target_name,
+            "locations": locations,
+            "device_idx": device_idx,
+        }
 
     # Lệnh Bơm TikTok 3 Bước
     if any(k in text_lower for k in ["/tiktok", "bơm tiktok", "chạy tiktok", "tiktok"]):
@@ -896,82 +593,6 @@ def parse_natural_command(text):
         device_idx = int(m.group(1)) if m else None
         return {"action": "home", "device_idx": device_idx}
         
-    # 5. Mở ứng dụng Shopee
-    if "mở shopee" in text_lower or "mở ứng dụng shopee" in text_lower or "chạy shopee" in text_lower:
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
-        device_idx = int(m.group(1)) if m else None
-        return {"action": "open_shopee", "device_idx": device_idx}
-        
-    # 6. Đóng ứng dụng Shopee
-    if "đóng shopee" in text_lower or "tắt shopee" in text_lower or "đóng ứng dụng shopee" in text_lower:
-        m = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
-        device_idx = int(m.group(1)) if m else None
-        return {"action": "close_shopee", "device_idx": device_idx}
-
-    # 7. Tìm kiếm sản phẩm trên Shopee
-    shopee_keywords = ["shopee", "tìm", "tìm kiếm"]
-    if any(k in text_lower for k in shopee_keywords):
-        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
-        device_idx = int(m_device.group(1)) if m_device else None
-        
-        keyword = ""
-        m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+?)\s+(?:trên|ở)\s+shopee", text_lower)
-        if m_search:
-            keyword = m_search.group(1)
-        else:
-            m_search = re.search(r"shopee\s+(?:tìm kiếm|tìm)\s+(.+)", text_lower)
-            if m_search:
-                keyword = m_search.group(1)
-            else:
-                m_search = re.search(r"(?:tìm kiếm|tìm)\s+shopee\s+(.+)", text_lower)
-                if m_search:
-                    keyword = m_search.group(1)
-                else:
-                    m_search = re.search(r"(?:tìm kiếm|tìm)\s+(.+)", text_lower)
-                    if m_search:
-                        keyword = m_search.group(1)
-        
-        if keyword:
-            keyword = re.sub(r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+", "", keyword)
-            keyword = keyword.strip()
-            
-            if "lâm đồng" in text_lower or "lam dong" in text_lower:
-                click_first_item = False
-                first_item_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-                if any(ind in text_lower for ind in first_item_indicators):
-                    click_first_item = True
-                
-                keyword_clean = re.sub(r"(?:tỉnh\s+)?(?:lâm\s+đồng|lam\s+dong)", "", keyword, flags=re.IGNORECASE)
-                keyword_clean = re.sub(r"(?:tuần\s+tự|tuan\s+tu|lần\s+lượt|lan\s+luot)", "", keyword_clean, flags=re.IGNORECASE)
-                
-                for ind in first_item_indicators:
-                    keyword_clean = re.sub(r"\b" + re.escape(ind) + r"\b", "", keyword_clean, flags=re.IGNORECASE)
-                
-                keyword_clean = re.sub(r"\s+", " ", keyword_clean).strip()
-                
-                keywords = [k.strip() for k in re.split(r'[,;|]', keyword_clean) if k.strip()]
-                if not keywords:
-                    keywords = [keyword_clean]
-                
-                if any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt", "lan luot"]):
-                    return {
-                        "action": "shopee_search_lamdong_sequential", 
-                        "keywords": keywords, 
-                        "device_idx": device_idx,
-                        "click_first_item": click_first_item
-                    }
-                return {
-                    "action": "shopee_search_lamdong", 
-                    "keywords": keywords, 
-                    "device_idx": device_idx,
-                    "click_first_item": click_first_item
-                }
-                
-            keywords = [k.strip() for k in re.split(r'[,;|]', keyword) if k.strip()]
-            if not keywords:
-                keywords = [keyword]
-            return {"action": "shopee_search", "keywords": keywords, "device_idx": device_idx}
-            
     # 8. Lệnh Click tọa độ thủ công
     m_click = re.search(r"click\s+(\d+)\s+(\d+)(?:\s+(?:máy|máy số|số|device)?\s*(\d+))?", text_lower)
     if m_click:
@@ -999,212 +620,65 @@ def parse_natural_command(text):
     return None
 
 # Xử lý lệnh /start, /help và /menu
-@bot.message_handler(commands=['start', 'help', 'menu', 't1', 't2', 'setshop', 'shop'])
+@bot.message_handler(commands=["start", "help", "menu"])
 def handle_slash_commands(message):
-    if not check_auth(message):
-        return
-
-    cmd = message.text.strip()
-    cmd_lower = cmd.lower()
-
-    if cmd_lower.startswith("/t1"):
-        kw_text = cmd[3:].strip()
-        if not kw_text:
-            bot.reply_to(message, "⚠️ Vui lòng nhập từ khóa chính sau lệnh `/t1`, ví dụ:\n`/t1 Lotion Bôi Ghẻ Ngứa`", parse_mode="Markdown")
-            return
-        handle_t1_generation(message, kw_text)
-
-    elif cmd_lower.startswith("/t2"):
-        kw_text = cmd[3:].strip()
-        if not kw_text:
-            bot.reply_to(message, "⚠️ Vui lòng nhập tiêu đề thô sau lệnh `/t2`, ví dụ:\n`/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`", parse_mode="Markdown")
-            return
-        handle_t2_generation(message, kw_text)
-
-    elif cmd_lower.startswith("/setshop"):
-        shops_raw = cmd[8:].strip()
-        if not shops_raw:
-            bot.reply_to(message, "⚠️ Vui lòng nhập danh sách shop sau lệnh `/setshop`, ví dụ:\n`/setshop shop_a, shop_b`", parse_mode="Markdown")
-            return
-        handle_set_shop(message, shops_raw)
-
-    elif cmd_lower.startswith("/shop"):
-        handle_get_shop(message)
-
-    elif cmd_lower in ["/start", "/help", "/menu"]:
+    if check_auth(message):
         send_full_dashboard(message)
 
+
 def send_full_dashboard(message):
-    shops_str = ", ".join(config.SHOPEE_SHOP_NAMES) if config.SHOPEE_SHOP_NAMES else "Chưa cấu hình"
     instructions = (
-        "🤖 **BOXPHONE AUTOMATION - BẢNG ĐIỀU KHIỂN & HƯỚNG DẪN BOT** 🤖\n\n"
-        f"🏬 **Shop dự phòng hiện tại:** `{shops_str}`\n"
-        "----------------------------------------\n\n"
-        "📖 **HƯỚNG DẪN SỬ DỤNG CHI TIẾT TẤT CẢ LỆNH:**\n\n"
-
-        "🪄 **1. SINH TỪ KHÓA BẰNG GEMINI AI:**\n"
-        "• **Tầng 1 (SEO Expansion - Sinh từ khóa phụ):**\n"
-        "  Cú pháp: `/t1 <tên sản phẩm>` hoặc `sinh tầng 1 <tên sản phẩm>`\n"
-        "  _Ví dụ:_ `/t1 Lotion Bôi Ghẻ Ngứa Premiscab`\n\n"
-        "• **Tầng 2 (Bóc tách Tiêu đề thô CoT):**\n"
-        "  Cú pháp: `/t2 <tiêu đề 1>, <tiêu đề 2>` hoặc `sinh tầng 2 <tiêu đề>`\n"
-        "  _Ví dụ:_ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`\n"
-        "  *(Sau khi AI sinh từ khóa, bấm nút `▶️ Chạy Tuần Tự` hoặc `⚡ Chạy Song Song` ngay dưới tin nhắn để khởi chạy)*\n\n"
-
-        "🛒 **2. LỆNH TÌM KIẾM & TƯƠNG TÁC SHOPEE:**\n"
-        "• **Chạy Tuần Tự (Cập nhật Real-time 100%):**\n"
-        "  `tìm tuần tự lâm đồng deriva, son môi`\n"
-        "• **Chạy Lướt Top 1 / Shopee Video:**\n"
-        "  `tìm tuần tự lâm đồng deriva video`\n"
-        "• **Chạy Song Song Tất Cả Các Máy:**\n"
-        "  `tìm lâm đồng deriva`\n"
-        "• **Chạy Trên Một Máy Chỉ Định:**\n"
-        "  `máy 1 tìm lâm đồng deriva`\n\n"
-
-        "🎵 **3. LỆNH BƠM TIKTOK 3 BƯỚC:**\n"
-        "• **Chạy TikTok Song Song (Tất cả máy):**\n"
-        "  `/tiktok từ khóa 1, từ khóa 2 | kenh_a, kenh_b`\n"
-        "  _(Mỗi máy chọn ngẫu nhiên đúng 1 kênh trong danh sách)_\n"
-        "• **Chạy TikTok Tuần Tự:**\n"
-        "  `/tiktok tuần tự từ khóa 1, từ khóa 2 | kenh_a, kenh_b`\n"
-        "• **Chạy TikTok Trên Máy Chỉ Định:**\n"
-        "  `máy 1 bơm tiktok từ khóa 1 | kenh_a, kenh_b`\n\n"
-
-        "⚙️ **4. CẤU HÌNH SHOP DỰ PHÒNG:**\n"
-        "• **Cài đặt danh sách shop mới:**\n"
-        "  `/setshop shop_a, shop_b` hoặc `đặt shop shop_a, shop_b`\n"
-        "• **Xem danh sách shop đang lưu:**\n"
-        "  `/shop` hoặc `danh sách shop`\n\n"
-
-        "📊 **4. THIẾT BỊ & GIÁM SÁT MÀN HÌNH:**\n"
-        "• **Xem danh sách máy kết nối:** `danh sách máy` hoặc `trạng thái`\n"
-        "• **Chụp ảnh màn hình:** `chụp màn hình máy 1`\n"
-        "• **Điều khiển ứng dụng:** `mở shopee`, `đóng shopee`, `quay lại`, `trang chủ`\n\n"
-
-        "🛑 **5. DỪNG TÁC VỤ KHẨN CẤP:**\n"
-        "• Nhắn `dừng` / `stop` hoặc bấm nút **`🛑 DỪNG KHẨN CẤP`** bên dưới.\n"
+        "🤖 **BOXPHONECONTROL • BẢNG ĐIỀU KHIỂN**\n\n"
+        "📍 **Google Maps Ranking**\n"
+        "Dùng giao diện máy tính để quét từ khóa Notion và kiểm tra vị trí "
+        "hồ sơ qua Places API chính thức. Module này không tạo lượt tương tác.\n\n"
+        "🎵 **TikTok**\n"
+        "/tiktok từ khóa 1, từ khóa 2 | kênh_a, kênh_b\n"
+        "/tiktok tuần tự từ khóa | kênh_mục_tiêu\n\n"
+        "📊 **Thiết bị**\n"
+        "• danh sách máy\n"
+        "• chụp màn hình máy 1\n"
+        "• quay lại máy 1 / trang chủ máy 1\n\n"
+        "🛑 Nhắn dừng hoặc bấm nút bên dưới để dừng tác vụ."
     )
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        telebot.types.InlineKeyboardButton("🪄 Sinh Tầng 1 (SEO)", callback_data="btn_t1_prompt"),
-        telebot.types.InlineKeyboardButton("🧠 Sinh Tầng 2 (Tiêu đề)", callback_data="btn_t2_prompt"),
-        telebot.types.InlineKeyboardButton("🏬 Danh sách Shop", callback_data="btn_shop"),
-        telebot.types.InlineKeyboardButton("📊 Danh sách Máy", callback_data="btn_list"),
-        telebot.types.InlineKeyboardButton("📸 Chụp màn hình S1", callback_data="btn_screenshot_1"),
-        telebot.types.InlineKeyboardButton("🛑 DỪNG KHẨN CẤP", callback_data="stop_all")
+        telebot.types.InlineKeyboardButton(
+            "📊 Danh sách Máy", callback_data="btn_list"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "📸 Chụp màn hình S1", callback_data="btn_screenshot_1"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "🛑 DỪNG KHẨN CẤP", callback_data="stop_all"
+        ),
     )
-    bot.reply_to(message, instructions, parse_mode="Markdown", reply_markup=markup)
-
-def handle_t1_generation(message, kw_text):
-    status_msg = bot.reply_to(message, f"🪄 [Gemini AI] Đang bóc tách & sinh từ khóa **Tầng 1 (SEO)** cho: `{kw_text}`...", parse_mode="Markdown")
-    
-    titles = [k.strip() for k in re.split(r'[,;\n|]', kw_text) if k.strip()]
-    generated_kws = config.generate_keywords_via_gemini(config.GEMINI_API_KEY, titles)
-    
-    if not generated_kws:
-        safe_edit_message("❌ Gemini AI không sinh được từ khóa Tầng 1. Vui lòng kiểm tra lại GEMINI_API_KEY.", message.chat.id, status_msg.message_id)
-        return
-
-    job_id = create_job_id()
-    ai_keyword_jobs[job_id] = {
-        "tier": 1,
-        "keywords": generated_kws,
-        "raw_text": kw_text
-    }
-
-    kw_list_str = "\n".join([f"{idx+1}. `{kw}`" for idx, kw in enumerate(generated_kws[:15])])
-    if len(generated_kws) > 15:
-        kw_list_str += f"\n_... và {len(generated_kws) - 15} từ khóa khác._"
-
-    res_text = (
-        f"✅ **ĐÃ SINH {len(generated_kws)} TỪ KHÓA TẦNG 1 (SEO EXPANSION)**\n\n"
-        f"{kw_list_str}\n\n"
-        f"👇 **Bấm nút dưới đây để khởi chạy ngay trên Box Phone:**"
+    bot.reply_to(
+        message,
+        instructions,
+        parse_mode="Markdown",
+        reply_markup=markup,
     )
-    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        telebot.types.InlineKeyboardButton("▶️ Chạy Tuần Tự (Tầng 1)", callback_data=f"t1_seq:{job_id}"),
-        telebot.types.InlineKeyboardButton("⚡ Chạy Song Song (Tầng 1)", callback_data=f"t1_par:{job_id}")
-    )
-    safe_edit_message(res_text, message.chat.id, status_msg.message_id, reply_markup=markup, parse_mode="Markdown")
 
-def handle_t2_generation(message, kw_text):
-    status_msg = bot.reply_to(message, f"🧠 [Gemini AI] Đang phân tích CoT & sinh từ khóa **Tầng 2 (Bóc tách Tiêu đề)** cho:\n`{kw_text}`...", parse_mode="Markdown")
-    
-    titles = [k.strip() for k in re.split(r'[\n;]', kw_text) if k.strip()]
-    if len(titles) == 1 and "," in kw_text:
-        titles = [k.strip() for k in kw_text.split(",") if k.strip()]
-
-    generated_kws = config.generate_keywords_tier2_via_gemini(config.GEMINI_API_KEY, titles)
-    
-    if not generated_kws:
-        safe_edit_message("❌ Gemini AI không sinh được từ khóa Tầng 2. Vui lòng kiểm tra lại GEMINI_API_KEY.", message.chat.id, status_msg.message_id)
-        return
-
-    job_id = create_job_id()
-    ai_keyword_jobs[job_id] = {
-        "tier": 2,
-        "keywords": generated_kws,
-        "raw_text": kw_text
-    }
-
-    kw_list_str = "\n".join([f"{idx+1}. `{kw}`" for idx, kw in enumerate(generated_kws[:15])])
-    if len(generated_kws) > 15:
-        kw_list_str += f"\n_... và {len(generated_kws) - 15} từ khóa khác._"
-
-    res_text = (
-        f"✅ **ĐÃ SINH {len(generated_kws)} TỪ KHÓA TẦNG 2 (BÓC TÁCH TIÊU ĐỀ)**\n\n"
-        f"{kw_list_str}\n\n"
-        f"👇 **Bấm nút dưới đây để khởi chạy ngay trên Box Phone:**"
-    )
-    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        telebot.types.InlineKeyboardButton("▶️ Chạy Tuần Tự (Tầng 2)", callback_data=f"t2_seq:{job_id}"),
-        telebot.types.InlineKeyboardButton("⚡ Chạy Song Song (Tầng 2)", callback_data=f"t2_par:{job_id}")
-    )
-    safe_edit_message(res_text, message.chat.id, status_msg.message_id, reply_markup=markup, parse_mode="Markdown")
-
-def handle_set_shop(message, shops_raw):
-    shop_list = [s.strip() for s in re.split(r'[,;\n|]', shops_raw) if s.strip()]
-    if not shop_list:
-        bot.reply_to(message, "❌ Danh sách shop không hợp lệ.")
-        return
-    save_env_shop_names(shop_list)
-    shops_str = ", ".join(shop_list)
-    bot.reply_to(message, f"✅ **ĐÃ CẬP NHẬT DANH SÁCH SHOP DỰ PHÒNG!**\n\n🏬 Danh sách shop mới: `{shops_str}`\n\n_Đã lưu trực tiếp vào cấu hình hệ thống & file .env._", parse_mode="Markdown")
-
-def handle_get_shop(message):
-    if not config.SHOPEE_SHOP_NAMES:
-        bot.reply_to(message, "⚠️ Chưa có shop dự phòng nào được cấu hình. Sử dụng `/setshop shop1, shop2` để thêm shop.", parse_mode="Markdown")
-        return
-    shops_str = "\n".join([f"• `{s}`" for s in config.SHOPEE_SHOP_NAMES])
-    bot.reply_to(message, f"🏬 **DANH SÁCH SHOP DỰ PHÒNG HIỆN TẠI ({len(config.SHOPEE_SHOP_NAMES)} Shop):**\n\n{shops_str}", parse_mode="Markdown")
 
 # Xử lý tất cả Inline Keyboard Callbacks
 @bot.callback_query_handler(func=lambda call: True)
 def handle_inline_callbacks(call):
     data = call.data
     chat_id = call.message.chat.id
-    
-    if data == "btn_t1_prompt":
-        bot.answer_callback_query(call.id)
-        safe_send_message(chat_id, "💡 **HƯỚNG DẪN SINH TỪ KHÓA TẦNG 1:**\n\nGõ theo cú pháp: `/t1 <tên sản phẩm>` hoặc `sinh tầng 1 <tên sản phẩm>`\n\n_Ví dụ:_ `/t1 Lotion Bôi Ghẻ Ngứa Premiscab`", parse_mode="Markdown")
 
-    elif data == "btn_t2_prompt":
-        bot.answer_callback_query(call.id)
-        safe_send_message(chat_id, "💡 **HƯỚNG DẪN SINH TỪ KHÓA TẦNG 2:**\n\nGõ theo cú pháp: `/t2 <tiêu đề 1>, <tiêu đề 2>` hoặc `sinh tầng 2 <tiêu đề>`\n\n_Ví dụ:_ `/t2 Lotion Bôi Ghẻ Ngứa Premiscab Permethrin, Giải Độc Gan Silymarin`", parse_mode="Markdown")
-
-    elif data == "btn_shop":
-        bot.answer_callback_query(call.id)
-        handle_get_shop(call.message)
-
-    elif data == "btn_list":
+    if data == "btn_list":
         bot.answer_callback_query(call.id)
         devices = get_ordered_devices()
-        res = f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI ({len(devices)} máy):**\n\n"
-        for d in devices:
-            res += f"📱 **Máy {get_device_name(d)}**: ID: `{d}`\n"
-        safe_send_message(chat_id, res, parse_mode="Markdown")
+        response = (
+            f"📊 **DANH SÁCH THIẾT BỊ ĐANG KẾT NỐI "
+            f"({len(devices)} máy):**\n\n"
+        )
+        for device in devices:
+            response += (
+                f"📱 **Máy {get_device_name(device)}**: ID: {device}\n"
+            )
+        safe_send_message(chat_id, response, parse_mode="Markdown")
 
     elif data == "btn_screenshot_1":
         bot.answer_callback_query(call.id)
@@ -1212,98 +686,35 @@ def handle_inline_callbacks(call):
         if not devices:
             safe_send_message(chat_id, "❌ Không có máy nào đang kết nối.")
             return
-        tgt_dev = devices[0]
-        tgt_name = get_device_name(tgt_dev)
-        temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+        device = devices[0]
+        device_name = get_device_name(device)
+        temp_dir = os.path.join(os.path.dirname(__file__), "temp")
         os.makedirs(temp_dir, exist_ok=True)
-        local_path = os.path.join(temp_dir, f"screenshot_{tgt_name}.png")
-        success, result = adb.take_screenshot(tgt_dev, local_path)
+        local_path = os.path.join(
+            temp_dir, f"screenshot_{device_name}.png"
+        )
+        success, _ = adb.take_screenshot(device, local_path)
         if success:
-            with open(local_path, 'rb') as photo:
-                bot.send_photo(chat_id, photo, caption=f"🖼️ Ảnh chụp màn hình **Máy {tgt_name}**")
+            with open(local_path, "rb") as photo:
+                bot.send_photo(
+                    chat_id,
+                    photo,
+                    caption=f"🖼️ Ảnh chụp màn hình Máy {device_name}",
+                )
             try:
                 os.remove(local_path)
-            except Exception:
+            except OSError:
                 pass
-
-    elif data.startswith("t1_seq:") or data.startswith("t2_seq:"):
-        bot.answer_callback_query(call.id)
-        job_id = data.split(":")[1]
-        if job_id not in ai_keyword_jobs:
-            safe_send_message(chat_id, "⚠️ Phiên sinh từ khóa này đã hết hạn. Vui lòng gõ `/t1` hoặc `/t2` để sinh từ khóa mới.")
-            return
-        job = ai_keyword_jobs[job_id]
-        kws = job["keywords"]
-        tier_label = f"Tầng {job['tier']}"
-        devices = get_ordered_devices()
-        
-        global sequential_thread
-        if sequential_thread and sequential_thread.is_alive():
-            safe_send_message(chat_id, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng gõ 'dừng' trước.")
-        else:
-            safe_send_message(chat_id, f"🚀 **KHỞI CHẠY TUẦN TỰ {tier_label.upper()}**\n\nĐang quét trên {len(devices)} máy với {len(kws)} từ khóa AI...", parse_mode="Markdown")
-            workflow_session = start_workflow_session()
-            sequential_thread = threading.Thread(
-                target=run_sequential_shopee_search,
-                args=(call.message, kws, devices, False),
-                kwargs={"session_id": workflow_session},
-            )
-            sequential_thread.daemon = True
-            sequential_thread.start()
-
-    elif data.startswith("t1_par:") or data.startswith("t2_par:"):
-        bot.answer_callback_query(call.id)
-        job_id = data.split(":")[1]
-        if job_id not in ai_keyword_jobs:
-            safe_send_message(chat_id, "⚠️ Phiên sinh từ khóa này đã hết hạn. Vui lòng gõ `/t1` hoặc `/t2` để sinh từ khóa mới.")
-            return
-        job = ai_keyword_jobs[job_id]
-        kws = job["keywords"]
-        tier_label = f"Tầng {job['tier']}"
-        devices = get_ordered_devices()
-        workflow_session = start_workflow_session()
-        session_is_cancelled = make_session_cancel_checker(
-            workflow_session
-        )
-        
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-        status_msg = safe_send_message(chat_id, f"🚀 **KHỞI CHẠY SONG SONG {tier_label.upper()}**\n\nĐang chạy song song trên {len(devices)} máy với {len(kws)} từ khóa AI...", parse_mode="Markdown", reply_markup=markup)
-        
-        def run_search_parallel(device_id):
-            dev_name = get_device_name(device_id)
-            current_keyword = random.choice(kws)
-            dev_start = time.time()
-            success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=session_is_cancelled, click_first_item=False)
-            dev_dur = time.time() - dev_start
-            send_device_finished_card(chat_id, dev_name, device_id, current_keyword, success, err, dev_dur)
-            return dev_name, current_keyword, success, err
-
-        def run_par_bg():
-            results = []
-            with ThreadPoolExecutor(max_workers=len(devices)) as executor:
-                futures = [executor.submit(run_search_parallel, dev) for dev in devices]
-                for future in futures:
-                    results.append(future.result())
-            success_count = sum(1 for r in results if r[2])
-            summary = f"🏁 **HOÀN THÀNH CHẠY SONG SONG {tier_label.upper()} ({success_count}/{len(devices)} MÁY THÀNH CÔNG)**"
-            safe_edit_message(summary, chat_id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
-
-        threading.Thread(target=run_par_bg, daemon=True).start()
 
     elif data == "stop_all":
         bot.answer_callback_query(call.id)
         cancel_all_workflows()
-        status_msg = safe_send_message(chat_id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
-        
-        def finish_stop_notice():
-            time.sleep(3.5)
-            try:
-                safe_edit_message("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", chat_id, status_msg.message_id)
-            except Exception:
-                pass
-                
-        threading.Thread(target=finish_stop_notice, daemon=True).start()
+        safe_send_message(
+            chat_id,
+            "⏹️ **ĐÃ DỪNG TẤT CẢ TÁC VỤ**",
+            parse_mode="Markdown",
+        )
+
 
 # Xử lý tất cả tin nhắn văn bản (Ngôn ngữ tự nhiên)
 @bot.message_handler(func=lambda message: True)
@@ -1319,22 +730,6 @@ def handle_all_messages(message):
         return
 
     action = cmd["action"]
-
-    if action == "generate_t1":
-        handle_t1_generation(message, cmd["raw_text"])
-        return
-
-    if action == "generate_t2":
-        handle_t2_generation(message, cmd["raw_text"])
-        return
-
-    if action == "set_shop":
-        handle_set_shop(message, cmd["shops_raw"])
-        return
-
-    if action == "get_shop":
-        handle_get_shop(message)
-        return
 
     devices = get_ordered_devices()
     if not devices:
@@ -1353,6 +748,151 @@ def handle_all_messages(message):
             return
     else:
         target_devices = devices
+
+    if action == "google_maps_automation":
+        is_seq = cmd.get("is_sequential", False)
+        keywords = cmd.get("keywords")
+        target_name = cmd.get("target_name") or config.GOOGLE_MAPS_TARGET_NAME or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT
+        locations = cmd.get("locations") or config.GOOGLE_MAPS_LOCATION_TEXT or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT
+        workflow_session = start_workflow_session()
+        session_is_cancelled = make_session_cancel_checker(
+            workflow_session
+        )
+
+        if is_seq or len(target_devices) == 1:
+            def run_seq_maps_thread():
+                tracker = TelegramRealtimeTracker(bot, message.chat.id)
+                tracker.start_dashboard(
+                    f"📍 **BƠM GOOGLE MAPS TUẦN TỰ**\n"
+                    f"Hồ sơ mục tiêu: `{target_name}`\n"
+                    f"Đang quét trên {len(target_devices)} máy..."
+                )
+
+                success_count = 0
+                for idx, dev in enumerate(target_devices):
+                    if session_is_cancelled():
+                        break
+                    dev_name = get_device_name(dev)
+                    tracker.set_active_device(
+                        dev_name,
+                        dev,
+                        f"Maps: {target_name}",
+                        idx + 1,
+                        len(target_devices),
+                        platform="Google Maps",
+                    )
+                    dev_start = time.time()
+                    success, err = adb.google_maps_automation_workflow(
+                        dev,
+                        keywords=keywords,
+                        target_name=target_name,
+                        locations=locations,
+                        status_callback=tracker.status_callback,
+                        is_cancelled=session_is_cancelled,
+                    )
+                    dev_dur = time.time() - dev_start
+                    send_device_finished_card(
+                        message.chat.id,
+                        dev_name,
+                        dev,
+                        f"Google Maps: {target_name}",
+                        success,
+                        err,
+                        dev_dur,
+                    )
+                    if success:
+                        success_count += 1
+
+                tracker.finish_dashboard(
+                    f"🏁 **KẾT QUẢ GOOGLE MAPS TUẦN TỰ: "
+                    f"{success_count}/{len(target_devices)} MÁY THÀNH CÔNG**"
+                )
+
+            threading.Thread(target=run_seq_maps_thread, daemon=True).start()
+        else:
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(
+                telebot.types.InlineKeyboardButton(
+                    "🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"
+                )
+            )
+            status_msg = bot.reply_to(
+                message,
+                f"📍 **BƠM GOOGLE MAPS SONG SONG** trên {len(target_devices)} máy...\n"
+                f"Hồ sơ mục tiêu: `{target_name}`",
+                reply_markup=markup,
+            )
+
+            def run_maps_parallel(device_id):
+                dev_name = get_device_name(device_id)
+                tracker = TelegramRealtimeTracker(bot, message.chat.id)
+                tracker.start_dashboard(
+                    f"📍 **GOOGLE MAPS SONG SONG • MÁY {dev_name}**\n"
+                    f"Hồ sơ mục tiêu: `{target_name}`"
+                )
+                tracker.set_active_device(
+                    dev_name,
+                    device_id,
+                    f"Maps: {target_name}",
+                    1,
+                    1,
+                    platform="Google Maps",
+                )
+                dev_start = time.time()
+                success, err = adb.google_maps_automation_workflow(
+                    device_id,
+                    keywords=keywords,
+                    target_name=target_name,
+                    locations=locations,
+                    status_callback=tracker.status_callback,
+                    is_cancelled=session_is_cancelled,
+                )
+                dev_dur = time.time() - dev_start
+                if success:
+                    tracker.finish_dashboard(
+                        f"✅ **MÁY {dev_name} HOÀN THÀNH GOOGLE MAPS**\n"
+                        f"Hồ sơ: `{target_name}`"
+                    )
+                else:
+                    tracker.finish_dashboard(
+                        f"❌ **MÁY {dev_name} GOOGLE MAPS THẤT BẠI**\n"
+                        f"Lỗi: `{err}`"
+                    )
+                send_device_finished_card(
+                    message.chat.id,
+                    dev_name,
+                    device_id,
+                    f"Google Maps: {target_name}",
+                    success,
+                    err,
+                    dev_dur,
+                )
+                return dev_name, success, err
+
+            def run_par_maps_bg():
+                results = []
+                with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
+                    futures = [
+                        executor.submit(run_maps_parallel, dev)
+                        for dev in target_devices
+                    ]
+                    for future in futures:
+                        results.append(future.result())
+                success_count = sum(1 for r in results if r[1])
+                summary = (
+                    f"🏁 **HOÀN THÀNH BƠM GOOGLE MAPS SONG SONG "
+                    f"({success_count}/{len(target_devices)} MÁY THÀNH CÔNG)**"
+                )
+                safe_edit_message(
+                    summary,
+                    message.chat.id,
+                    status_msg.message_id,
+                    reply_markup=None,
+                    parse_mode="Markdown",
+                )
+
+            threading.Thread(target=run_par_maps_bg, daemon=True).start()
+        return
 
     if action == "tiktok_automation":
         is_seq = cmd.get("is_sequential", False)
@@ -1483,138 +1023,6 @@ def handle_all_messages(message):
         else:
             bot.edit_message_text(f"❌ Không thể chụp màn hình máy {tgt_name}. Lỗi: {result}", message.chat.id, status_msg.message_id)
 
-    elif action == "shopee_search":
-        workflow_session = start_workflow_session()
-        session_is_cancelled = make_session_cancel_checker(
-            workflow_session
-        )
-        keywords = cmd["keywords"]
-        def gemini_status(msg):
-            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
-        expanded_keywords = config.generate_keywords_via_gemini(
-            config.GEMINI_API_KEY, 
-            keywords, 
-            status_cb=gemini_status
-        )
-        
-        if len(target_devices) == 1:
-            tgt_dev = target_devices[0]
-            tgt_name = get_device_name(tgt_dev)
-            current_keyword = random.choice(expanded_keywords)
-            
-            tracker = TelegramRealtimeTracker(bot, message.chat.id)
-            tracker.start_dashboard(f"🛒 **Máy {tgt_name}**: Bắt đầu mở Shopee và tìm kiếm `{current_keyword}`...")
-            tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
-            
-            dev_start = time.time()
-            success, err = adb.shopee_search_sequence(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=session_is_cancelled)
-            duration = time.time() - dev_start
-            
-            tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm kiếm.")
-            send_device_finished_card(message.chat.id, tgt_name, tgt_dev, current_keyword, success, err, duration)
-        else:
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-            status_msg = bot.reply_to(message, f"🚀 Bắt đầu chạy song song trên {len(target_devices)} máy...", reply_markup=markup)
-            keyword_assignments = assign_shopee_keywords(
-                expanded_keywords,
-                target_devices,
-            )
-            
-            def run_search_parallel(device_id):
-                dev_name = get_device_name(device_id)
-                current_keyword = keyword_assignments[device_id]
-                dev_start = time.time()
-                success, err = adb.shopee_search_sequence(device_id, current_keyword, is_cancelled=session_is_cancelled)
-                dev_dur = time.time() - dev_start
-                send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
-                return dev_name, current_keyword, success, err
-                
-            results = []
-            with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                futures = [executor.submit(run_search_parallel, dev) for dev in target_devices]
-                for future in futures:
-                    results.append(future.result())
-            
-            success_count = sum(1 for r in results if r[2])
-            summary = f"🏁 **HOÀN THÀNH TÌM KIẾM SONG SONG ({success_count}/{len(target_devices)} MÁY)**"
-            safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
-
-    elif action == "shopee_search_lamdong":
-        workflow_session = start_workflow_session()
-        session_is_cancelled = make_session_cancel_checker(
-            workflow_session
-        )
-        keywords = cmd["keywords"]
-        click_first = cmd.get("click_first_item", False)
-        
-        def gemini_status(msg):
-            safe_send_message(message.chat.id, f"🤖 [Gemini AI]: {msg}")
-        expanded_keywords = config.generate_keywords_via_gemini(
-            config.GEMINI_API_KEY, 
-            keywords, 
-            status_cb=gemini_status
-        )
-        
-        if len(target_devices) == 1:
-            tgt_dev = target_devices[0]
-            tgt_name = get_device_name(tgt_dev)
-            current_keyword = random.choice(expanded_keywords)
-            
-            tracker = TelegramRealtimeTracker(bot, message.chat.id)
-            tracker.start_dashboard(f"🔍 **Máy {tgt_name}**: Bắt đầu quét shop Lâm Đồng từ khóa `{current_keyword}`...")
-            tracker.set_active_device(tgt_name, tgt_dev, current_keyword, 1, 1)
-            
-            dev_start = time.time()
-            success, err = adb.shopee_find_and_click_lamdong(tgt_dev, current_keyword, status_callback=tracker.status_callback, is_cancelled=session_is_cancelled, click_first_item=click_first)
-            duration = time.time() - dev_start
-            
-            tracker.finish_dashboard("🏁 Hoàn tất tác vụ tìm shop Lâm Đồng.")
-            send_device_finished_card(message.chat.id, tgt_name, tgt_dev, current_keyword, success, err, duration)
-        else:
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(telebot.types.InlineKeyboardButton("🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"))
-            status_msg = bot.reply_to(message, f"🚀 Bắt đầu quét shop Lâm Đồng song song trên {len(target_devices)} máy...", reply_markup=markup)
-            keyword_assignments = assign_shopee_keywords(
-                expanded_keywords,
-                target_devices,
-            )
-            
-            def run_search_parallel(device_id):
-                dev_name = get_device_name(device_id)
-                current_keyword = keyword_assignments[device_id]
-                dev_start = time.time()
-                success, err = adb.shopee_find_and_click_lamdong(device_id, current_keyword, is_cancelled=session_is_cancelled, click_first_item=click_first)
-                dev_dur = time.time() - dev_start
-                send_device_finished_card(message.chat.id, dev_name, device_id, current_keyword, success, err, dev_dur)
-                return dev_name, current_keyword, success, err
-                
-            results = []
-            with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                futures = [executor.submit(run_search_parallel, dev) for dev in target_devices]
-                for future in futures:
-                    results.append(future.result())
-            
-            success_count = sum(1 for r in results if r[2])
-            summary = f"🏁 **KẾT QUẢ QUÉT SHOP LÂM ĐỒNG SONG SONG ({success_count}/{len(target_devices)} MÁY THÀNH CÔNG)**"
-            safe_edit_message(summary, message.chat.id, status_msg.message_id, reply_markup=None, parse_mode="Markdown")
-
-    elif action == "shopee_search_lamdong_sequential":
-        keywords = cmd["keywords"]
-        click_first = cmd.get("click_first_item", False)
-        global sequential_thread
-        if sequential_thread and sequential_thread.is_alive():
-            bot.reply_to(message, "⚠️ Hiện đang có một tiến trình chạy tuần tự đang diễn ra. Vui lòng nhắn 'dừng' để hủy trước khi khởi chạy phiên mới.")
-        else:
-            workflow_session = start_workflow_session()
-            sequential_thread = threading.Thread(
-                target=run_sequential_shopee_search,
-                args=(message, keywords, target_devices, click_first),
-                kwargs={"session_id": workflow_session},
-            )
-            sequential_thread.daemon = True
-            sequential_thread.start()
-
     elif action == "stop_all":
         cancel_all_workflows()
         status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
@@ -1627,16 +1035,6 @@ def handle_all_messages(message):
                 pass
                 
         threading.Thread(target=finish_stop_notice).start()
-
-    elif action == "open_shopee":
-        for dev in target_devices:
-            adb.launch_app(dev, config.SHOPEE_PACKAGE)
-        bot.reply_to(message, f"✅ Đã mở Shopee trên {len(target_devices)} máy.")
-
-    elif action == "close_shopee":
-        for dev in target_devices:
-            adb.stop_app(dev, config.SHOPEE_PACKAGE)
-        bot.reply_to(message, f"✅ Đã buộc dừng Shopee trên {len(target_devices)} máy.")
 
     elif action == "back":
         for dev in target_devices:

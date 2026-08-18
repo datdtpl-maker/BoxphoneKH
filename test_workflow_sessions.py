@@ -1,8 +1,6 @@
 import unittest
 import threading
 import time
-from unittest.mock import patch
-
 import main
 from adb_controller import ADBController
 
@@ -44,33 +42,6 @@ class WorkflowSessionTests(unittest.TestCase):
         main.cancel_all_workflows()
 
         self.assertTrue(is_cancelled())
-
-    def test_delayed_old_shopee_worker_cannot_run_in_new_session(self):
-        old_session = main.start_workflow_session()
-        main.start_workflow_session()
-
-        class Message:
-            class Chat:
-                id = 0
-
-            chat = Chat()
-
-        with (
-            patch.object(main, "safe_send_message"),
-            patch.object(
-                main.adb,
-                "shopee_find_and_click_lamdong",
-            ) as shopee_workflow,
-        ):
-            main.run_sequential_shopee_search(
-                Message(),
-                ["keyword"],
-                ["device"],
-                use_ai=False,
-                session_id=old_session,
-            )
-
-        shopee_workflow.assert_not_called()
 
     def test_new_platform_waits_until_old_device_workflow_releases_control(self):
         controller = ADBController(adb_path="adb")

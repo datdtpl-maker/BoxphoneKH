@@ -1,133 +1,108 @@
-# BoxPhone Automation
+# BoxPhoneControl
 
-Ứng dụng Windows điều khiển nhiều điện thoại Android qua ADB, hỗ trợ quy trình tự động hóa Shopee, TikTok, Facebook và báo cáo tiến trình theo thời gian thực qua Telegram.
+Ứng dụng Windows chuyên nghiệp quản lý và điều khiển hàng loạt điện thoại Android (Boxphone) qua ADB. Hỗ trợ tự động hóa đa nền tảng: **Bơm Google Maps (qua Google Chrome)**, **TikTok**, **Facebook**, đồng bộ lịch từ khóa tự động từ **Notion** và điều khiển/báo cáo từ xa qua **Telegram Bot**.
 
-Repository công khai không chứa token, ID Telegram, serial thiết bị, tên shop hoặc tên kênh thực tế. Toàn bộ thông tin vận hành phải được cấu hình cục bộ.
+---
 
-## Tính năng
+## 🌟 Tính Năng Nổi Bật
 
-### Shopee
+### 1. Bơm Google Maps (Google Chrome Automation)
+- **Mở Google Chrome**: Tự động xử lý popup điều khoản dịch vụ, đồng bộ tài khoản để sẵn sàng hoạt động.
+- **Tự động nhận diện 3 giao diện Chrome**:
+  - *Trang chủ Chrome (New Tab)*: Nhận diện ô "Tìm kiếm hoặc nhập URL" ở giữa màn hình.
+  - *Trang kết quả tìm kiếm Google*: Tự động bấm nút **dấu X ❌** để xóa nhanh từ khóa cũ, xóa triệt để input và nhập từ khóa mới.
+  - *Trang chi tiết địa điểm/profile*: Tự động nhận diện và bấm vào **thanh URL bar trên cùng (`y ~ 10%`)**, xóa URL cũ và nhập từ khóa mới.
+- **Bộ gõ Tiếng Việt chuẩn**: Hỗ trợ gõ tiếng Việt có dấu chuẩn xác qua bộ gõ XwIME (`XW_INPUT_B64`) và xóa sạch input (`XW_CLEAR_TEXT` + phím Backspace).
+- **Thuật toán tìm Profile thông minh**:
+  - *Ưu tiên 1*: Quét và bấm ngay vào profile mục tiêu (*Nhà thuốc Khải Hoàn Skincare*) ngay trên trang kết quả đầu tiên.
+  - *Ưu tiên 2*: Chỉ bấm *"Doanh nghiệp khác"* / *"Các địa điểm khác"* khi trang đầu chưa hiển thị profile mục tiêu.
+  - *Ưu tiên 3*: Cuộn trang tự động để tìm tiếp profile nếu ở xa.
+- **Lướt xem tự nhiên như người thật**: Ở lại profile trong **2 - 3 phút** (120s – 180s ngẫu nhiên), luân chuyển xem thông tin Tổng quan, Bài đánh giá và Hình ảnh.
+- **Tương tác thực tế (Bước 5)**: Cuộn mượt về đầu trang profile và bấm ngẫu nhiên các nút hành động tròn (*Chỉ đường*, *Chia sẻ*, *Trang web*, *Lưu*, *Gọi điện*...) hoặc các tab tương tác.
 
-- Chạy tuần tự hoặc song song trên nhiều thiết bị.
-- Chọn ngẫu nhiên đúng một từ khóa cho mỗi lượt chạy.
-- Ba chế độ từ khóa: gốc, mở rộng AI và tầng 2 AI.
-- Mỗi đầu vào AI sinh đúng 10 từ khóa dự phòng khi API lỗi.
-- Tự mở đúng ô tìm kiếm, tránh bấm nhầm giỏ hàng.
-- Nếu đang ở trang chi tiết sản phẩm, ứng dụng dùng kính lúp hoặc quay lại Trang chủ trước khi tìm kiếm.
-- Hỗ trợ danh sách shop dự phòng, phân cách bằng dấu phẩy.
+### 2. Tự Động Hóa TikTok & Facebook
+- Hỗ trợ đầy đủ các kịch bản nuôi kênh, tìm kiếm từ khóa mồi, xem clip/bài viết, dạo Newfeed và tương tác tự nhiên.
+- Hỗ trợ các chế độ chạy: **Tuần tự**, **Song song**, **Thích ứng** và **Luân phiên máy**.
 
-### TikTok
+### 3. Đồng Bộ Lịch Từ Khóa Notion
+- Tự động nạp danh sách từ khóa theo dõi từ cơ sở dữ liệu Notion:
+  - `Google Maps - Từ khóa theo dõi`
+  - `TikTok - Từ khóa nhiệm vụ`, `TikTok - Kênh mục tiêu`
+  - `Facebook - Từ khóa mồi`, `Facebook - Page mục tiêu`
+- Bốc ngẫu nhiên từ khóa theo danh sách phân tách bằng dấu phẩy.
+- Nút **Hoàn thành tuần** tự động cập nhật trạng thái lên Notion.
 
-- Trước workflow chính, mở Facebook và nuôi Feed ngẫu nhiên 3–5 phút.
-- Quy trình ba bước: lướt Trang chủ, tìm từ khóa nhiệm vụ, tìm và vào kênh mục tiêu.
-- Xóa sạch nội dung cũ trước khi nhập từ khóa mới.
-- Mở clip trong kênh và chuyển clip theo khoảng thời gian cấu hình sẵn.
-- Chạy tuần tự hoặc song song.
+### 4. Báo Cáo & Điều Khiển Qua Telegram
+- Gửi thông báo và log tiến trình realtime đến nhóm/kênh Telegram riêng.
+- Hỗ trợ các lệnh điều khiển từ xa: `/maps`, `/tiktok`, `/facebook`, `/status`, `/stop`...
 
-### Facebook
+---
 
-- Trước workflow chính, mở TikTok và xem video ngẫu nhiên 3–5 phút.
-- Nuôi Feed, tìm từ khóa mồi và vào đúng Page mục tiêu.
-- Hỗ trợ giao diện Facebook tiếng Việt và tiếng Anh.
-- Tự phục hồi về Home nếu đang ở Story, Reels hoặc Page cũ.
-- Chạy tuần tự hoặc song song.
+## ⚙️ Cấu Hình Môi Trường (.env)
 
-### Telegram
-
-- Báo cáo trạng thái theo thời gian thực cho từng thiết bị.
-- Tách riêng thông báo Shopee, TikTok và Facebook.
-- Bỏ lệnh tồn đọng đúng một lần khi bot khởi động.
-- Hỗ trợ dừng tác vụ khẩn cấp.
-
-## Yêu cầu
-
-- Windows 10/11.
-- Python 3.10 trở lên nếu chạy từ mã nguồn.
-- ADB và thiết bị Android đã bật USB debugging.
-- Bàn phím ADB tương thích với broadcast `XW_INPUT_B64` và `XW_CLEAR_TEXT`.
-- Telegram Bot Token.
-- Gemini API Key nếu muốn sinh từ khóa bằng AI.
-
-## Chạy từ mã nguồn
-
-```powershell
-git clone https://github.com/datdtpl-maker/BoxphoneKH.git
-cd BoxphoneKH
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python gui_app.py
-```
-
-## Cấu hình
-
-### Đồng bộ lịch từ khóa Notion
-
-Tool có nút **Quét từ khóa Notion** để nạp dữ liệu vào các ô Shopee, TikTok và
-Facebook. Mỗi dòng Notion là một lịch chạy theo tuần và cần có các cột:
-
-- `Tên lịch`, `Thời gian áp dụng`, `Đang áp dụng`, `Trạng thái bơm`
-- `Shopee - Từ khóa gốc`
-- `TikTok - Từ khóa nhiệm vụ`, `TikTok - Kênh mục tiêu`
-- `Facebook - Từ khóa mồi`, `Facebook - Page mục tiêu`
-- `Ghi chú Admin`, `Lần quét gần nhất`
-
-Nhập `NOTION API TOKEN` và link database Notion (hoặc `DATA SOURCE ID`) trong khu vực cấu hình, bấm
-**Lưu cấu hình**, sau đó bật các lịch cần dùng trên Notion. Khi quét, tool hiển
-thị các nút theo `Tên lịch` của toàn bộ dòng đã bật `Đang áp dụng`; bấm lịch nào
-thì bộ từ khóa của đúng dòng đó được nạp vào Shopee, TikTok và Facebook, đồng
-thời `Trạng thái bơm` chuyển thành `Đang xử lý`. Khi kết thúc tuần, bấm
-**Hoàn thành tuần** để đồng bộ trạng thái `Hoàn thành`; lịch đã hoàn thành sẽ
-không xuất hiện trong các lần quét tiếp theo. Token chỉ được lưu trong `.env`
-cục bộ và không được commit lên Git.
-
-Tạo file `.env` tại thư mục gốc:
+Tạo file `.env` cùng thư mục với file chạy `BoxPhoneControl.exe` hoặc sử dụng tính năng **Import .env** trên giao diện:
 
 ```env
-TELEGRAM_BOT_TOKEN=your_bot_token
-ALLOWED_USER_IDS=123456789
-GEMINI_API_KEY=your_gemini_api_key
-SHOPEE_SHOP_NAMES=shop_a,shop_b
-TIKTOK_TARGET_CHANNEL=kenh_tiktok_a,kenh_tiktok_b
-FACEBOOK_TARGET_PAGE_EXACT=ten_page_day_du_tuy_chon
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_NOTIFICATIONS_ENABLED=1
+ALLOWED_USER_IDS=
+
+# Đường dẫn ADB (Mặc định dùng ADB của Xiaowei hoặc Android SDK)
+ADB_PATH=C:\Program Files (x86)\xiaowei\tools\adb.exe
+
+# Cấu hình Google Maps
+GOOGLE_MAPS_TARGET_NAME=Nhà thuốc Khải Hoàn Skincare
+GOOGLE_MAPS_LOCATION_TEXT=Phan Thiết, Lâm Đồng
+GOOGLE_MAPS_DWELL_MIN=120
+GOOGLE_MAPS_DWELL_MAX=180
+
+# Cấu hình Notion API
+NOTION_API_TOKEN=
+NOTION_DATA_SOURCE_ID=
+
+# Cấu hình TikTok & Facebook
+TIKTOK_TARGET_CHANNEL=
+FACEBOOK_TARGET_PAGE_EXACT=
 ```
 
-Không commit file `.env`. File này đã được khai báo trong `.gitignore`.
+> ⚠️ **Lưu ý bảo mật**: Tuyệt đối không chia sẻ hoặc đẩy file `.env` chứa token/khóa bí mật lên các kho lưu trữ công khai.
 
-Các trường Telegram token, Admin ID, đường dẫn ADB và danh sách shop cũng có thể được cập nhật trong giao diện rồi bấm `LƯU`.
-Danh sách kênh TikTok được phân cách bằng dấu phẩy; mỗi máy sẽ chọn ngẫu nhiên đúng một kênh để tìm kiếm.
+---
 
-## Bản chạy Windows
+## 🚀 Hướng Dẫn Sử Dụng
 
-File thực thi được đặt tại:
+### Cách 1: Chạy trực tiếp từ file EXE (Portable)
+Tải và chạy file `BoxPhoneControl.exe` tại thư mục `release/` (hoặc thư mục gốc dự án) mà không cần cài đặt môi trường Python.
 
-```text
-release/BoxPhoneControl.exe
-```
+### Cách 2: Chạy từ mã nguồn Python
 
-Đây là bản portable, không cần tạo tag hoặc GitHub Release. Người dùng vẫn phải tự nhập cấu hình riêng trên máy của mình.
+1. **Cài đặt thư viện phụ thuộc**:
+   ```powershell
+   python -m pip install -r requirements.txt
+   ```
 
-## Kiểm thử
+2. **Khởi chạy ứng dụng**:
+   ```powershell
+   python gui_app.py
+   ```
 
+---
+
+## 🧪 Kiểm Thử & Đóng Gói (Build)
+
+### Chạy Unit Test:
 ```powershell
-python -m unittest -v `
-  test_telegram_task_routing.py `
-  test_shopee_search_click.py `
-  test_shopee_keyword_generation.py `
-  test_tiktok_search_input.py `
-  test_gui_tiktok_status.py `
-  test_tiktok_telegram_tracker.py `
-  test_facebook_automation.py `
-  test_gui_facebook_status.py
+python -m unittest discover -p "test_*.py"
 ```
 
-## Bảo mật
+### Đóng gói file chạy EXE:
+```powershell
+python build_exe.py
+```
+File thực thi sau khi đóng gói sẽ được đặt tại `BoxPhoneControl.exe` và `release/BoxPhoneControl.exe`.
 
-- Không hardcode hoặc chia sẻ Telegram Bot Token và Gemini API Key.
-- Không đưa serial thiết bị, ảnh chụp màn hình hoặc dữ liệu vận hành vào issue công khai.
-- Nếu token từng bị commit, hãy thu hồi token cũ và tạo token mới.
-- Chỉ sử dụng automation trên tài khoản, thiết bị và dữ liệu mà bạn có quyền quản lý.
+---
 
-## Lưu ý
-
-Giao diện và tọa độ của ứng dụng bên thứ ba có thể thay đổi theo phiên bản. Nên kiểm thử trên một thiết bị trước khi chạy hàng loạt.
+## 📄 Bản Quyền & Giấy Phép
+Dự án được phát triển và tối ưu bởi **Khải Hoàn Skincare**.

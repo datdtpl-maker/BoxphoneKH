@@ -7,14 +7,12 @@ import main
 
 class TelegramTaskRoutingTests(unittest.TestCase):
     def test_command_parser_selects_only_one_platform(self):
-        shopee = main.parse_natural_command(
-            "tìm tuần tự lâm đồng kem trị mụn"
-        )
+        unrelated = main.parse_natural_command("tìm kem trị mụn")
         tiktok = main.parse_natural_command(
             "/tiktok tuần tự từ khóa mẫu | Kênh TikTok Mẫu"
         )
 
-        self.assertEqual("shopee_search_lamdong_sequential", shopee["action"])
+        self.assertIsNone(unrelated)
         self.assertEqual("tiktok_automation", tiktok["action"])
 
     def test_gui_bot_startup_drops_pending_updates_only_once(self):

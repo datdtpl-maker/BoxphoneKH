@@ -13,7 +13,7 @@ class AdaptivePolicy:
 
 
 PLATFORM_POLICIES = {
-    "shopee": AdaptivePolicy(max_workers=2, stagger_seconds=(30, 90)),
+    "google_maps": AdaptivePolicy(max_workers=3, stagger_seconds=(2, 5)),
     "facebook": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),
     "tiktok": AdaptivePolicy(max_workers=4, stagger_seconds=(30, 90)),
     "social": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),

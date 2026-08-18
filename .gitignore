@@ -15,8 +15,6 @@ debug/
 *.log
 
 # Exclude result text files
-shopee_results.txt
-shopee_dump.xml
 parse_results.txt
 window_dump.xml
 window_dump_new.xml
@@ -30,7 +28,6 @@ extract_serial_names.py
 find_mappings.py
 find_mappings_appdata.py
 inspect_leveldb.py
-parse_shopee_xml.py
 parse_xml.py
 parse_xml_safe.py
 print_xml_summary.py
@@ -41,4 +38,7 @@ BoxPhoneControl.exe
 BoxPhoneControl-fixed-v*.exe
 build-*/
 dist-*/
+build/
+dist/
 *.spec
+tools/

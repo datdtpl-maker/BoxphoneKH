@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import main
 from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
+from google_maps_rank import split_google_maps_keywords
 from notion_keyword_sync import (
     NotionSyncError,
     PUMP_STATUS_PROCESSING,
@@ -519,12 +520,12 @@ class GUIApp(ctk.CTk):
         self.module_tabs.grid(
             row=2, column=0, columnspan=3, sticky="nsew", pady=(0, 0)
         )
-        self.shopee_tab = self.module_tabs.add("Shopee")
+        self.maps_tab = self.module_tabs.add("Google Maps")
         self.tiktok_tab = self.module_tabs.add("TikTok")
         self.facebook_tab = self.module_tabs.add("Facebook")
-        self.module_tabs.set("Shopee")
+        self.module_tabs.set("Google Maps")
         for module_tab in (
-            self.shopee_tab,
+            self.maps_tab,
             self.tiktok_tab,
             self.facebook_tab,
         ):
@@ -532,267 +533,121 @@ class GUIApp(ctk.CTk):
             module_tab.grid_columnconfigure(0, weight=1)
             module_tab.grid_rowconfigure(0, weight=1)
 
-        # ---------------- SHOPEE AUTOMATION ----------------
-        self.shopee_scroll = ctk.CTkScrollableFrame(
-            self.shopee_tab,
+        # ---------------- GOOGLE MAPS AUTOMATION ----------------
+        self.maps_scroll = ctk.CTkScrollableFrame(
+            self.maps_tab,
             **scroll_style,
         )
-        self.shopee_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self.maps_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
-        self.shopee_heading = ctk.CTkFrame(
-            self.shopee_scroll, fg_color=orange_soft, corner_radius=16
+        self.maps_heading = ctk.CTkFrame(
+            self.maps_scroll, fg_color=orange_soft, corner_radius=16
         )
-        self.shopee_heading.pack(fill="x", padx=16, pady=(14, 10))
+        self.maps_heading.pack(fill="x", padx=16, pady=(14, 10))
 
-        self.shopee_mark = ctk.CTkLabel(
-            self.shopee_heading,
-            text="S",
+        ctk.CTkLabel(
+            self.maps_heading,
+            text="M",
             width=38,
             height=38,
             corner_radius=12,
             fg_color="#ffffff",
             text_color=orange,
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-        )
-        self.shopee_mark.pack(side="left", padx=10, pady=9)
+        ).pack(side="left", padx=10, pady=9)
 
-        self.shopee_heading_copy = ctk.CTkFrame(
-            self.shopee_heading, fg_color="transparent"
+        maps_heading_copy = ctk.CTkFrame(
+            self.maps_heading, fg_color="transparent"
         )
-        self.shopee_heading_copy.pack(side="left", fill="y", pady=8)
-
+        maps_heading_copy.pack(side="left", fill="y", pady=8)
         ctk.CTkLabel(
-            self.shopee_heading,
-            text="SẴN SÀNG",
-            width=76,
+            maps_heading_copy,
+            text="Bơm Google Maps",
+            font=title_font,
+            text_color=text,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            maps_heading_copy,
+            text="Tự động tìm kiếm từ khóa, vào Profile mục tiêu, lướt xem và tương tác như người thật",
+            font=body_font,
+            text_color=muted,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            self.maps_heading,
+            text="BƠM TỰ ĐỘNG",
             height=26,
             corner_radius=8,
             fg_color="#ffffff",
-            text_color=orange,
+            text_color=green,
             font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
         ).pack(side="right", padx=10)
 
-        self.lbl_tasks = ctk.CTkLabel(
-            self.shopee_heading_copy,
-            text="Shopee Automation",
-            font=title_font,
-            text_color=text,
-        )
-        self.lbl_tasks.pack(anchor="w")
-
-        self.lbl_shopee_hint = ctk.CTkLabel(
-            self.shopee_heading_copy,
-            text="Tìm kiếm đa tầng và điều phối thiết bị",
-            font=body_font,
-            text_color=muted,
-        )
-        self.lbl_shopee_hint.pack(anchor="w")
-        
-        self.main_keywords_header = ctk.CTkFrame(
-            self.shopee_scroll,
-            fg_color="transparent",
-        )
-        self.main_keywords_header.pack(fill="x", padx=16, pady=(0, 3))
-
-        self.lbl_main_keywords = ctk.CTkLabel(
-            self.main_keywords_header,
-            text="Từ khóa chính • Mỗi dòng một từ khóa",
+        ctk.CTkLabel(
+            self.maps_scroll,
+            text="Từ khóa theo dõi • Phân cách bằng dấu phẩy • Random 1 từ/máy",
             font=label_font,
             text_color=text,
-        )
-        self.lbl_main_keywords.pack(side="left")
-
-        self.btn_toggle_main_keywords = ctk.CTkButton(
-            self.main_keywords_header,
-            text="Mở rộng ▼",
-            width=92,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color=blue_soft,
-            hover_color="#dce9ff",
-            text_color=blue,
-            corner_radius=10,
-            cursor="hand2",
-            command=lambda: self.toggle_shopee_keyword_box("main"),
-        )
-        self.btn_toggle_main_keywords.pack(side="right")
-
-        self.txt_main_keywords = ctk.CTkTextbox(
-            self.shopee_scroll,
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 3))
+        self.txt_maps_keywords = ctk.CTkTextbox(
+            self.maps_scroll,
             fg_color=surface,
             border_color=input_border,
             text_color=text,
             border_width=1,
             corner_radius=12,
-            height=64,
+            height=110,
             font=body_font,
             scrollbar_button_color="#c5d5e7",
             scrollbar_button_hover_color="#a9bfd9",
         )
-        self.txt_main_keywords.pack(fill="x", padx=16, pady=(0, 8))
-        
-        # Chế độ từ khóa
-        self.keyword_mode = ctk.StringVar(value="original")
-        self.mode_frame = ctk.CTkFrame(
-            self.shopee_scroll,
-            fg_color=glass_tint,
-            corner_radius=12,
-            border_width=1,
-            border_color=border,
-        )
-        self.mode_frame.pack(fill="x", padx=16, pady=(0, 8))
-        
-        self.rad_orig = ctk.CTkRadioButton(
-            self.mode_frame,
-            text="Gốc (Không AI)",
-            variable=self.keyword_mode,
-            value="original",
-            font=label_font,
-            text_color=text,
-            fg_color=blue,
-            hover_color=blue_hover,
-            border_color="#9eb0c7",
-        )
-        self.rad_orig.pack(side="left", padx=(10, 7), pady=9)
-        
-        self.rad_ai = ctk.CTkRadioButton(
-            self.mode_frame,
-            text="Mở rộng (AI)",
-            variable=self.keyword_mode,
-            value="ai",
-            font=label_font,
-            text_color=text,
-            fg_color=violet,
-            hover_color="#5b3fb3",
-            border_color="#9eb0c7",
-        )
-        self.rad_ai.pack(side="left", padx=7, pady=9)
+        self.txt_maps_keywords.pack(fill="x", padx=16, pady=(0, 8))
 
-        self.rad_ai_t2 = ctk.CTkRadioButton(
-            self.mode_frame,
-            text="Tầng 2 (AI sinh)",
-            variable=self.keyword_mode,
-            value="ai_t2",
-            font=label_font,
-            text_color=text,
-            fg_color=violet,
-            hover_color="#5b3fb3",
-            border_color="#9eb0c7",
-        )
-        self.rad_ai_t2.pack(side="left", padx=(7, 10), pady=9)
-        
-        # Nút sinh từ khóa qua AI
-        self.ai_btn_grid = ctk.CTkFrame(
-            self.shopee_scroll, fg_color="transparent"
-        )
-        self.ai_btn_grid.pack(fill="x", padx=16, pady=(0, 8))
-        self.ai_btn_grid.columnconfigure(0, weight=1)
-        self.ai_btn_grid.columnconfigure(1, weight=1)
+        maps_fields = ctk.CTkFrame(self.maps_scroll, fg_color="transparent")
+        maps_fields.pack(fill="x", padx=16, pady=(0, 8))
+        maps_fields.columnconfigure((0, 1), weight=1)
 
-        self.btn_gen_ai = ctk.CTkButton(
-            self.ai_btn_grid,
-            text="Tạo từ khóa tầng 1",
-            font=button_font,
-            fg_color=violet_soft,
-            hover_color="#e8e0ff",
-            text_color=violet,
-            border_width=1,
-            border_color="#d9cdfa",
-            corner_radius=12,
-            height=38,
-            cursor="hand2",
-            command=self.generate_ai_keywords_action,
-        )
-        self.btn_gen_ai.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        
-        self.btn_gen_ai_t2 = ctk.CTkButton(
-            self.ai_btn_grid,
-            text="Tạo từ khóa tầng 2",
-            font=button_font,
-            fg_color=violet_soft,
-            hover_color="#e8e0ff",
-            text_color=violet,
-            border_width=1,
-            border_color="#d9cdfa",
-            corner_radius=12,
-            height=38,
-            cursor="hand2",
-            command=self.generate_ai_keywords_tier2_action,
-        )
-        self.btn_gen_ai_t2.grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        
-        self.ai_keywords_header = ctk.CTkFrame(
-            self.shopee_scroll,
-            fg_color="transparent",
-        )
-        self.ai_keywords_header.pack(fill="x", padx=16, pady=(0, 3))
-
-        self.lbl_ai_keywords = ctk.CTkLabel(
-            self.ai_keywords_header,
-            text="Từ khóa AI đã tạo",
-            font=label_font,
-            text_color=text,
-        )
-        self.lbl_ai_keywords.pack(side="left")
-
-        self.btn_toggle_ai_keywords = ctk.CTkButton(
-            self.ai_keywords_header,
-            text="Mở rộng ▼",
-            width=92,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            fg_color=violet_soft,
-            hover_color="#e8e0ff",
-            text_color=violet,
-            corner_radius=10,
-            cursor="hand2",
-            command=lambda: self.toggle_shopee_keyword_box("ai"),
-        )
-        self.btn_toggle_ai_keywords.pack(side="right")
-        
-        self.txt_ai_keywords = ctk.CTkTextbox(
-            self.shopee_scroll,
-            fg_color=surface,
-            border_color=input_border,
-            text_color="#245ca6",
-            border_width=1,
-            corner_radius=12,
-            height=64,
-            font=body_font,
-            scrollbar_button_color="#c5d5e7",
-            scrollbar_button_hover_color="#a9bfd9",
-        )
-        self.txt_ai_keywords.pack(fill="x", padx=16, pady=(0, 8))
-
-        self._shopee_keyword_boxes = {
-            "main": {
-                "textbox": self.txt_main_keywords,
-                "button": self.btn_toggle_main_keywords,
-                "expanded": False,
-            },
-            "ai": {
-                "textbox": self.txt_ai_keywords,
-                "button": self.btn_toggle_ai_keywords,
-                "expanded": False,
-            },
-        }
-        
-        self.ent_selection = ctk.CTkEntry(
-            self.shopee_scroll,
-            placeholder_text="Chọn máy chạy Shopee (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+        self.ent_maps_target = ctk.CTkEntry(
+            maps_fields,
+            placeholder_text="Tên hồ sơ Google Maps mục tiêu (Mặc định: Nhà thuốc Khải Hoàn Skincare)",
             height=42,
             **field_style,
         )
-        self.ent_selection.pack(fill="x", padx=16, pady=(0, 8))
-        
-        self.btn_grid = ctk.CTkFrame(self.shopee_scroll, fg_color="transparent")
-        self.btn_grid.pack(fill="x", padx=16, pady=(0, 7))
-        self.btn_grid.columnconfigure(0, weight=1)
-        self.btn_grid.columnconfigure(1, weight=1)
-        self.btn_grid.columnconfigure(2, weight=1)
-        
-        self.btn_seq = ctk.CTkButton(
-            self.btn_grid,
+        self.ent_maps_target.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.ent_maps_target.insert(
+            0,
+            config.GOOGLE_MAPS_TARGET_NAME
+            or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT,
+        )
+
+        self.ent_maps_location = ctk.CTkEntry(
+            maps_fields,
+            placeholder_text="Khu vực • Phân cách dấu phẩy • Random 1 khu vực/máy (Mặc định: Phan Thiết, Lâm Đồng)",
+            height=42,
+            **field_style,
+        )
+        self.ent_maps_location.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self.ent_maps_location.insert(
+            0,
+            config.GOOGLE_MAPS_LOCATION_TEXT
+            or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT,
+        )
+
+        self.ent_maps_selection = ctk.CTkEntry(
+            self.maps_scroll,
+            placeholder_text=(
+                "Chọn máy chạy Google Maps (Ví dụ: 1-5,10 hoặc trống=Tất cả)"
+            ),
+            height=42,
+            **field_style,
+        )
+        self.ent_maps_selection.pack(fill="x", padx=16, pady=(0, 8))
+
+        maps_buttons = ctk.CTkFrame(self.maps_scroll, fg_color="transparent")
+        maps_buttons.pack(fill="x", padx=16, pady=(0, 8))
+        maps_buttons.columnconfigure((0, 1, 2), weight=1)
+        ctk.CTkButton(
+            maps_buttons,
             text="Chạy tuần tự",
             font=button_font,
             fg_color=green,
@@ -801,12 +656,10 @@ class GUIApp(ctk.CTk):
             corner_radius=13,
             height=44,
             cursor="hand2",
-            command=self.run_seq_search,
-        )
-        self.btn_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
-        
-        self.btn_par = ctk.CTkButton(
-            self.btn_grid,
+            command=self.run_maps_sequential,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ctk.CTkButton(
+            maps_buttons,
             text="Chạy song song",
             font=button_font,
             fg_color=blue,
@@ -815,12 +668,10 @@ class GUIApp(ctk.CTk):
             corner_radius=13,
             height=44,
             cursor="hand2",
-            command=self.run_par_search,
-        )
-        self.btn_par.grid(row=0, column=1, padx=4, sticky="ew")
-
-        self.btn_adaptive = ctk.CTkButton(
-            self.btn_grid,
+            command=self.run_maps_parallel,
+        ).grid(row=0, column=1, sticky="ew", padx=4)
+        ctk.CTkButton(
+            maps_buttons,
             text="Chạy thích ứng",
             font=button_font,
             fg_color=violet,
@@ -829,15 +680,24 @@ class GUIApp(ctk.CTk):
             corner_radius=13,
             height=44,
             cursor="hand2",
-            command=lambda: self.run_par_search(adaptive=True),
+            command=lambda: self.run_maps_parallel(adaptive=True),
+        ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
+
+        self.txt_maps_results = ctk.CTkTextbox(
+            self.maps_scroll,
+            fg_color=glass_tint,
+            border_color=border,
+            text_color=text,
+            border_width=1,
+            corner_radius=12,
+            height=190,
+            font=body_font,
+            state="disabled",
         )
-        self.btn_adaptive.grid(
-            row=0, column=2, padx=(4, 0), sticky="ew"
-        )
-        
-        self.btn_stop = ctk.CTkButton(
-            self.shopee_scroll,
-            text="Dừng Shopee khẩn cấp",
+        self.txt_maps_results.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        ctk.CTkButton(
+            self.maps_scroll,
+            text="Dừng Google Maps khẩn cấp",
             font=button_font,
             fg_color=red_soft,
             hover_color="#ffe1e4",
@@ -848,8 +708,7 @@ class GUIApp(ctk.CTk):
             height=42,
             cursor="hand2",
             command=self.stop_all,
-        )
-        self.btn_stop.pack(fill="x", padx=16, pady=(0, 12))
+        ).pack(fill="x", padx=16, pady=(0, 12))
 
         # ---------------- TIKTOK AUTOMATION ----------------
         self.tiktok_scroll = ctk.CTkScrollableFrame(
@@ -1357,7 +1216,7 @@ class GUIApp(ctk.CTk):
             self.bottom_panel, fg_color="transparent"
         )
         self.settings_card.pack(fill="x", padx=14, pady=(2, 12))
-        for column, weight in enumerate((2, 1, 2, 2, 2, 0, 0)):
+        for column, weight in enumerate((2, 1, 3, 2, 0)):
             self.settings_card.columnconfigure(column, weight=weight)
 
         def make_setting_field(
@@ -1401,37 +1260,9 @@ class GUIApp(ctk.CTk):
         self.ent_admins.insert(0, admin_ids_str)
 
         self.ent_adb = make_setting_field(
-            2, "ĐƯỜNG DẪN ADB", "Đường dẫn adb.exe"
+            2, "ĐƯỜNG DẪN ADB", "Đường dẫn adb.exe", columnspan=2
         )
         self.ent_adb.insert(0, config.ADB_PATH or "")
-
-        shops_str = ",".join(config.SHOPEE_SHOP_NAMES or [])
-        self.ent_shops = make_setting_field(
-            3, "SHOP DỰ PHÒNG", "Tên shop, phân cách bằng dấu phẩy"
-        )
-        self.ent_shops.insert(0, shops_str)
-
-        self.ent_gemini_key = make_setting_field(
-            4, "GEMINI API KEY", "Nhập Gemini API Key", show="*"
-        )
-        self.ent_gemini_key.insert(0, config.GEMINI_API_KEY or "")
-
-        self.btn_check_gemini = ctk.CTkButton(
-            self.settings_card,
-            text="Kiểm tra API",
-            font=button_font,
-            fg_color=violet,
-            hover_color="#5b21b6",
-            text_color="#ffffff",
-            corner_radius=10,
-            height=42,
-            width=112,
-            cursor="hand2",
-            command=self.check_gemini_api_action,
-        )
-        self.btn_check_gemini.grid(
-            row=0, column=5, padx=(10, 4), pady=(19, 0)
-        )
 
         self.btn_save = ctk.CTkButton(
             self.settings_card,
@@ -1446,7 +1277,7 @@ class GUIApp(ctk.CTk):
             cursor="hand2",
             command=self.save_settings,
         )
-        self.btn_save.grid(row=0, column=6, padx=(4, 4), pady=(19, 0))
+        self.btn_save.grid(row=0, column=4, padx=(6, 4), pady=(19, 0))
 
         self.ent_notion_token = make_setting_field(
             0,
@@ -1463,7 +1294,7 @@ class GUIApp(ctk.CTk):
             "NOTION DATABASE URL / DATA SOURCE ID",
             "Dán link bảng Notion hoặc Data Source ID",
             row=1,
-            columnspan=3,
+            columnspan=2,
         )
         self.ent_notion_source_id.insert(0, config.NOTION_DATA_SOURCE_ID or "")
 
@@ -1475,7 +1306,7 @@ class GUIApp(ctk.CTk):
             anchor="w",
         )
         self.lbl_notion_hint.grid(
-            row=1, column=5, columnspan=2, sticky="ew", padx=8, pady=(23, 0)
+            row=1, column=4, sticky="ew", padx=8, pady=(23, 0)
         )
 
         # Progressive disclosure: configuration is available from the fixed
@@ -1486,7 +1317,7 @@ class GUIApp(ctk.CTk):
         # presentation-only effects and do not touch automation state.
         self._bind_glass_hover(self.top_header, "#1e293b", "#334155")
         self._bind_glass_hover(self.log_card, border, border_hover)
-        self._bind_glass_hover(self.shopee_scroll, border, "#f1b98d")
+        self._bind_glass_hover(self.maps_scroll, border, "#f1b98d")
         self._bind_glass_hover(self.tiktok_scroll, border, "#e4a7c5")
         self._bind_glass_hover(self.facebook_scroll, border, border_hover)
         self._bind_glass_hover(self.bottom_panel, border, border_hover)
@@ -1506,7 +1337,7 @@ class GUIApp(ctk.CTk):
         # Quét thiết bị khi vừa khởi động
         self.refresh_devices_action()
         # Thiết bị Box Phone có thể kết nối muộn hoặc tự bật lại cảm biến xoay.
-        # Kiểm tra định kỳ để Facebook, Shopee và các app luôn giữ hướng dọc.
+        # Kiểm tra định kỳ để các app social luôn giữ hướng dọc.
         self.after(15000, self._portrait_guard_tick)
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
@@ -1545,11 +1376,11 @@ class GUIApp(ctk.CTk):
     def _reset_operation_scrolls(self):
         """Luôn hiển thị tiêu đề hai card khi app vừa mở."""
         try:
-            self.shopee_scroll._parent_canvas.yview_moveto(0)
+            self.maps_scroll._parent_canvas.yview_moveto(0)
             self.tiktok_scroll._parent_canvas.yview_moveto(0)
             self.facebook_scroll._parent_canvas.yview_moveto(0)
             # Giữ focus khởi động ở nút header để Textbox không tự yêu cầu
-            # cuộn card Shopee xuống khi cửa sổ được kích hoạt lại.
+            # cuộn card module xuống khi cửa sổ được kích hoạt lại.
             self.btn_refresh.focus_set()
         except Exception:
             pass
@@ -1557,7 +1388,7 @@ class GUIApp(ctk.CTk):
     def _finish_module_ui_setup(self):
         """Chọn tab mặc định trước khi bật callback Focus Workspace."""
         try:
-            self.module_tabs.set("Shopee")
+            self.module_tabs.set("Google Maps")
         finally:
             self._module_focus_ready = True
 
@@ -1566,8 +1397,11 @@ class GUIApp(ctk.CTk):
         if not self.__dict__.get("_module_focus_ready", False):
             return
         self._set_module_focus(True)
-        selected = self.module_tabs.get().lower()
-        scroll = self.__dict__.get(f"{selected}_scroll")
+        scroll = {
+            "Google Maps": self.maps_scroll,
+            "TikTok": self.tiktok_scroll,
+            "Facebook": self.facebook_scroll,
+        }.get(self.module_tabs.get())
         if scroll is not None:
             self.after_idle(lambda widget=scroll: widget._parent_canvas.yview_moveto(0))
 
@@ -1712,52 +1546,23 @@ class GUIApp(ctk.CTk):
 
         self.run_in_thread(action)
 
-    def check_gemini_api_action(self):
-        """Kiểm tra key hiện có trong ô bằng một request Gemini thật."""
-        api_key = self.ent_gemini_key.get().strip()
-        self.btn_check_gemini.configure(
-            state="disabled",
-            text="Đang kiểm tra...",
-            fg_color="#64748b",
-        )
-
-        def action():
-            ok, code, message = config.check_gemini_api(api_key)
-            print(f"[Gemini API] {message} (mã: {code})")
-
-            def finish():
-                self.btn_check_gemini.configure(
-                    state="normal",
-                    text=("API hoạt động" if ok else "Kiểm tra lại"),
-                    fg_color=("#047857" if ok else "#c81e2b"),
-                    hover_color=("#065f46" if ok else "#a91623"),
-                )
-                if ok:
-                    messagebox.showinfo("Gemini API", message)
-                else:
-                    messagebox.showwarning("Gemini API", message)
-
-            self.after(0, finish)
-
-        self.run_in_thread(action)
-
     @staticmethod
     def _replace_entry_value(widget, value):
         widget.delete(0, "end")
         widget.insert(0, value)
 
     @staticmethod
-    def _normalize_shopee_keywords(value):
-        return "\n".join(
+    def _normalize_maps_keywords(value):
+        return ", ".join(
             item.strip()
             for item in re.split(r"[,\n]+", value or "")
             if item.strip()
         )
 
     def _apply_notion_schedule(self, schedule):
-        self.txt_main_keywords.delete("1.0", "end")
-        self.txt_main_keywords.insert(
-            "1.0", self._normalize_shopee_keywords(schedule.shopee_keywords)
+        self.txt_maps_keywords.delete("1.0", "end")
+        self.txt_maps_keywords.insert(
+            "1.0", self._normalize_maps_keywords(schedule.google_maps_keywords)
         )
         self._replace_entry_value(
             self.ent_tt_seed, schedule.tiktok_seed_keywords
@@ -1788,7 +1593,7 @@ class GUIApp(ctk.CTk):
         )
         self.log_message(
             f"[Notion] Đã nạp lịch '{schedule.title}' ({period}) "
-            "vào Shopee, TikTok và Facebook."
+            "vào Google Maps, TikTok và Facebook."
         )
         messagebox.showinfo(
             "Đã chọn lịch Notion",
@@ -1984,12 +1789,14 @@ class GUIApp(ctk.CTk):
         config.ADB_PATH = get_value(
             "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
         )
-        shops = get_value("SHOPEE_SHOP_NAMES")
-        config.SHOPEE_SHOP_NAMES = [
-            item.strip() for item in shops.split(",") if item.strip()
-        ]
-        config.GEMINI_API_KEY = get_value("GEMINI_API_KEY")
-        config.GEMINI_MODEL = get_value("GEMINI_MODEL", "gemini-flash-latest")
+        config.GOOGLE_MAPS_TARGET_NAME = get_value(
+            "GOOGLE_MAPS_TARGET_NAME",
+            getattr(config, "GOOGLE_MAPS_TARGET_NAME_DEFAULT", "Nhà thuốc Khải Hoàn Skincare"),
+        )
+        config.GOOGLE_MAPS_LOCATION_TEXT = get_value(
+            "GOOGLE_MAPS_LOCATION_TEXT",
+            getattr(config, "GOOGLE_MAPS_LOCATION_TEXT_DEFAULT", "Phan Thiết, Lâm Đồng"),
+        )
         config.NOTION_API_TOKEN = get_value("NOTION_API_TOKEN")
         config.NOTION_DATA_SOURCE_ID = get_value("NOTION_DATA_SOURCE_ID")
         config.TIKTOK_TARGET_CHANNEL_DEFAULT = get_value("TIKTOK_TARGET_CHANNEL")
@@ -2004,8 +1811,8 @@ class GUIApp(ctk.CTk):
             "ent_token": config.TELEGRAM_BOT_TOKEN,
             "ent_admins": admin_ids,
             "ent_adb": config.ADB_PATH,
-            "ent_shops": shops,
-            "ent_gemini_key": config.GEMINI_API_KEY,
+            "ent_maps_target": config.GOOGLE_MAPS_TARGET_NAME,
+            "ent_maps_location": config.GOOGLE_MAPS_LOCATION_TEXT,
             "ent_notion_token": config.NOTION_API_TOKEN,
             "ent_notion_source_id": config.NOTION_DATA_SOURCE_ID,
             "ent_tt_channel": config.TIKTOK_TARGET_CHANNEL_DEFAULT,
@@ -2033,9 +1840,10 @@ class GUIApp(ctk.CTk):
             "TELEGRAM_NOTIFICATIONS_ENABLED",
             "ALLOWED_USER_IDS",
             "ADB_PATH",
-            "SHOPEE_SHOP_NAMES",
-            "GEMINI_API_KEY",
-            "GEMINI_MODEL",
+            "GOOGLE_MAPS_API_KEY",
+            "GOOGLE_MAPS_TARGET_NAME",
+            "GOOGLE_MAPS_LOCATION_TEXT",
+            "GOOGLE_MAPS_MAX_RESULTS",
             "NOTION_API_TOKEN",
             "NOTION_DATA_SOURCE_ID",
             "TIKTOK_TARGET_CHANNEL",
@@ -2083,68 +1891,70 @@ class GUIApp(ctk.CTk):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
         adb_path = self.ent_adb.get().strip()
-        shops = self.ent_shops.get().strip()
-        gemini_key = self.ent_gemini_key.get().strip()
+        maps_target = self.ent_maps_target.get().strip()
+        maps_location = self.ent_maps_location.get().strip()
         notion_token = self.ent_notion_token.get().strip()
         notion_source_id = self.ent_notion_source_id.get().strip()
         telegram_token_valid = main.is_valid_telegram_token(token)
         if not telegram_token_valid:
             config.TELEGRAM_NOTIFICATIONS_ENABLED = False
-        
+
         env_path = config.ENV_PATH
         lines = []
         if env_path.exists():
-            with env_path.open('r', encoding='utf-8') as f:
-                lines = f.readlines()
-                
+            with env_path.open("r", encoding="utf-8") as env_file:
+                lines = env_file.readlines()
+
         keys = {
-            'TELEGRAM_BOT_TOKEN': token,
-            'TELEGRAM_NOTIFICATIONS_ENABLED': (
-                '1' if config.TELEGRAM_NOTIFICATIONS_ENABLED else '0'
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_NOTIFICATIONS_ENABLED": (
+                "1" if config.TELEGRAM_NOTIFICATIONS_ENABLED else "0"
             ),
-            'ALLOWED_USER_IDS': admin_ids,
-            'ADB_PATH': adb_path,
-            'SHOPEE_SHOP_NAMES': shops,
-            'GEMINI_API_KEY': gemini_key,
-            'NOTION_API_TOKEN': notion_token,
-            'NOTION_DATA_SOURCE_ID': notion_source_id,
+            "ALLOWED_USER_IDS": admin_ids,
+            "ADB_PATH": adb_path,
+            "GOOGLE_MAPS_TARGET_NAME": maps_target,
+            "GOOGLE_MAPS_LOCATION_TEXT": maps_location,
+            "NOTION_API_TOKEN": notion_token,
+            "NOTION_DATA_SOURCE_ID": notion_source_id,
         }
-        
         new_lines = []
         updated_keys = set()
         for line in lines:
+            stripped = line.strip()
             matched = False
-            for k in keys:
-                if line.strip().startswith(f"{k}="):
-                    new_lines.append(f"{k}={keys[k]}\n")
-                    updated_keys.add(k)
+            for key, value in keys.items():
+                if stripped.startswith(f"{key}="):
+                    new_lines.append(f"{key}={value}\n")
+                    updated_keys.add(key)
                     matched = True
                     break
             if not matched:
                 new_lines.append(line)
-                
-        for k in keys:
-            if k not in updated_keys:
-                new_lines.append(f"{k}={keys[k]}\n")
-                
-        with env_path.open('w', encoding='utf-8') as f:
-            f.writelines(new_lines)
-            
-        # Reload config
+
+        for key, value in keys.items():
+            if key not in updated_keys:
+                new_lines.append(f"{key}={value}\n")
+
+        with env_path.open("w", encoding="utf-8") as env_file:
+            env_file.writelines(new_lines)
+
         config.TELEGRAM_BOT_TOKEN = token
-        config.ALLOWED_USER_IDS = [int(i.strip()) for i in admin_ids.split(',') if i.strip().isdigit()]
+        config.ALLOWED_USER_IDS = [
+            int(item.strip())
+            for item in admin_ids.split(",")
+            if item.strip().isdigit()
+        ]
         config.ADB_PATH = adb_path
-        main.adb.adb_path = adb_path
-        config.SHOPEE_SHOP_NAMES = [s.strip() for s in shops.split(',') if s.strip()]
-        config.GEMINI_API_KEY = gemini_key
+        config.GOOGLE_MAPS_TARGET_NAME = maps_target
+        config.GOOGLE_MAPS_LOCATION_TEXT = maps_location
         config.NOTION_API_TOKEN = notion_token
         config.NOTION_DATA_SOURCE_ID = notion_source_id
-        
-        # Keep the existing bot so all message/callback handlers remain registered.
+        main.adb.adb_path = adb_path
+
         main.configure_telegram_bot_token(token)
         if self.__dict__.get("btn_telegram_notifications") is not None:
             self._refresh_telegram_notifications_button()
-        
+
         print("[Hệ thống] Lưu cấu hình và tải lại thành công!")
         if telegram_token_valid:
             messagebox.showinfo("Thành công", "Đã lưu cấu hình và tự động nạp lại!")
@@ -2276,7 +2086,7 @@ class GUIApp(ctk.CTk):
     def prepare_social_targets(
         self, target_devices, opening_platform, is_cancelled=None
     ):
-        """Đưa toàn bộ máy mục tiêu khỏi Shopee trước khi xếp hàng social."""
+        """Chuẩn bị đúng ứng dụng mở đầu cho hàng đợi social."""
         if not target_devices:
             return []
 
@@ -2286,10 +2096,6 @@ class GUIApp(ctk.CTk):
             try:
                 # Chờ workflow cũ nhả đúng thiết bị rồi mới được đổi ứng dụng.
                 with main.adb.device_workflow_scope(device_id):
-                    if is_cancelled and is_cancelled():
-                        return device_id, False
-                    # Máy đang chờ lượt không được giữ Shopee trên foreground.
-                    main.adb.stop_app(device_id, config.SHOPEE_PACKAGE)
                     if is_cancelled and is_cancelled():
                         return device_id, False
                     if opening_platform == "facebook":
@@ -2334,18 +2140,6 @@ class GUIApp(ctk.CTk):
         self.bulk_disable_rotation()
         self.after(30000, self._portrait_guard_tick)
 
-    def toggle_shopee_keyword_box(self, box_name):
-        box = self._shopee_keyword_boxes.get(box_name)
-        if not box:
-            return
-
-        expanded = not box["expanded"]
-        box["expanded"] = expanded
-        box["textbox"].configure(height=220 if expanded else 64)
-        box["button"].configure(
-            text="Thu nhỏ ▲" if expanded else "Mở rộng ▼"
-        )
-
     def toggle_system_log(self):
         """Mở rộng vùng log để xem chi tiết, bấm lại để trở về bố cục gọn."""
         self._log_expanded = not self._log_expanded
@@ -2388,320 +2182,276 @@ class GUIApp(ctk.CTk):
             )
         self.after_idle(self._reset_operation_scrolls)
 
-    # ================= CÁC TÁC VỤ CHẠY TÌM KIẾM SHOPEE =================
-    def run_seq_search(self):
-        click_first_item = False
-        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        mode = self.keyword_mode.get()
-        
-        if mode == "original":
-            raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-            if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính Shopee!")
-                return
-            keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
-            for kw in keywords:
-                if any(ind in kw.lower() for ind in first_indicators):
-                    click_first_item = True
-                    break
-            clean_keywords = []
-            for kw in keywords:
-                clean_kw = kw
-                for ind in first_indicators:
-                    clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
-                clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
-                if clean_kw:
-                    clean_keywords.append(clean_kw)
-            keywords = clean_keywords
-        else:
-            ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
-            if ai_keywords_raw:
-                keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
-                for kw in keywords:
-                    if any(ind in kw.lower() for ind in first_indicators):
-                        click_first_item = True
-                        break
-            else:
-                raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-                if not raw_text:
-                    messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước khi chạy chế độ AI!")
-                    return
-                keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
-                for kw in keywords:
-                    if any(ind in kw.lower() for ind in first_indicators):
-                        click_first_item = True
-                        break
-                clean_keywords = []
-                for kw in keywords:
-                    clean_kw = kw
-                    for ind in first_indicators:
-                        clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
-                    clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
-                    if clean_kw:
-                        clean_keywords.append(clean_kw)
-                keywords = clean_keywords
-            
-        target_devices = self.parse_targets(entry_widget=self.ent_selection)
-        if not target_devices:
-            return
-        workflow_session = main.start_workflow_session()
-            
-        def action():
-            nonlocal keywords
-            if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
-                def status_cb(msg):
-                    self.log_message(f"[Gemini AI] {msg}")
-                if mode == "ai":
-                    expanded = config.generate_keywords_via_gemini(
-                        config.GEMINI_API_KEY, 
-                        keywords, 
-                        status_cb=status_cb
-                    )
-                else:
-                    expanded = config.generate_keywords_tier2_via_gemini(
-                        config.GEMINI_API_KEY,
-                        keywords,
-                        status_cb=status_cb
-                    )
-                if click_first_item:
-                    expanded = [f"{k} video" for k in expanded]
-                keywords = expanded
-                self.txt_ai_keywords.delete("1.0", "end")
-                for k in keywords:
-                    self.txt_ai_keywords.insert("end", f"{k}\n")
-            
-            class DummyMessage:
-                def __init__(self):
-                    class DummyChat:
-                        def __init__(self):
-                            self.id = int(config.ALLOWED_USER_IDS[0]) if config.ALLOWED_USER_IDS else 0
-                    self.chat = DummyChat()
-            main.run_sequential_shopee_search(
-                DummyMessage(),
-                keywords,
-                target_devices,
-                click_first_item=click_first_item,
-                use_ai=False,
-                session_id=workflow_session,
-            )
-            
-        self.run_in_thread(action)
-
-    def run_par_search(self, adaptive=False):
-        click_first_item = False
-        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        mode = self.keyword_mode.get()
-        
-        if mode == "original":
-            raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-            if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính!")
-                return
-            keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
-            for kw in keywords:
-                if any(ind in kw.lower() for ind in first_indicators):
-                    click_first_item = True
-                    break
-            clean_keywords = []
-            for kw in keywords:
-                clean_kw = kw
-                for ind in first_indicators:
-                    clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
-                clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
-                if clean_kw:
-                    clean_keywords.append(clean_kw)
-            keywords = clean_keywords
-        else:
-            ai_keywords_raw = self.txt_ai_keywords.get("1.0", "end").strip()
-            if ai_keywords_raw:
-                keywords = [line.strip() for line in ai_keywords_raw.split("\n") if line.strip()]
-                for kw in keywords:
-                    if any(ind in kw.lower() for ind in first_indicators):
-                        click_first_item = True
-                        break
-            else:
-                raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-                if not raw_text:
-                    messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước khi chạy chế độ AI!")
-                    return
-                keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
-                for kw in keywords:
-                    if any(ind in kw.lower() for ind in first_indicators):
-                        click_first_item = True
-                        break
-                clean_keywords = []
-                for kw in keywords:
-                    clean_kw = kw
-                    for ind in first_indicators:
-                        clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
-                    clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
-                    if clean_kw:
-                        clean_keywords.append(clean_kw)
-                keywords = clean_keywords
-            
-        target_devices = self.parse_targets(entry_widget=self.ent_selection)
-        if not target_devices:
-            return
-        workflow_session = main.start_workflow_session()
-        session_is_cancelled = main.make_session_cancel_checker(
-            workflow_session
+    # ================= GOOGLE MAPS AUTOMATION =================
+    def _get_maps_inputs(self):
+        keywords = split_google_maps_keywords(
+            self.txt_maps_keywords.get("1.0", "end")
         )
-            
-        def action():
-            nonlocal keywords
-            if (mode == "ai" or mode == "ai_t2") and not ai_keywords_raw:
-                def status_cb(msg):
-                    self.log_message(f"[Gemini AI] {msg}")
-                if mode == "ai":
-                    expanded = config.generate_keywords_via_gemini(
-                        config.GEMINI_API_KEY, 
-                        keywords, 
-                        status_cb=status_cb
+        target = self.ent_maps_target.get().strip() or getattr(
+            config,
+            "GOOGLE_MAPS_TARGET_NAME",
+            getattr(
+                config,
+                "GOOGLE_MAPS_TARGET_NAME_DEFAULT",
+                "Nhà thuốc Khải Hoàn Skincare",
+            ),
+        )
+        locations = split_google_maps_keywords(self.ent_maps_location.get())
+        if not locations:
+            locations = [
+                getattr(
+                    config,
+                    "GOOGLE_MAPS_LOCATION_TEXT",
+                    getattr(
+                        config,
+                        "GOOGLE_MAPS_LOCATION_TEXT_DEFAULT",
+                        "Phan Thiết, Lâm Đồng",
+                    ),
+                )
+            ]
+        if not keywords:
+            messagebox.showwarning(
+                "Thiếu từ khóa",
+                "Vui lòng nhập ít nhất một từ khóa Google Maps.",
+            )
+            return None
+        if not target:
+            messagebox.showwarning(
+                "Thiếu hồ sơ mục tiêu",
+                "Vui lòng nhập tên hồ sơ Google Maps mục tiêu.",
+            )
+            return None
+        target_devices = self.parse_targets(
+            entry_widget=self.ent_maps_selection
+        )
+        if not target_devices:
+            return None
+        return keywords, target, locations, target_devices
+
+    def _set_maps_results(self, lines):
+        def update():
+            self.txt_maps_results.configure(state="normal")
+            self.txt_maps_results.delete("1.0", "end")
+            self.txt_maps_results.insert("1.0", "\n".join(lines))
+            self.txt_maps_results.configure(state="disabled")
+        self.after(0, update)
+
+    @staticmethod
+    def _assign_maps_tasks(keywords, locations, target_devices):
+        loc_choices = locations if locations else [""]
+        return [
+            (
+                device_id,
+                random.choice(keywords),
+                random.choice(loc_choices),
+            )
+            for device_id in target_devices
+        ]
+
+    def _run_maps_automation(self, inputs, mode):
+        keywords, target, locations, target_devices = inputs
+        tasks = self._assign_maps_tasks(keywords, locations, target_devices)
+        workflow_session = main.start_workflow_session()
+        is_cancelled = main.make_session_cancel_checker(workflow_session)
+        self.bulk_disable_rotation(target_devices)
+
+        chat_id = (
+            config.ALLOWED_USER_IDS[0]
+            if config.ALLOWED_USER_IDS
+            else None
+        )
+        mode_label = mode.capitalize()
+        self._set_maps_results(
+            [
+                f"Đang chạy Bơm Google Maps ({mode_label}) trên {len(tasks)} máy...",
+                f"Hồ sơ mục tiêu: {target}",
+                "Mỗi máy được bốc ngẫu nhiên một từ khóa và khu vực.",
+            ]
+        )
+
+        results = []
+
+        if mode == "tuần tự":
+            tracker = main.TelegramRealtimeTracker(main.bot, chat_id) if chat_id else None
+            if tracker:
+                tracker.start_dashboard(
+                    f"📍 **BƠM GOOGLE MAPS TUẦN TỰ**\n"
+                    f"Hồ sơ mục tiêu: `{target}`\n"
+                    f"Đang chạy trên {len(tasks)} máy..."
+                )
+
+            success_count = 0
+            for idx, (dev, kw, loc) in enumerate(tasks):
+                if is_cancelled():
+                    break
+                dev_name = main.get_device_name(dev)
+                loc_text = f" ({loc})" if loc else ""
+                self.log_message(
+                    f"[Google Maps] Máy {dev_name} bắt đầu: từ khóa '{kw}'{loc_text} • mục tiêu '{target}'"
+                )
+                if tracker:
+                    tracker.set_active_device(
+                        dev_name,
+                        dev,
+                        f"Maps: {target} ({kw})",
+                        idx + 1,
+                        len(tasks),
+                        platform="Google Maps",
+                    )
+                dev_start = time.time()
+                status_cb = tracker.status_callback if tracker else None
+                success, err = main.adb.google_maps_automation_workflow(
+                    dev,
+                    keywords=[kw],
+                    target_name=target,
+                    locations=[loc] if loc else None,
+                    status_callback=status_cb,
+                    is_cancelled=is_cancelled,
+                )
+                dev_dur = time.time() - dev_start
+                if success:
+                    success_count += 1
+                    self.log_message(
+                        f"✅ [Google Maps] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
                     )
                 else:
-                    expanded = config.generate_keywords_tier2_via_gemini(
-                        config.GEMINI_API_KEY,
-                        keywords,
-                        status_cb=status_cb
+                    self.log_message(
+                        f"❌ [Google Maps] Máy {dev_name} thất bại: {err}"
                     )
-                if click_first_item:
-                    expanded = [f"{k} video" for k in expanded]
-                keywords = expanded
-                self.txt_ai_keywords.delete("1.0", "end")
-                for k in keywords:
-                    self.txt_ai_keywords.insert("end", f"{k}\n")
-            
-            run_mode = "thích ứng" if adaptive else "song song"
-            print(
-                f"[GUI] Bắt đầu tìm kiếm {run_mode} "
-                f"(Mở rộng từ Gemini) trên {len(target_devices)} máy..."
-            )
-
-            keyword_assignments = main.assign_shopee_keywords(
-                keywords,
-                target_devices,
-            )
-            chat_id = (
-                config.ALLOWED_USER_IDS[0]
-                if config.ALLOWED_USER_IDS
-                else None
-            )
-            markup = None
-            if chat_id:
-                markup = main.telebot.types.InlineKeyboardMarkup()
-                markup.add(
-                    main.telebot.types.InlineKeyboardButton(
-                        "🛑 DỪNG CHẠY KHẨN CẤP",
-                        callback_data="stop_all",
-                    )
-                )
-                main.safe_send_message(
-                    chat_id,
-                    f"🚀 **BẮT ĐẦU CHẠY SONG SONG SHOPEE**\n\n"
-                    f"🔑 Kho từ khóa: **{len(keywords)} từ khóa**\n"
-                    f"📱 Tổng số profile: **{len(target_devices)}**\n"
-                    f"🎲 Mỗi profile nhận một từ khóa random riêng\n"
-                    f"🧭 Chế độ bấm sản phẩm đầu tiên: "
-                    f"**{click_first_item}**\n\n"
-                    f"_(Mỗi profile có một log thời gian thực riêng)_",
-                    parse_mode="Markdown",
-                    reply_markup=markup,
-                )
-
-            target_positions = {
-                device_id: index + 1
-                for index, device_id in enumerate(target_devices)
-            }
-            
-            def run_search_parallel(device_id):
-                dev_idx = target_positions[device_id]
-                dev_name = main.get_device_name(device_id)
-                current_keyword = keyword_assignments[device_id]
-                tracker = None
                 if chat_id:
-                    tracker = main.start_shopee_profile_tracker(
+                    main.send_device_finished_card(
                         chat_id,
                         dev_name,
-                        device_id,
-                        current_keyword,
-                        dev_idx,
-                        len(target_devices),
-                    )
-                print(
-                    f"[Profile {dev_name}] Bắt đầu tìm kiếm với "
-                    f"từ khóa '{current_keyword}'..."
-                )
-                
-                dev_start = time.time()
-                success, err = main.adb.shopee_find_and_click_lamdong(
-                    device_id, 
-                    current_keyword, 
-                    status_callback=(
-                        tracker.status_callback if tracker else None
-                    ),
-                    is_cancelled=session_is_cancelled,
-                    click_first_item=click_first_item
-                )
-                dev_duration = time.time() - dev_start
-                if tracker:
-                    main.finish_shopee_profile_tracker(
-                        tracker,
+                        dev,
+                        f"Google Maps: {target} ({kw})",
                         success,
                         err,
-                        dev_duration,
+                        dev_dur,
                     )
+                results.append((dev, kw, loc, success, err))
+
+            if tracker:
+                tracker.finish_dashboard(
+                    f"🏁 **KẾT QUẢ BƠM GOOGLE MAPS TUẦN TỰ: "
+                    f"{success_count}/{len(tasks)} MÁY THÀNH CÔNG**"
+                )
+        elif mode == "thích ứng":
+            def run_single_adaptive(task_item):
+                dev, kw, loc = task_item
+                dev_name = main.get_device_name(dev)
+                self.log_message(
+                    f"[Google Maps thích ứng] Máy {dev_name} bắt đầu: từ khóa '{kw}'"
+                )
+                dev_start = time.time()
+                success, err = main.adb.google_maps_automation_workflow(
+                    dev,
+                    keywords=[kw],
+                    target_name=target,
+                    locations=[loc] if loc else None,
+                    status_callback=lambda _d, msg: self.log_message(f"[Máy {dev_name}] {msg}"),
+                    is_cancelled=is_cancelled,
+                )
+                dev_dur = time.time() - dev_start
                 if success:
-                    print(
-                        f"[Profile {dev_name}] ✅ Hoàn thành trọn vẹn "
-                        f"quy trình với từ khóa '{current_keyword}'!"
+                    self.log_message(
+                        f"✅ [Google Maps thích ứng] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
                     )
                 else:
-                    print(f"[Profile {dev_name}] ❌ Thất bại: {err}")
-                return dev_name, current_keyword, success, err
-                
-            if adaptive:
-                policy = PLATFORM_POLICIES["shopee"]
-                results = run_adaptive(
-                    target_devices,
-                    run_search_parallel,
-                    policy,
-                    is_cancelled=session_is_cancelled,
-                    on_wait=lambda dev, delay, position, total: print(
-                        f"[GUI] Shopee thích ứng: máy "
-                        f"{main.get_device_name(dev)} đang chờ {delay}s "
-                        f"({position + 1}/{total})."
-                    ),
+                    self.log_message(
+                        f"❌ [Google Maps thích ứng] Máy {dev_name} thất bại: {err}"
+                    )
+                if chat_id:
+                    main.send_device_finished_card(
+                        chat_id,
+                        dev_name,
+                        dev,
+                        f"Google Maps: {target} ({kw})",
+                        success,
+                        err,
+                        dev_dur,
+                    )
+                return dev, kw, loc, success, err
+
+            results = run_adaptive(
+                tasks,
+                run_single_adaptive,
+                PLATFORM_POLICIES["google_maps"],
+                is_cancelled=is_cancelled,
+                on_wait=lambda task, delay, position, total: self.log_message(
+                    f"[Google Maps thích ứng] Máy {main.get_device_name(task[0])} "
+                    f"chờ {delay}s ({position + 1}/{total})"
+                ),
+            )
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def run_single_parallel(task_item):
+                dev, kw, loc = task_item
+                dev_name = main.get_device_name(dev)
+                self.log_message(
+                    f"[Google Maps song song] Máy {dev_name} bắt đầu: từ khóa '{kw}'"
                 )
-            else:
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(
-                    max_workers=len(target_devices)
-                ) as executor:
-                    futures = [
-                        executor.submit(run_search_parallel, dev)
-                        for dev in target_devices
-                    ]
-                    results = [f.result() for f in futures]
-                
-            success_count = sum(1 for r in results if r[2])
-            fail_count = len(results) - success_count
-            
-            summary = f"🏁 **[GUI] KẾT QUẢ TÌM SHOPEE (SONG SONG):**\n\n"
-            summary += f"✅ Hoàn thành trọn vẹn: **{success_count}/{len(target_devices)} máy**\n"
-            if fail_count > 0:
-                summary += f"❌ Thất bại: **{fail_count} máy**\n"
-                fails_list = [f"Máy {r[0]} ({r[1]}): {r[3]}" for r in results if not r[2]]
-                summary += f"⚠️ Chi tiết lỗi:\n" + "\n".join(fails_list)
-                
-            print("[GUI] Tiến trình tìm kiếm song song Shopee kết thúc.")
-            if chat_id:
-                main.safe_send_message(
-                    chat_id,
-                    summary,
-                    parse_mode="Markdown",
+                dev_start = time.time()
+                success, err = main.adb.google_maps_automation_workflow(
+                    dev,
+                    keywords=[kw],
+                    target_name=target,
+                    locations=[loc] if loc else None,
+                    status_callback=lambda _d, msg: self.log_message(f"[Máy {dev_name}] {msg}"),
+                    is_cancelled=is_cancelled,
                 )
-            
-        self.run_in_thread(action)
+                dev_dur = time.time() - dev_start
+                if success:
+                    self.log_message(
+                        f"✅ [Google Maps song song] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
+                    )
+                else:
+                    self.log_message(
+                        f"❌ [Google Maps song song] Máy {dev_name} thất bại: {err}"
+                    )
+                if chat_id:
+                    main.send_device_finished_card(
+                        chat_id,
+                        dev_name,
+                        dev,
+                        f"Google Maps: {target} ({kw})",
+                        success,
+                        err,
+                        dev_dur,
+                    )
+                return dev, kw, loc, success, err
+
+            max_workers = min(6, len(tasks))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(run_single_parallel, tasks))
+
+        summary_lines = []
+        for dev, kw, loc, success, err in results:
+            dname = main.get_device_name(dev)
+            loc_s = f" ({loc})" if loc else ""
+            status_s = "✅ Thành công" if success else f"❌ Lỗi: {err}"
+            summary_lines.append(f"Máy {dname}: '{kw}'{loc_s} -> {status_s}")
+
+        if not summary_lines:
+            summary_lines = ["Đã dừng quy trình Bơm Google Maps."]
+        self._set_maps_results(summary_lines)
+
+    def run_seq_maps(self):
+        inputs = self._get_maps_inputs()
+        if inputs:
+            self.run_in_thread(self._run_maps_automation, inputs, "tuần tự")
+
+    def run_par_maps(self, adaptive=False):
+        inputs = self._get_maps_inputs()
+        if inputs:
+            mode = "thích ứng" if adaptive else "song song"
+            self.run_in_thread(self._run_maps_automation, inputs, mode)
+
+    def run_maps_sequential(self):
+        self.run_seq_maps()
+
+    def run_maps_parallel(self, adaptive=False):
+        self.run_par_maps(adaptive=adaptive)
 
     @staticmethod
     def _random_social_order():
@@ -3441,115 +3191,6 @@ class GUIApp(ctk.CTk):
 
     def log_message(self, msg):
         print(f"[GUI] {msg}")
-
-    def generate_ai_keywords_action(self):
-        raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-        if not raw_text:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính trước!")
-            return
-            
-        gemini_key = self.ent_gemini_key.get().strip()
-        if not gemini_key:
-            gemini_key = config.GEMINI_API_KEY
-            
-        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        keywords = [line.strip() for line in raw_text.split("\n") if line.strip()]
-        if not keywords:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập từ khóa chính hợp lệ!")
-            return
-            
-        click_first_item = False
-        clean_keywords = []
-        for kw in keywords:
-            if any(ind in kw.lower() for ind in first_indicators):
-                click_first_item = True
-            clean_kw = kw
-            for ind in first_indicators:
-                clean_kw = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_kw, flags=re.IGNORECASE)
-            clean_kw = re.sub(r"\s+", " ", clean_kw).strip()
-            if clean_kw:
-                clean_keywords.append(clean_kw)
-        keywords = clean_keywords
-        
-        self.log_message(f"Đang gửi yêu cầu sinh từ khóa Tầng 1 (Gemini AI) cho {len(keywords)} từ khóa...")
-        self.btn_gen_ai.configure(state="disabled", text="🪄 Đang sinh từ khóa...")
-        
-        def action():
-            try:
-                def status_cb(msg):
-                    self.log_message(msg)
-                    
-                expanded = config.generate_keywords_via_gemini(gemini_key, keywords, status_cb=status_cb)
-                
-                # Hiển thị lên Textbox
-                self.txt_ai_keywords.delete("1.0", "end")
-                for kw in expanded:
-                    kw_to_insert = kw
-                    if click_first_item:
-                        kw_to_insert = f"{kw} video"
-                    self.txt_ai_keywords.insert("end", f"{kw_to_insert}\n")
-                    
-                self.log_message(f"Đã hiển thị {len(expanded)} từ khóa lên giao diện.")
-            except Exception as e:
-                self.log_message(f"Gặp lỗi khi sinh từ khóa: {e}")
-            finally:
-                self.btn_gen_ai.configure(state="normal", text="🪄 Sinh từ khóa Tầng 1 (Mở rộng SEO)")
-                
-        self.run_in_thread(action)
-
-    def generate_ai_keywords_tier2_action(self):
-        raw_text = self.txt_main_keywords.get("1.0", "end").strip()
-        if not raw_text:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập các tiêu đề thô Shopee trong ô từ khóa chính!")
-            return
-            
-        gemini_key = self.ent_gemini_key.get().strip()
-        if not gemini_key:
-            gemini_key = config.GEMINI_API_KEY
-            
-        first_indicators = ["video", "đầu", "đầu tiên", "top 1", "top1"]
-        lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
-        if not lines:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập các tiêu đề thô hợp lệ!")
-            return
-            
-        click_first_item = False
-        clean_titles = []
-        for title in lines:
-            if any(ind in title.lower() for ind in first_indicators):
-                click_first_item = True
-            clean_title = title
-            for ind in first_indicators:
-                clean_title = re.sub(r"\b" + re.escape(ind) + r"\b", "", clean_title, flags=re.IGNORECASE)
-            clean_title = re.sub(r"\s+", " ", clean_title).strip()
-            if clean_title:
-                clean_titles.append(clean_title)
-        
-        self.log_message(f"Đang gửi yêu cầu sinh từ khóa Tầng 2 cho {len(clean_titles)} tiêu đề sản phẩm...")
-        self.btn_gen_ai_t2.configure(state="disabled", text="🪄 Đang sinh từ khóa Tầng 2...")
-        
-        def action():
-            try:
-                def status_cb(msg):
-                    self.log_message(msg)
-                    
-                expanded = config.generate_keywords_tier2_via_gemini(gemini_key, clean_titles, status_cb=status_cb)
-                
-                # Hiển thị lên Textbox
-                self.txt_ai_keywords.delete("1.0", "end")
-                for kw in expanded:
-                    kw_to_insert = kw
-                    if click_first_item:
-                        kw_to_insert = f"{kw} video"
-                    self.txt_ai_keywords.insert("end", f"{kw_to_insert}\n")
-                    
-                self.log_message(f"Đã hiển thị tổng cộng {len(expanded)} từ khóa Tầng 2 lên giao diện cho {len(clean_titles)} sản phẩm!")
-            except Exception as e:
-                self.log_message(f"Gặp lỗi khi sinh từ khóa Tầng 2: {e}")
-            finally:
-                self.btn_gen_ai_t2.configure(state="normal", text="🧠 Sinh từ khóa Tầng 2 (Bóc tách Tiêu đề thô)")
-                
-        self.run_in_thread(action)
 
     def start_bot_service(self):
         if self.__dict__.get("_bot_service_started", False):

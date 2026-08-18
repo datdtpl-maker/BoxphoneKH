@@ -231,7 +231,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda *_args, **_kwargs: swipes.append(_args) or (0, "", "")
         )
 
-        self.assertFalse(self.controller.advance_tiktok_feed("device-on-shopee"))
+        self.assertFalse(self.controller.advance_tiktok_feed("device-wrong-app"))
         self.assertEqual([], swipes)
 
     @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MIN", 16)
