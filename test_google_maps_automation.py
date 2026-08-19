@@ -235,7 +235,7 @@ class GoogleMapsAutomationTests(unittest.TestCase):
         root2 = ET.fromstring(xml_2)
         status_msgs = []
         with patch.object(ADBController, "_get_maps_ui_root", side_effect=[root1, root1, root2]), \
-             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False] * 7 + [True]):
+             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False] * 6 + [True]):
             found = self.adb.find_and_click_google_maps_target(
                 "dev_01",
                 target_names=["Nhà thuốc Khải Hoàn Skincare"],
