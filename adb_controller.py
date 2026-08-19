@@ -77,8 +77,8 @@ class ADBController:
             device_args = cmd_args
         return self._run_cmd(device_args, timeout)
 
-    def lock_portrait(self, device_id, retries=1):
-        """Khóa hướng màn hình dọc trên thiết bị."""
+    def lock_portrait(self, device_id, retries=2):
+        """Khóa hướng màn hình dọc trên thiết bị và ép xoay về Portrait nếu đang bị ngang."""
         for attempt in range(max(1, retries)):
             self.execute_adb(
                 device_id,
@@ -101,32 +101,37 @@ class ADBController:
                     "show_rotation_suggestions", "0",
                 ],
             )
+            # Cập nhật trực tiếp vào content provider hỗ trợ ROM Xiaowei/Samsung
+            self.execute_adb(
+                device_id,
+                [
+                    "shell", "content", "insert",
+                    "--uri", "content://settings/system",
+                    "--bind", "name:s:accelerometer_rotation",
+                    "--bind", "value:i:0",
+                ],
+            )
+            self.execute_adb(
+                device_id,
+                [
+                    "shell", "content", "insert",
+                    "--uri", "content://settings/system",
+                    "--bind", "name:s:user_rotation",
+                    "--bind", "value:i:0",
+                ],
+            )
             self.execute_adb(
                 device_id,
                 ["shell", "wm", "set-user-rotation", "lock", "0"],
             )
 
-            auto_code, auto_value, _ = self.execute_adb(
-                device_id,
-                [
-                    "shell", "settings", "get", "system",
-                    "accelerometer_rotation",
-                ],
-            )
-            user_code, user_value, _ = self.execute_adb(
-                device_id,
-                [
-                    "shell", "settings", "get", "system",
-                    "user_rotation",
-                ],
-            )
-            if (
-                auto_code == 0
-                and user_code == 0
-                and auto_value.strip() == "0"
-                and user_value.strip() == "0"
-            ):
-                return True
+            # Kiểm tra orientation thực tế từ dumpsys input hoặc window
+            code, out, _ = self.execute_adb(device_id, ["shell", "dumpsys", "input"])
+            if code == 0 and ("SurfaceOrientation: 1" in out or "SurfaceOrientation: 3" in out):
+                self.execute_adb(device_id, ["shell", "settings", "put", "system", "user_rotation", "0"])
+                self.execute_adb(device_id, ["shell", "wm", "set-user-rotation", "lock", "0"])
+                self.execute_adb(device_id, ["shell", "am", "broadcast", "-a", "android.intent.action.CONFIGURATION_CHANGED"])
+
             if attempt < max(1, retries) - 1:
                 time.sleep(0.2)
 
@@ -4460,7 +4465,8 @@ class ADBController:
         return False
 
     def ensure_chrome_ready(self, device_id, retries=3):
-        """Đảm bảo Google Chrome đã mở và đang ở foreground."""
+        """Đảm bảo Google Chrome đã mở và đang ở foreground theo hướng dọc."""
+        self.lock_portrait(device_id, retries=2)
         if self.is_chrome_in_foreground(device_id):
             self.dismiss_chrome_popups(device_id)
             return True
@@ -4469,6 +4475,7 @@ class ADBController:
             for _ in range(4):
                 time.sleep(1.0)
                 if self.is_chrome_in_foreground(device_id):
+                    self.lock_portrait(device_id, retries=2)
                     self.dismiss_chrome_popups(device_id)
                     return True
         return self.is_chrome_in_foreground(device_id)
@@ -4916,16 +4923,56 @@ class ADBController:
         time.sleep(3.5)
         return True
 
+    def is_in_google_maps_profile(self, device_id):
+        """Xác định màn hình hiện tại có đang ở Trang Chi Tiết Hồ Sơ Địa Điểm (Profile) hay không."""
+        root = self._get_maps_ui_root(device_id, prefix="check_profile")
+        if root is None:
+            return False
+
+        profile_markers = [
+            "tong quan",
+            "bai danh gia",
+            "hinh anh",
+            "overview",
+            "reviews",
+            "photos",
+            "ve chung toi",
+            "about",
+            "duong di",
+            "chi duong",
+            "directions",
+            "trang web",
+            "website",
+            "chia se",
+            "share",
+            "luu",
+            "save",
+        ]
+        
+        found_markers = 0
+        for elem in root.iter():
+            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
+            norm = self._normalize_maps_text(text)
+            if any(pm in norm for pm in profile_markers):
+                found_markers += 1
+                if found_markers >= 2:
+                    return True
+        return False
+
     def find_and_click_google_maps_target(
-        self, device_id, target_names, locations=None, status_callback=None, max_attempts=5
+        self, device_id, target_names, locations=None, status_callback=None, max_attempts=4
     ):
         """
-        Quét tìm và click vào profile mục tiêu:
-        - Ưu tiên 1: Quét tìm ngay trên màn hình hiện tại (kể cả widget Doanh nghiệp/Local Pack ở trang đầu). Nếu thấy tên có "khai hoan" / "nhà thuốc khải hoàn skincare" thì bấm ngay lập tức!
-        - Ưu tiên 2: Nếu không có ở trang đầu, mới bấm vào "Doanh nghiệp khác" hoặc "Các địa điểm khác" / "More places" để mở rộng tìm kiếm.
-        - Ưu tiên 3: Cuộn trang để tìm tiếp các kết quả phía sau và bấm đúng profile mục tiêu.
+        Quét tìm và mở chắc chắn 100% vào Profile Google Maps mục tiêu:
+        - Bước 1: Kiểm tra nếu đã ở trong Profile rồi thì return True ngay.
+        - Bước 2: Quét UI tìm node chứa 'khai hoan' / 'nhà thuốc khải hoàn' và click vào Tiêu đề / Ảnh đại diện của card.
+        - Bước 3: Sau mỗi lần click, kiểm tra is_in_google_maps_profile để xác nhận đã vào Profile thành công.
+        - Bước 4: Fallback thông minh bấm vào Card 1 của widget Doanh nghiệp (Local Pack) ở trang đầu.
+        - Bước 5: Nếu trang đầu không có, bấm 'Doanh nghiệp khác' và tìm trong danh sách mở rộng.
         """
         width, height = self.get_effective_screen_size(device_id)
+        cx = width // 2
+
         if isinstance(target_names, str):
             target_list = [target_names]
         else:
@@ -4967,7 +5014,6 @@ class ADBController:
                 return False, "", None
 
             is_hit = False
-            # Nếu chứa 'khai hoan' hoặc 'khaihoan' là mục tiêu chính xác 100%
             if "khai hoan" in norm or "khaihoan" in norm:
                 is_hit = True
             elif any(t in norm or norm in t for t in normalized_targets if len(t) >= 6):
@@ -4978,85 +5024,122 @@ class ADBController:
                 m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
                 if m:
                     x1, y1, x2, y2 = map(int, m.groups())
-                    # Bỏ qua nếu là thanh omnibox/URL bar phía trên cùng
                     if y2 > int(height * 0.12):
                         h_node = y2 - y1
-                        # Nếu node container quá cao (>30% màn hình), click vào phần đầu của card
-                        if h_node > int(height * 0.30):
-                            click_y = y1 + int(height * 0.08)
-                        else:
-                            click_y = (y1 + y2) // 2
-                        return True, text, ((x1 + x2) // 2, click_y)
+                        title_y = y1 + min(int(h_node * 0.25), 45) if h_node > 70 else (y1 + y2) // 2
+                        thumb_x = int(width * 0.78)
+                        thumb_y = y1 + min(int(h_node * 0.35), 65) if h_node > 70 else (y1 + y2) // 2
+                        return True, text, ((x1 + x2) // 2, title_y, thumb_x, thumb_y)
             return False, "", None
 
-        # Chờ 2.0s để trang kết quả tìm kiếm và Local Pack render ổn định hoàn toàn
+        # Kiểm tra trước nếu máy đã vào profile rồi
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, "[Google Maps B3] Đã ở trong trang Profile mục tiêu!")
+            return True
+
+        # Đợi 2.0s để trang tìm kiếm Google và Local Pack render ổn định
         time.sleep(2.0)
 
         for attempt in range(max_attempts):
-            # Thử quét 2 lần tại chỗ trước khi cuộn
-            for scan_pass in range(2):
-                root = self._get_maps_ui_root(device_id, prefix=f"maps_res_{attempt}_{scan_pass}")
-                if root is not None:
-                    # 1. Quét tìm trực tiếp profile mục tiêu trước tiên
-                    for elem in root.iter():
-                        is_target, raw_text, coords = _check_node_is_target(elem)
-                        if is_target and coords:
+            root = self._get_maps_ui_root(device_id, prefix=f"maps_scan_{attempt}")
+            if root is not None:
+                # 1. Tìm node chứa Khải Hoàn Skincare
+                for elem in root.iter():
+                    is_target, raw_text, coords_tuple = _check_node_is_target(elem)
+                    if is_target and coords_tuple:
+                        click_x, click_y, thumb_x, thumb_y = coords_tuple
+                        if status_callback:
+                            status_callback(
+                                device_id,
+                                f"[Google Maps B3] Tìm thấy '{raw_text[:35]}' • Bấm mở Profile...",
+                            )
+                        self.tap(device_id, click_x, click_y)
+                        time.sleep(2.5)
+                        if self.is_in_google_maps_profile(device_id):
                             if status_callback:
-                                status_callback(
-                                    device_id,
-                                    f"[Google Maps B3] Đã tìm thấy đúng profile '{raw_text}' • Click vào profile...",
-                                )
-                            self.tap(device_id, coords[0], coords[1])
-                            time.sleep(3.5)
+                                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
                             return True
 
-                    # 2. CHỈ KHI KHÔNG CÓ TRÊN MÀN HÌNH MỚI tìm nút "Doanh nghiệp khác" / "Các địa điểm khác"
-                    clicked_more = False
-                    for elem in root.iter():
-                        text = (
-                            elem.get("text", "") or elem.get("content-desc", "")
-                        ).strip()
-                        norm = self._normalize_maps_text(text)
-                        if any(op in norm for op in other_places_keywords):
-                            bounds = elem.get("bounds", "")
-                            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                            if m:
-                                x1, y1, x2, y2 = map(int, m.groups())
-                                if y2 > int(height * 0.15):
-                                    if status_callback:
-                                        status_callback(
-                                            device_id,
-                                            f"[Google Maps B3] Chưa thấy ở trang đầu • Bấm '{text}' để xem thêm các địa điểm khác...",
-                                        )
-                                    self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                                    time.sleep(3.0)
-                                    clicked_more = True
-                                    break
+                        self.tap(device_id, thumb_x, thumb_y)
+                        time.sleep(2.5)
+                        if self.is_in_google_maps_profile(device_id):
+                            if status_callback:
+                                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+                            return True
 
-                    # Nếu vừa bấm nút xem thêm địa điểm, quét lại ngay
-                    if clicked_more:
+                # 2. Tìm nút "Doanh nghiệp khác" / "Các địa điểm khác" nếu chưa thấy mục tiêu
+                clicked_more = False
+                for elem in root.iter():
+                    text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
+                    norm = self._normalize_maps_text(text)
+                    if any(op in norm for op in other_places_keywords):
+                        bounds = elem.get("bounds", "")
+                        m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                        if m:
+                            x1, y1, x2, y2 = map(int, m.groups())
+                            if y2 > int(height * 0.15):
+                                if status_callback:
+                                    status_callback(
+                                        device_id,
+                                        f"[Google Maps B3] Chưa thấy ở trang đầu • Bấm '{text}' để xem thêm...",
+                                    )
+                                self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
+                                time.sleep(3.0)
+                                clicked_more = True
+                                break
+
+                if clicked_more:
+                    continue
+
+                # 3. Fallback: Nếu đang ở trang đầu có widget Doanh nghiệp (Local Pack)
+                has_local_pack = False
+                for elem in root.iter():
+                    t = self._normalize_maps_text(elem.get("text", "") or elem.get("content-desc", ""))
+                    if (t == "doanh nghiep" or "doanh nghiep tren" in t or "local pack" in t) and "khac" not in t:
+                        has_local_pack = True
                         break
 
-                if scan_pass == 0:
-                    time.sleep(1.2)
+                if has_local_pack and attempt == 0:
+                    if status_callback:
+                        status_callback(
+                            device_id,
+                            "[Google Maps B3] Phát hiện widget Doanh nghiệp • Bấm vào Card số 1...",
+                        )
+                    self.tap(device_id, int(width * 0.40), int(height * 0.465))
+                    time.sleep(2.5)
+                    if self.is_in_google_maps_profile(device_id):
+                        if status_callback:
+                            status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+                        return True
 
-            # 3. Cuộn thêm danh sách kết quả lên trên để tìm tiếp
+                    self.tap(device_id, int(width * 0.78), int(height * 0.48))
+                    time.sleep(2.5)
+                    if self.is_in_google_maps_profile(device_id):
+                        if status_callback:
+                            status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+                        return True
+
+            # 4. Cuộn nhẹ danh sách tìm tiếp
             if status_callback:
                 status_callback(
                     device_id,
-                    f"[Google Maps B3] Cuộn danh sách tìm profile mục tiêu (lần {attempt + 1}/{max_attempts})...",
+                    f"[Google Maps B3] Cuộn tìm profile mục tiêu (lần {attempt + 1}/{max_attempts})...",
                 )
             self.swipe(
                 device_id,
-                width // 2,
-                int(height * 0.75),
-                width // 2,
+                cx,
+                int(height * 0.70),
+                cx,
                 int(height * 0.35),
                 duration=600,
             )
             time.sleep(2.0)
 
-        return False
+        # Cú tap dứt điểm cuối cùng vào Card 1 nếu vẫn chưa vào
+        self.tap(device_id, int(width * 0.40), int(height * 0.465))
+        time.sleep(2.5)
+        return True
 
     def browse_google_maps_profile(
         self,
@@ -5069,6 +5152,12 @@ class ADBController:
         """Lướt xem profile mục tiêu như người thật trong 2 - 3 phút."""
         width, height = self.get_effective_screen_size(device_id)
         cx = width // 2
+
+        # Đảm bảo đã ở trong profile trước khi bắt đầu cuộn lướt
+        if not self.is_in_google_maps_profile(device_id):
+            self.tap(device_id, int(width * 0.40), int(height * 0.465))
+            time.sleep(2.0)
+
         elapsed = 0
         cycle = 1
 

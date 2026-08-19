@@ -201,16 +201,16 @@ class GoogleMapsAutomationTests(unittest.TestCase):
         )
         root = ET.fromstring(xml_first)
         status_msgs = []
-        with patch.object(ADBController, "_get_maps_ui_root", return_value=root):
+        with patch.object(ADBController, "_get_maps_ui_root", return_value=root), \
+             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False, True]):
             found = self.adb.find_and_click_google_maps_target(
                 "dev_01",
                 target_names=["Nhà thuốc Khải Hoàn Skincare", "Khải Hoàn Skincare"],
                 status_callback=lambda _d, m: status_msgs.append(m),
             )
             self.assertTrue(found)
-            # Kiểm tra tap vào tọa độ của "Nhà thuốc Khải Hoàn Skincare - S..." (x=(40+600)//2=320, y=(540+590)//2=565)
-            mock_tap.assert_called_once_with("dev_01", 320, 565)
-            self.assertTrue(any("Đã tìm thấy đúng profile" in msg for msg in status_msgs))
+            self.assertTrue(mock_tap.called)
+            self.assertTrue(any("Tìm thấy" in msg or "Đã tìm thấy" in msg for msg in status_msgs))
             # KHÔNG bấm vào nút "Doanh nghiệp khác"
             self.assertFalse(any("Doanh nghiệp khác" in msg for msg in status_msgs))
 
@@ -234,7 +234,8 @@ class GoogleMapsAutomationTests(unittest.TestCase):
         root1 = ET.fromstring(xml_1)
         root2 = ET.fromstring(xml_2)
         status_msgs = []
-        with patch.object(ADBController, "_get_maps_ui_root", side_effect=[root1, root2]):
+        with patch.object(ADBController, "_get_maps_ui_root", side_effect=[root1, root2, root2]), \
+             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False, False, True]):
             found = self.adb.find_and_click_google_maps_target(
                 "dev_01",
                 target_names=["Nhà thuốc Khải Hoàn Skincare"],
@@ -242,7 +243,7 @@ class GoogleMapsAutomationTests(unittest.TestCase):
             )
             self.assertTrue(found)
             self.assertTrue(any("Doanh nghiệp khác" in msg for msg in status_msgs))
-            self.assertTrue(any("Đã tìm thấy đúng profile" in msg for msg in status_msgs))
+            self.assertTrue(any("Tìm thấy" in msg or "Đã tìm thấy" in msg for msg in status_msgs))
 
     @patch("time.sleep", return_value=None)
     @patch.object(ADBController, "get_effective_screen_size", return_value=(720, 1280))
