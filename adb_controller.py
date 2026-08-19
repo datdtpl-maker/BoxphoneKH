@@ -4483,13 +4483,18 @@ class ADBController:
     def find_and_search_chrome(self, device_id, search_text, status_callback=None):
         """
         Tự động nhận diện các giao diện Chrome và tìm kiếm từ khóa:
+        - Thao tác kéo nhẹ từ giữa màn hình xuống (swipe down) để làm hiện thanh tìm kiếm và URL bar ở trên cùng nếu đang bị ẩn.
         - Giao diện 1: Trang chủ Chrome (New Tab) -> Bấm ô 'Tìm kiếm hoặc nhập URL' ở giữa, nhập từ khóa mới.
         - Giao diện 2: Trang kết quả tìm kiếm Google (có search bar ở giữa) -> Bấm nút dấu X xóa sạch từ khóa cũ, nhập từ khóa mới.
-        - Giao diện 3: Trang Chi tiết địa điểm / Profile Maps (có tab Tổng quan, Đánh giá, Gọi điện...) -> Bấm vào thanh URL bar trên cùng (chỗ tô màu vàng y ~ 10%), xóa sạch và tìm kiếm.
+        - Giao diện 3: Trang Chi tiết địa điểm / Profile Maps -> Bấm vào thanh URL bar trên cùng (y ~ 11%), xóa sạch và tìm kiếm.
         - Fallback: Bấm thanh URL bar trên cùng của Chrome.
         """
         width, height = self.get_effective_screen_size(device_id)
         cx = width // 2
+
+        # 1. Kéo nhẹ từ giữa màn hình xuống dưới để thanh tìm kiếm và URL bar trên cùng luôn hiện ra
+        self.swipe(device_id, cx, int(height * 0.35), cx, int(height * 0.70), duration=350)
+        time.sleep(1.0)
 
         # Dump XML UI để phân tích giao diện
         root = self._get_maps_ui_root(device_id, prefix="chrome_detect")
@@ -4574,10 +4579,10 @@ class ADBController:
                             clear_btn_coords = ((x1 + x2) // 2, cy)
 
         if not url_bar_coords:
-            url_bar_coords = (cx, int(height * 0.10))
+            url_bar_coords = (cx, int(height * 0.11))
 
         # Phân loại giao diện:
-        # Nếu đang ở trang chi tiết địa điểm -> Bấm thanh URL trên cùng (chỗ tô màu vàng)
+        # Nếu đang ở trang chi tiết địa điểm -> Bấm thanh URL trên cùng (y ~ 11%)
         if is_place_detail_page and not clear_btn_coords:
             if status_callback:
                 status_callback(
@@ -4610,16 +4615,15 @@ class ADBController:
                     "[Google Chrome B2] Nhận diện trang kết quả tìm kiếm • Bấm nút X xóa sạch từ khóa cũ...",
                 )
 
-            # 1. Bấm nút dấu X để xóa từ khóa cũ
+            # 1. Bấm nút dấu X để xóa từ khóa cũ (x ~ 72%, y ~ 26%)
             if clear_btn_coords:
                 self.tap(device_id, clear_btn_coords[0], clear_btn_coords[1])
             else:
-                # Tọa độ nút X chuẩn trên ô search Google: x ~ 69%, y ~ 24.5%
-                self.tap(device_id, int(width * 0.69), int(height * 0.245))
+                self.tap(device_id, int(width * 0.72), int(height * 0.260))
             time.sleep(0.8)
 
-            # 2. Focus vào ô tìm kiếm Google (x ~ 40%, y ~ 24.5%)
-            self.tap(device_id, int(width * 0.40), int(height * 0.245))
+            # 2. Focus vào ô tìm kiếm Google (x ~ 40%, y ~ 26%)
+            self.tap(device_id, int(width * 0.40), int(height * 0.260))
             time.sleep(0.5)
 
             # 3. Xóa sạch triệt để bằng broadcast và backspace
@@ -4674,7 +4678,7 @@ class ADBController:
             return True
 
         else:
-            # ================= FALLBACK: THANH URL BAR TRÊN CÙNG (CHỖ TÔ VÀNG) =================
+            # ================= FALLBACK: THANH URL BAR TRÊN CÙNG (y ~ 11%) =================
             if status_callback:
                 status_callback(
                     device_id,
@@ -4962,16 +4966,6 @@ class ADBController:
     def find_and_click_google_maps_target(
         self, device_id, target_names, locations=None, status_callback=None, max_attempts=4
     ):
-        """
-        Quét tìm và mở chắc chắn 100% vào Profile Google Maps mục tiêu:
-        - QUY TẮC CỐT LÕI: Khi vừa tìm kiếm xong, Profile Khải Hoàn Skincare nằm ngay trên cùng (Card 1).
-        - Tuyệt đối không cuộn màn hình khi chưa thử bấm mở Card 1 trên cùng!
-        - Bước 1: Kiểm tra nếu đã ở trong Profile rồi thì return True ngay.
-        - Bước 2: Quét UI XML tìm node chứa 'khai hoan' / 'nhà thuốc khải hoàn' và click vào Tiêu đề / Ảnh đại diện của card.
-        - Bước 3: Nếu uiautomator chưa trả về kịp, BẤM TRỰC TIẾP VÀO CARD 1 (Khải Hoàn Skincare) ngay tại màn hình đầu tiên (x ~ 42%, y ~ 46.5% và x ~ 78%, y ~ 48.5%).
-        - Bước 4: Sau mỗi lần bấm, kiểm tra is_in_google_maps_profile để xác nhận đã vào Profile thành công.
-        - Bước 5: Chỉ khi ở màn hình đầu không có Khải Hoàn mới bấm 'Doanh nghiệp khác'.
-        """
         width, height = self.get_effective_screen_size(device_id)
         cx = width // 2
 
@@ -5046,31 +5040,47 @@ class ADBController:
                                     status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
                                 return True
 
-        # 3. NẾU QUÉT XML CHƯA BẮT ĐƯỢC: BẤM CHÍNH XÁC VÀO CARD 1 TRÊN MÀN HÌNH ĐẦU TIÊN
+        # 3. NẾU QUÉT XML CHƯA BẮT ĐƯỢC: BẤM CHÍNH XÁC VÀO CARD 1 TRÊN MÀN HÌNH ĐẦU TIÊN (CHUẨN ẢNH 3)
         if status_callback:
             status_callback(
                 device_id,
                 "[Google Maps B3] Bấm vào Card số 1 trên cùng (Khải Hoàn Skincare)...",
             )
 
-        # Thử 1: Bấm vào tiêu đề Card 1 (x ~ 42%, y ~ 46.5%)
+        # Thử 1: Bấm vào tiêu đề Card 1 (x ~ 42%, y ~ 67.5%)
+        self.tap(device_id, int(width * 0.42), int(height * 0.675))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 2: Bấm vào ảnh đại diện Card 1 (x ~ 78%, y ~ 70.0%)
+        self.tap(device_id, int(width * 0.78), int(height * 0.700))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 3: Bấm vào dòng thông tin Card 1 (x ~ 42%, y ~ 72.0%)
+        self.tap(device_id, int(width * 0.42), int(height * 0.720))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 4: Bấm vào ghim bản đồ Khải Hoàn Skincare (x ~ 45%, y ~ 58.0%)
+        self.tap(device_id, int(width * 0.45), int(height * 0.580))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 5: Fallback cho giao diện không có header lớn (x ~ 42%, y ~ 46.5%)
         self.tap(device_id, int(width * 0.42), int(height * 0.465))
-        time.sleep(3.0)
-        if self.is_in_google_maps_profile(device_id):
-            if status_callback:
-                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
-            return True
-
-        # Thử 2: Bấm vào ảnh đại diện Card 1 (x ~ 78%, y ~ 48.5%)
-        self.tap(device_id, int(width * 0.78), int(height * 0.485))
-        time.sleep(3.0)
-        if self.is_in_google_maps_profile(device_id):
-            if status_callback:
-                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
-            return True
-
-        # Thử 3: Bấm vào ghim bản đồ Khải Hoàn Skincare (x ~ 45%, y ~ 36%)
-        self.tap(device_id, int(width * 0.45), int(height * 0.360))
         time.sleep(3.0)
         if self.is_in_google_maps_profile(device_id):
             if status_callback:
@@ -5121,109 +5131,57 @@ class ADBController:
         if not self.is_in_google_maps_profile(device_id):
             if status_callback:
                 status_callback(device_id, "[Google Maps B4] Xác nhận vào Profile trước khi lướt...")
-            self.tap(device_id, int(width * 0.42), int(height * 0.465))
+            self.tap(device_id, int(width * 0.42), int(height * 0.675))
             time.sleep(2.5)
 
         elapsed = 0
         cycle = 1
 
         tab_keywords = {
-            "reviews": ["bai danh gia", "danh gia", "reviews", "review"],
-            "photos": ["anh", "hinh anh", "photos", "photo"],
-            "overview": ["tong quan", "overview", "gioi thieu", "about"],
+            "tổng quan": ["tong quan", "overview"],
+            "bài đánh giá": ["bai danh gia", "danh gia", "reviews", "review"],
+            "ảnh": ["anh", "hinh anh", "photos", "photo"],
         }
 
+        # Vòng lặp cuộn và tương tác tự nhiên trong khoảng thời gian dwell_total
         while elapsed < total_seconds:
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
 
-            dwell = min(random.randint(15, 25), total_seconds - elapsed)
-            if status_callback:
-                status_callback(
+            remaining = total_seconds - elapsed
+
+            # Thao tác 1: Vuốt cuộn nội dung trang profile
+            scroll_duration = random.randint(400, 700)
+            if cycle % 5 == 0:
+                # Mỗi 5 lượt thì cuộn ngược lên một chút
+                self.swipe(
                     device_id,
-                    f"[Google Maps B4] Lướt xem profile '{target_name}' "
-                    f"đợt {cycle} ({dwell}s) • còn {total_seconds - elapsed}s...",
+                    cx,
+                    int(height * 0.40),
+                    cx,
+                    int(height * 0.70),
+                    duration=scroll_duration,
+                )
+            else:
+                self.swipe(
+                    device_id,
+                    cx,
+                    int(height * 0.70),
+                    cx,
+                    int(height * 0.40),
+                    duration=scroll_duration,
                 )
 
-            if cycle % 3 == 1:
-                # Cuộn nhẹ trang Tổng quan
-                for _ in range(max(1, dwell // 4)):
-                    time.sleep(3.5)
-                    if is_cancelled and is_cancelled():
-                        raise RuntimeError("Bị dừng bởi người dùng")
-                    self.swipe(
-                        device_id,
-                        cx + random.randint(-40, 40),
-                        int(height * 0.70) + random.randint(-30, 30),
-                        cx + random.randint(-40, 40),
-                        int(height * 0.40) + random.randint(-30, 30),
-                        duration=random.randint(500, 800),
-                    )
-            elif cycle % 3 == 2:
-                # Bấm tab Đánh giá hoặc Ảnh
-                root = self._get_maps_ui_root(device_id, prefix="maps_tabs")
-                if root is not None:
-                    target_tab_group = (
-                        tab_keywords["reviews"]
-                        if cycle % 2 == 0
-                        else tab_keywords["photos"]
-                    )
-                    for elem in root.iter():
-                        text = (
-                            elem.get("text", "") or elem.get("content-desc", "")
-                        ).strip()
-                        norm = self._normalize_maps_text(text)
-                        if any(kw in norm for kw in target_tab_group):
-                            bounds = elem.get("bounds", "")
-                            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                            if m:
-                                x1, y1, x2, y2 = map(int, m.groups())
-                                self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                                time.sleep(1.5)
-                                break
-                for _ in range(max(1, dwell // 5)):
-                    time.sleep(4.0)
-                    if is_cancelled and is_cancelled():
-                        raise RuntimeError("Bị dừng bởi người dùng")
-                    self.swipe(
-                        device_id,
-                        cx + random.randint(-30, 30),
-                        int(height * 0.65) + random.randint(-20, 20),
-                        cx + random.randint(-30, 30),
-                        int(height * 0.45) + random.randint(-20, 20),
-                        duration=random.randint(600, 900),
-                    )
-            else:
-                # Cuộn về Tổng quan
-                root = self._get_maps_ui_root(device_id, prefix="maps_overview")
-                if root is not None:
-                    for elem in root.iter():
-                        text = (
-                            elem.get("text", "") or elem.get("content-desc", "")
-                        ).strip()
-                        norm = self._normalize_maps_text(text)
-                        if any(kw in norm for kw in tab_keywords["overview"]):
-                            bounds = elem.get("bounds", "")
-                            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                            if m:
-                                x1, y1, x2, y2 = map(int, m.groups())
-                                self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                                time.sleep(1.5)
-                                break
-                for _ in range(max(1, dwell // 5)):
-                    time.sleep(4.0)
-                    if is_cancelled and is_cancelled():
-                        raise RuntimeError("Bị dừng bởi người dùng")
-                    self.swipe(
-                        device_id,
-                        cx + random.randint(-40, 40),
-                        int(height * 0.40) + random.randint(-20, 20),
-                        cx + random.randint(-40, 40),
-                        int(height * 0.65) + random.randint(-20, 20),
-                        duration=random.randint(600, 900),
-                    )
+            dwell_pause = random.randint(4, 8)
+            time.sleep(dwell_pause)
+            elapsed += dwell_pause
 
-            elapsed += dwell
+            if status_callback and cycle % 2 == 0:
+                status_callback(
+                    device_id,
+                    f"[Google Maps B4] Đang xem thông tin profile • còn {max(0, remaining - dwell_pause)}s...",
+                )
+
             cycle += 1
 
         return True
@@ -5384,6 +5342,12 @@ class ADBController:
 
         try:
             check_cancelled()
+
+            # Tắt triệt để các app mạng xã hội khác nếu đang mở để tránh đè màn hình Google Chrome
+            self.stop_app(device_id, "com.ss.android.ugc.trill")
+            self.stop_app(device_id, "com.zhiliaoapp.musically")
+            self.stop_app(device_id, "com.facebook.katana")
+            time.sleep(0.5)
 
             # ================= BƯỚC 1: MỞ GOOGLE CHROME =================
             update_status("[Google Chrome B1] Mở ứng dụng Google Chrome...")
