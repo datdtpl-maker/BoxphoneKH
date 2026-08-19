@@ -4480,33 +4480,133 @@ class ADBController:
                     return True
         return self.is_chrome_in_foreground(device_id)
 
+    def is_chrome_homepage(self, device_id):
+        """Xác minh Chrome đang ở trang chủ có ô tìm kiếm lớn giữa màn hình."""
+        width, height = self.get_effective_screen_size(device_id)
+        root = self._get_maps_ui_root(device_id, prefix="chrome_home_check")
+        if root is None:
+            return False
+
+        home_search_markers = (
+            "tim kiem tren google hoac nhap url",
+            "search google or type a url",
+            "tim kiem tren google hoac nhap dia chi web",
+        )
+        home_search_res_ids = (
+            "search_box_text",
+            "search_widget_text",
+            "search_omnibox_edit_text",
+        )
+        for elem in root.iter():
+            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
+            norm = self._normalize_maps_text(text)
+            res_id = (elem.get("resource-id", "") or "").lower()
+            if not (
+                any(marker in norm for marker in home_search_markers)
+                or any(marker in res_id for marker in home_search_res_ids)
+            ):
+                continue
+
+            bounds = elem.get("bounds", "")
+            match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+            if not match:
+                continue
+            x1, y1, x2, y2 = map(int, match.groups())
+            center_y = (y1 + y2) // 2
+            if y2 > y1 and x2 > x1 and height * 0.15 <= center_y <= height * 0.55:
+                return True
+        return False
+
+    def open_chrome_homepage(self, device_id, status_callback=None):
+        """Bấm biểu tượng Home của Chrome, không dùng phím Home của Android."""
+        if self.is_chrome_homepage(device_id):
+            return True
+
+        width, height = self.get_effective_screen_size(device_id)
+        root = self._get_maps_ui_root(device_id, prefix="chrome_home_button")
+        home_coords = None
+
+        if root is not None:
+            for elem in root.iter():
+                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
+                norm = self._normalize_maps_text(text)
+                res_id = (elem.get("resource-id", "") or "").lower()
+                is_home = (
+                    norm in ("home", "trang chu", "homepage")
+                    or "home_button" in res_id
+                    or res_id.endswith(":id/home")
+                )
+                if not is_home:
+                    continue
+
+                bounds = elem.get("bounds", "")
+                match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                if not match:
+                    continue
+                x1, y1, x2, y2 = map(int, match.groups())
+                center_x = (x1 + x2) // 2
+                center_y = (y1 + y2) // 2
+                if center_x <= width * 0.25 and center_y <= height * 0.20:
+                    home_coords = (center_x, center_y)
+                    break
+
+        if status_callback:
+            status_callback(
+                device_id,
+                "[Google Chrome B2] Bấm Home của Chrome để về trang chủ trước khi tìm kiếm...",
+            )
+
+        if home_coords is None:
+            home_coords = (int(width * 0.075), int(height * 0.08))
+        self.tap(device_id, home_coords[0], home_coords[1])
+        time.sleep(2.0)
+        self.dismiss_chrome_popups(device_id)
+        return self.is_chrome_homepage(device_id)
+
     def find_and_search_chrome(self, device_id, search_text, status_callback=None):
         """
-        Giao diện đơn giản và chống lỗi 100%:
-        Luôn bấm vào thanh URL ở trên cùng (y ~ 11%), nhập thẳng từ khóa và Enter.
-        Khắc phục hoàn toàn lỗi máy bị kẹt ở trang chủ hoặc không search được.
+        Quy trình chuẩn theo yêu cầu:
+        1. Bấm nút HOME (góc trái trên) để về trang chủ (Google New Tab)
+        2. Bấm vào ô tìm kiếm to giữa màn hình (y ~ 32%)
+        3. Nhập từ khóa (từng từ một)
         """
         width, height = self.get_effective_screen_size(device_id)
         cx = width // 2
 
         if status_callback:
-            status_callback(device_id, f"[Google Chrome B2] Bấm thanh URL để tìm kiếm: '{search_text}'...")
+            status_callback(device_id, f"[Google Chrome B2] Về trang chủ và nhập từ khóa: '{search_text}'...")
 
-        # 1. Bấm vào thanh URL ở trên cùng (y ~ 11%)
-        self.tap(device_id, cx, int(height * 0.11))
-        time.sleep(1.0)
-        
-        # Bấm thêm nút X góc phải của thanh URL (x ~ 85%, y ~ 11%) để xóa nhanh nếu có
-        self.tap(device_id, int(width * 0.85), int(height * 0.11))
-        time.sleep(0.5)
+        # 1. Bấm vào nút Home góc trái trên cùng để về trang chủ (x ~ 10%, y ~ 11%)
+        self.tap(device_id, int(width * 0.10), int(height * 0.11))
+        time.sleep(2.5)
 
-        # 2. Xóa sạch dữ liệu cũ
-        self.clear_input_field(device_id, max_chars=50)
-        time.sleep(0.5)
-
-        # 3. Nhập thẳng text
-        self.input_text(device_id, search_text)
+        # 2. Bấm vào Ô "Tìm kiếm trên Google hoặc nhập URL" ở khoảng 1/3 màn hình (y ~ 32%)
+        self.tap(device_id, cx, int(height * 0.32))
         time.sleep(1.5)
+        
+        # Bấm thêm 1 nhát nữa lỡ bấm trượt
+        self.tap(device_id, cx, int(height * 0.32))
+        time.sleep(1.0)
+
+        # Xoá text cũ nếu có (bấm góc phải nút X hoặc gửi backspace)
+        self.tap(device_id, int(width * 0.85), int(height * 0.11))
+        time.sleep(0.3)
+        self.clear_input_field(device_id, max_chars=80)
+        time.sleep(0.5)
+
+        # 3. Nhập text từng từ để trị bệnh Chrome giật focus làm đứt quãng
+        if status_callback:
+            status_callback(device_id, f"[Google Chrome B2] Đang gõ từ khoá...")
+        
+        words = search_text.split()
+        for i, word in enumerate(words):
+            self.input_text(device_id, word)
+            time.sleep(0.3)
+            if i < len(words) - 1:
+                self.keyevent(device_id, 62) # Dấu cách SPACE
+                time.sleep(0.15)
+        
+        time.sleep(1.0)
 
         # 4. Gửi phím Enter (66) 2 lần để chắc chắn ăn phím
         self.keyevent(device_id, 66)
@@ -5094,8 +5194,8 @@ class ADBController:
     ):
         """Quy trình Bơm Google Maps:
 
-        1. Khởi động app Google Maps, xử lý popup.
-        2. Nhập từ khóa ngẫu nhiên từ danh sách và tìm kiếm.
+        1. Mở Chrome và bấm Home của Chrome để về trang chủ.
+        2. Chỉ nhập một từ khóa ngẫu nhiên từ ô "Từ khóa theo dõi".
         3. Tìm và mở đúng profile mục tiêu (nếu trang đầu không có thì bấm Các địa điểm khác/cuộn).
         4. Lướt xem như người thật 2-3 phút (Tổng quan, Đánh giá, Ảnh).
         5. Bấm ngẫu nhiên các nút trên profile và hoàn tất.
@@ -5136,7 +5236,8 @@ class ADBController:
         selected_keyword = random.choice(kw_list)
         selected_location = random.choice(loc_list) if loc_list else ""
 
-        # CHỈ TÌM ĐÚNG TỪ KHÓA BỐC TỪ Ô "Từ khóa theo dõi"
+        # Tên profile target và vị trí chỉ dùng tham chiếu sau khi có kết quả.
+        # Tuyệt đối không ghép hai trường này vào nội dung nhập trên Google.
         search_query = selected_keyword
 
         dwell_min = min_dwell if min_dwell is not None else getattr(config, "GOOGLE_MAPS_DWELL_MIN", 120)

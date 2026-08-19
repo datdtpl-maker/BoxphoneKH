@@ -124,16 +124,21 @@ class GoogleMapsAutomationTests(unittest.TestCase):
     @patch.object(ADBController, "clear_input_field", return_value=True)
     @patch.object(ADBController, "input_text", return_value=True)
     @patch.object(ADBController, "keyevent", return_value=True)
-    def test_find_and_search_chrome_homepage(self, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
+    @patch.object(ADBController, "open_chrome_homepage", return_value=True)
+    def test_find_and_search_chrome_homepage(self, mock_home, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
         # Giả lập XML Trang chủ Chrome
         xml_home = '<hierarchy><node text="Tìm kiếm hoặc nhập URL" bounds="[60,340][660,420]"/></hierarchy>'
         root_home = ET.fromstring(xml_home)
         with patch.object(ADBController, "_get_maps_ui_root", return_value=root_home):
             res = self.adb.find_and_search_chrome("dev_01", "kem chống nắng")
             self.assertTrue(res)
+            mock_home.assert_called_once_with("dev_01", status_callback=None)
             self.assertTrue(mock_tap.called)
             self.assertTrue(mock_clear.called)
-            self.assertTrue(mock_input.called)
+            self.assertEqual(
+                [call.args[1] for call in mock_input.call_args_list],
+                ["kem", "chống", "nắng"],
+            )
             mock_key.assert_called_with("dev_01", 66)
 
     @patch("time.sleep", return_value=None)
@@ -142,19 +147,18 @@ class GoogleMapsAutomationTests(unittest.TestCase):
     @patch.object(ADBController, "clear_input_field", return_value=True)
     @patch.object(ADBController, "input_text", return_value=True)
     @patch.object(ADBController, "keyevent", return_value=True)
-    def test_find_and_search_chrome_search_results_page_clears_old_keyword(self, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
-        # Giả lập XML Trang kết quả tìm kiếm (có tab Tất cả và nút Xóa)
-        xml_res = '<hierarchy><node text="Tất cả" bounds="[50,380][150,420]"/><node content-desc="Xóa cụm từ tìm kiếm" bounds="[480,280][540,340]"/></hierarchy>'
-        root_res = ET.fromstring(xml_res)
-        with patch.object(ADBController, "_get_maps_ui_root", return_value=root_res):
-            status_msgs = []
-            res = self.adb.find_and_search_chrome("dev_01", "trị mụn Khải Hoàn", status_callback=lambda _d, m: status_msgs.append(m))
+    def test_find_and_search_chrome_uses_only_tracking_keyword(self, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
+        xml_home = '<hierarchy><node text="Tìm kiếm trên Google hoặc nhập URL" bounds="[60,340][660,420]"/></hierarchy>'
+        root_home = ET.fromstring(xml_home)
+        with patch.object(ADBController, "open_chrome_homepage", return_value=True), \
+             patch.object(ADBController, "_get_maps_ui_root", return_value=root_home):
+            res = self.adb.find_and_search_chrome("dev_01", "nặn mụn Phan Thiết")
             self.assertTrue(res)
-            self.assertTrue(any("Xóa sạch từ khóa cũ" in msg or "xóa sạch" in msg.lower() for msg in status_msgs))
-            self.assertTrue(mock_tap.called)
-            self.assertTrue(mock_clear.called)
-            self.assertTrue(mock_input.called)
-            mock_key.assert_called_with("dev_01", 66)
+            typed_words = [call.args[1] for call in mock_input.call_args_list]
+            self.assertEqual(typed_words, ["nặn", "mụn", "Phan", "Thiết"])
+            self.assertNotIn("Nhà thuốc Khải Hoàn Skincare", typed_words)
+            self.assertNotIn("Lâm Đồng", typed_words)
+            mock_key.assert_called_once_with("dev_01", 66)
 
     @patch("time.sleep", return_value=None)
     @patch.object(ADBController, "get_effective_screen_size", return_value=(720, 1280))
@@ -162,29 +166,14 @@ class GoogleMapsAutomationTests(unittest.TestCase):
     @patch.object(ADBController, "clear_input_field", return_value=True)
     @patch.object(ADBController, "input_text", return_value=True)
     @patch.object(ADBController, "keyevent", return_value=True)
-    def test_find_and_search_chrome_place_detail_page_clicks_top_url_bar(self, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
-        # Giả lập XML Trang chi tiết Profile (như ảnh Bắp Spa - Phan Thiết có Tổng quan, Bài đánh giá, Gọi điện...)
-        xml_place = (
-            '<hierarchy>'
-            '<node resource-id="com.android.chrome:id/url_bar" text="google.com/search?q=..." bounds="[100,60][620,130]"/>'
-            '<node text="Bắp Spa - Phan Thiết" bounds="[40,200][500,250]"/>'
-            '<node text="Tổng quan" bounds="[40,280][200,340]"/>'
-            '<node text="Bài đánh giá" bounds="[220,280][400,340]"/>'
-            '<node text="Ảnh" bounds="[420,280][540,340]"/>'
-            '<node text="Gọi điện" bounds="[40,550][180,620]"/>'
-            '</hierarchy>'
-        )
-        root_place = ET.fromstring(xml_place)
-        status_msgs = []
-        with patch.object(ADBController, "_get_maps_ui_root", return_value=root_place):
-            res = self.adb.find_and_search_chrome("dev_01", "kem mụn Khải Hoàn", status_callback=lambda _d, m: status_msgs.append(m))
-            self.assertTrue(res)
-            # Kiểm tra tap vào thanh URL bar trên cùng ((100+620)//2 = 360, (60+130)//2 = 95)
-            mock_tap.assert_called_once_with("dev_01", 360, 95)
-            self.assertTrue(any("thanh URL trên cùng" in msg for msg in status_msgs))
-            self.assertTrue(mock_clear.called)
-            self.assertTrue(mock_input.called)
-            mock_key.assert_called_with("dev_01", 66)
+    def test_open_chrome_homepage_clicks_chrome_home_icon(self, mock_key, mock_input, mock_clear, mock_tap, mock_size, mock_sleep):
+        xml_not_home = '<hierarchy><node text="swedish massage" bounds="[100,220][620,300]"/></hierarchy>'
+        xml_home_button = '<hierarchy><node resource-id="com.android.chrome:id/home_button" content-desc="Trang chủ" bounds="[24,50][84,110]"/></hierarchy>'
+        with patch.object(ADBController, "is_chrome_homepage", side_effect=[False, True]), \
+             patch.object(ADBController, "_get_maps_ui_root", return_value=ET.fromstring(xml_home_button)), \
+             patch.object(ADBController, "dismiss_chrome_popups", return_value=False):
+            self.assertTrue(self.adb.open_chrome_homepage("dev_01"))
+            mock_tap.assert_called_once_with("dev_01", 54, 80)
 
     @patch("time.sleep", return_value=None)
     @patch.object(ADBController, "get_effective_screen_size", return_value=(720, 1280))

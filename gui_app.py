@@ -633,6 +633,14 @@ class GUIApp(ctk.CTk):
             or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT,
         )
 
+        ctk.CTkLabel(
+            self.maps_scroll,
+            text="Tên profile và vị trí chỉ để đối chiếu kết quả • Không nhập vào ô tìm kiếm Google",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color="#b45309",
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 8))
+
         self.ent_maps_selection = ctk.CTkEntry(
             self.maps_scroll,
             placeholder_text=(
@@ -2268,7 +2276,7 @@ class GUIApp(ctk.CTk):
             [
                 f"Đang chạy Bơm Google Maps ({mode_label}) trên {len(tasks)} máy...",
                 f"Hồ sơ mục tiêu: {target}",
-                "Mỗi máy được bốc ngẫu nhiên một từ khóa và khu vực.",
+                "Mỗi máy random 1 từ khóa theo dõi; profile và khu vực chỉ dùng tham chiếu.",
             ]
         )
 
