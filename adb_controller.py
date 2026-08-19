@@ -4953,14 +4953,11 @@ class ADBController:
             "save",
         ]
         
-        found_markers = 0
         for elem in root.iter():
             text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
             norm = self._normalize_maps_text(text)
             if any(pm in norm for pm in profile_markers):
-                found_markers += 1
-                if found_markers >= 2:
-                    return True
+                return True
         return False
 
     def find_and_click_google_maps_target(
@@ -5040,47 +5037,55 @@ class ADBController:
                                     status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
                                 return True
 
-        # 3. NẾU QUÉT XML CHƯA BẮT ĐƯỢC: BẤM CHÍNH XÁC VÀO CARD 1 TRÊN MÀN HÌNH ĐẦU TIÊN (CHUẨN ẢNH 3)
+        # 3. NẾU QUÉT XML CHƯA BẮT ĐƯỢC: BẤM CHÍNH XÁC VÀO CARD 1 TRÊN MÀN HÌNH ĐẦU TIÊN (CHUẨN ẢNH MÁY S3)
         if status_callback:
             status_callback(
                 device_id,
                 "[Google Maps B3] Bấm vào Card số 1 trên cùng (Khải Hoàn Skincare)...",
             )
 
-        # Thử 1: Bấm vào tiêu đề Card 1 (x ~ 42%, y ~ 67.5%)
-        self.tap(device_id, int(width * 0.42), int(height * 0.675))
+        # Thử 1: Bấm vào tiêu đề Card 1 ở đầu dòng (chuẩn ảnh máy S3: x ~ 42%, y ~ 16.5%)
+        self.tap(device_id, int(width * 0.42), int(height * 0.165))
         time.sleep(3.0)
         if self.is_in_google_maps_profile(device_id):
             if status_callback:
                 status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
             return True
 
-        # Thử 2: Bấm vào ảnh đại diện Card 1 (x ~ 78%, y ~ 70.0%)
-        self.tap(device_id, int(width * 0.78), int(height * 0.700))
+        # Thử 2: Bấm vào ảnh đại diện Card 1 ở đầu dòng (chuẩn ảnh máy S3: x ~ 78%, y ~ 21.0%)
+        self.tap(device_id, int(width * 0.78), int(height * 0.210))
         time.sleep(3.0)
         if self.is_in_google_maps_profile(device_id):
             if status_callback:
                 status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
             return True
 
-        # Thử 3: Bấm vào dòng thông tin Card 1 (x ~ 42%, y ~ 72.0%)
-        self.tap(device_id, int(width * 0.42), int(height * 0.720))
+        # Thử 3: Bấm vào thân Card 1 ở đầu dòng (x ~ 42%, y ~ 24.0%)
+        self.tap(device_id, int(width * 0.42), int(height * 0.240))
         time.sleep(3.0)
         if self.is_in_google_maps_profile(device_id):
             if status_callback:
                 status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
             return True
 
-        # Thử 4: Bấm vào ghim bản đồ Khải Hoàn Skincare (x ~ 45%, y ~ 58.0%)
-        self.tap(device_id, int(width * 0.45), int(height * 0.580))
-        time.sleep(3.0)
-        if self.is_in_google_maps_profile(device_id):
-            if status_callback:
-                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
-            return True
-
-        # Thử 5: Fallback cho giao diện không có header lớn (x ~ 42%, y ~ 46.5%)
+        # Thử 4: Bấm vào Card 1 giữa trang (giao diện chưa scroll: x ~ 42%, y ~ 46.5%)
         self.tap(device_id, int(width * 0.42), int(height * 0.465))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 5: Bấm vào ảnh đại diện Card 1 giữa trang (x ~ 78%, y ~ 48.5%)
+        self.tap(device_id, int(width * 0.78), int(height * 0.485))
+        time.sleep(3.0)
+        if self.is_in_google_maps_profile(device_id):
+            if status_callback:
+                status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
+            return True
+
+        # Thử 6: Bấm vào Card 1 cuối trang (giao diện có header lớn: x ~ 42%, y ~ 67.5%)
+        self.tap(device_id, int(width * 0.42), int(height * 0.675))
         time.sleep(3.0)
         if self.is_in_google_maps_profile(device_id):
             if status_callback:
@@ -5131,7 +5136,7 @@ class ADBController:
         if not self.is_in_google_maps_profile(device_id):
             if status_callback:
                 status_callback(device_id, "[Google Maps B4] Xác nhận vào Profile trước khi lướt...")
-            self.tap(device_id, int(width * 0.42), int(height * 0.675))
+            self.tap(device_id, int(width * 0.42), int(height * 0.165))
             time.sleep(2.5)
 
         elapsed = 0
