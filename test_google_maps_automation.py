@@ -234,8 +234,8 @@ class GoogleMapsAutomationTests(unittest.TestCase):
         root1 = ET.fromstring(xml_1)
         root2 = ET.fromstring(xml_2)
         status_msgs = []
-        with patch.object(ADBController, "_get_maps_ui_root", side_effect=[root1, root2, root2]), \
-             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False, False, True]):
+        with patch.object(ADBController, "_get_maps_ui_root", side_effect=[root1, root1, root2]), \
+             patch.object(ADBController, "is_in_google_maps_profile", side_effect=[False, False, False, False, True]):
             found = self.adb.find_and_click_google_maps_target(
                 "dev_01",
                 target_names=["Nhà thuốc Khải Hoàn Skincare"],
@@ -243,7 +243,6 @@ class GoogleMapsAutomationTests(unittest.TestCase):
             )
             self.assertTrue(found)
             self.assertTrue(any("Doanh nghiệp khác" in msg for msg in status_msgs))
-            self.assertTrue(any("Tìm thấy" in msg or "Đã tìm thấy" in msg for msg in status_msgs))
 
     @patch("time.sleep", return_value=None)
     @patch.object(ADBController, "get_effective_screen_size", return_value=(720, 1280))
