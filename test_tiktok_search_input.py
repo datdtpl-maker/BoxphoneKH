@@ -561,9 +561,8 @@ class TikTokSearchInputTests(unittest.TestCase):
     @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MIN", 16)
     @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MAX", 16)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
-    @patch("adb_controller.time.sleep", return_value=None)
     def test_cross_warmup_recovers_when_tiktok_feed_does_not_move(
-        self, _sleep, _randint
+        self, _randint
     ):
         self.controller.launch_tiktok = lambda _device_id: None
         self.controller.is_tiktok_in_foreground = lambda _device_id: True
@@ -578,9 +577,19 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id: next(moves)
         )
 
-        self.assertTrue(
-            self.controller.warmup_tiktok_before_facebook("device-1")
-        )
+        clock = [0.0]
+        with (
+            patch(
+                "adb_controller.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(
+                    0, clock[0] + float(seconds)
+                ),
+            ),
+            patch("adb_controller.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            self.assertTrue(
+                self.controller.warmup_tiktok_before_facebook("device-1")
+            )
         self.assertEqual(
             [("device-1", False), ("device-1", True)],
             recoveries,

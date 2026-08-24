@@ -21,7 +21,6 @@ def _page(title="Tuần 12/08", start="2026-08-12", end="2026-08-18", active=Tru
             "Thời gian áp dụng": {"date": {"start": start, "end": end}},
             "Đang áp dụng": {"checkbox": active},
             "Trạng thái bơm": {"select": None},
-            "Google Maps - Từ khóa theo dõi": {"rich_text": [{"plain_text": "spa lấy mụn, chăm sóc da"}]},
             "TikTok - Từ khóa nhiệm vụ": {"rich_text": [{"plain_text": "chăm sóc da, skincare"}]},
             "TikTok - Kênh mục tiêu": {"rich_text": [{"plain_text": "kenh-a, kenh-b"}]},
             "Facebook - Từ khóa mồi": {"rich_text": [{"plain_text": "da khỏe, trị mụn"}]},
@@ -52,7 +51,6 @@ class NotionKeywordSyncTests(unittest.TestCase):
 
         self.assertEqual("Tuần 12/08", schedule.title)
         self.assertEqual(date(2026, 8, 12), schedule.start_date)
-        self.assertEqual("spa lấy mụn, chăm sóc da", schedule.google_maps_keywords)
         self.assertEqual("kenh-a, kenh-b", schedule.tiktok_target_channels)
         self.assertEqual("Page A, Page B", schedule.facebook_target_pages)
         self.assertEqual("", schedule.pump_status)

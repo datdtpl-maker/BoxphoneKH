@@ -13,10 +13,9 @@ class AdaptivePolicy:
 
 
 PLATFORM_POLICIES = {
-    "google_maps": AdaptivePolicy(max_workers=3, stagger_seconds=(2, 5)),
-    "facebook": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),
-    "tiktok": AdaptivePolicy(max_workers=4, stagger_seconds=(30, 90)),
-    "social": AdaptivePolicy(max_workers=3, stagger_seconds=(30, 90)),
+    "facebook": AdaptivePolicy(max_workers=3, stagger_seconds=(5, 15)),
+    "tiktok": AdaptivePolicy(max_workers=4, stagger_seconds=(5, 15)),
+    "social": AdaptivePolicy(max_workers=3, stagger_seconds=(5, 15)),
 }
 
 
@@ -66,9 +65,12 @@ def run_adaptive(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             while queued and not is_cancelled():
                 wave_limit = min(max_workers, len(queued))
+                # Khi còn ít nhất hai thiết bị, một đợt thích ứng phải khởi
+                # động tối thiểu hai máy để không tạo cảm giác chỉ chạy 1 profile.
+                wave_min = 2 if wave_limit >= 2 else 1
                 wave_size = max(
-                    1,
-                    min(randint_fn(1, wave_limit), wave_limit),
+                    wave_min,
+                    min(randint_fn(wave_min, wave_limit), wave_limit),
                 )
                 wave = [queued.pop(0) for _ in range(wave_size)]
                 wave_number += 1

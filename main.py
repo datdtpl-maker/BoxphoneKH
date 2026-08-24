@@ -518,39 +518,6 @@ def check_auth(message):
 def parse_natural_command(text):
     text_lower = text.lower().strip()
     
-    # Lệnh Bơm Google Maps
-    if any(k in text_lower for k in ["/maps", "/google_maps", "bơm google map", "bơm google maps", "bơm maps", "chạy google map", "chạy google maps", "google maps"]):
-        is_seq = any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt"])
-        m_device = re.search(r"(?:máy|máy số|số|device)\s*(\d+)", text_lower)
-        device_idx = int(m_device.group(1)) if m_device else None
-
-        raw = re.sub(
-            r"^(?:/maps_seq|/maps|/google_maps|bơm google maps tuần tự|bơm google map tuần tự|bơm google maps|bơm google map|bơm maps|chạy google maps|chạy google map)\s*",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        ).strip()
-        raw = re.sub(
-            r"(?:cho|ở|trên)?\s*(?:máy|máy số|số|device)\s*\d+",
-            "",
-            raw,
-            flags=re.IGNORECASE,
-        ).strip()
-
-        parts = [p.strip() for p in raw.split("|") if p.strip()]
-        keywords = parts[0] if parts else "chăm sóc da, trị mụn, spa lấy mụn"
-        target_name = parts[1] if len(parts) > 1 else (config.GOOGLE_MAPS_TARGET_NAME or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT)
-        locations = parts[2] if len(parts) > 2 else (config.GOOGLE_MAPS_LOCATION_TEXT or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT)
-
-        return {
-            "action": "google_maps_automation",
-            "is_sequential": is_seq,
-            "keywords": keywords,
-            "target_name": target_name,
-            "locations": locations,
-            "device_idx": device_idx,
-        }
-
     # Lệnh Bơm TikTok 3 Bước
     if any(k in text_lower for k in ["/tiktok", "bơm tiktok", "chạy tiktok", "tiktok"]):
         is_seq = any(k in text_lower for k in ["tuần tự", "tuan tu", "lần lượt"])
@@ -629,9 +596,6 @@ def handle_slash_commands(message):
 def send_full_dashboard(message):
     instructions = (
         "🤖 **BOXPHONECONTROL • BẢNG ĐIỀU KHIỂN**\n\n"
-        "📍 **Google Maps Ranking**\n"
-        "Dùng giao diện máy tính để quét từ khóa Notion và kiểm tra vị trí "
-        "hồ sơ qua Places API chính thức. Module này không tạo lượt tương tác.\n\n"
         "🎵 **TikTok**\n"
         "/tiktok từ khóa 1, từ khóa 2 | kênh_a, kênh_b\n"
         "/tiktok tuần tự từ khóa | kênh_mục_tiêu\n\n"
@@ -748,151 +712,6 @@ def handle_all_messages(message):
             return
     else:
         target_devices = devices
-
-    if action == "google_maps_automation":
-        is_seq = cmd.get("is_sequential", False)
-        keywords = cmd.get("keywords")
-        target_name = cmd.get("target_name") or config.GOOGLE_MAPS_TARGET_NAME or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT
-        locations = cmd.get("locations") or config.GOOGLE_MAPS_LOCATION_TEXT or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT
-        workflow_session = start_workflow_session()
-        session_is_cancelled = make_session_cancel_checker(
-            workflow_session
-        )
-
-        if is_seq or len(target_devices) == 1:
-            def run_seq_maps_thread():
-                tracker = TelegramRealtimeTracker(bot, message.chat.id)
-                tracker.start_dashboard(
-                    f"📍 **BƠM GOOGLE MAPS TUẦN TỰ**\n"
-                    f"Hồ sơ mục tiêu: `{target_name}`\n"
-                    f"Đang quét trên {len(target_devices)} máy..."
-                )
-
-                success_count = 0
-                for idx, dev in enumerate(target_devices):
-                    if session_is_cancelled():
-                        break
-                    dev_name = get_device_name(dev)
-                    tracker.set_active_device(
-                        dev_name,
-                        dev,
-                        f"Maps: {target_name}",
-                        idx + 1,
-                        len(target_devices),
-                        platform="Google Maps",
-                    )
-                    dev_start = time.time()
-                    success, err = adb.google_maps_automation_workflow(
-                        dev,
-                        keywords=keywords,
-                        target_name=target_name,
-                        locations=locations,
-                        status_callback=tracker.status_callback,
-                        is_cancelled=session_is_cancelled,
-                    )
-                    dev_dur = time.time() - dev_start
-                    send_device_finished_card(
-                        message.chat.id,
-                        dev_name,
-                        dev,
-                        f"Google Maps: {target_name}",
-                        success,
-                        err,
-                        dev_dur,
-                    )
-                    if success:
-                        success_count += 1
-
-                tracker.finish_dashboard(
-                    f"🏁 **KẾT QUẢ GOOGLE MAPS TUẦN TỰ: "
-                    f"{success_count}/{len(target_devices)} MÁY THÀNH CÔNG**"
-                )
-
-            threading.Thread(target=run_seq_maps_thread, daemon=True).start()
-        else:
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(
-                telebot.types.InlineKeyboardButton(
-                    "🛑 DỪNG CHẠY KHẨN CẤP", callback_data="stop_all"
-                )
-            )
-            status_msg = bot.reply_to(
-                message,
-                f"📍 **BƠM GOOGLE MAPS SONG SONG** trên {len(target_devices)} máy...\n"
-                f"Hồ sơ mục tiêu: `{target_name}`",
-                reply_markup=markup,
-            )
-
-            def run_maps_parallel(device_id):
-                dev_name = get_device_name(device_id)
-                tracker = TelegramRealtimeTracker(bot, message.chat.id)
-                tracker.start_dashboard(
-                    f"📍 **GOOGLE MAPS SONG SONG • MÁY {dev_name}**\n"
-                    f"Hồ sơ mục tiêu: `{target_name}`"
-                )
-                tracker.set_active_device(
-                    dev_name,
-                    device_id,
-                    f"Maps: {target_name}",
-                    1,
-                    1,
-                    platform="Google Maps",
-                )
-                dev_start = time.time()
-                success, err = adb.google_maps_automation_workflow(
-                    device_id,
-                    keywords=keywords,
-                    target_name=target_name,
-                    locations=locations,
-                    status_callback=tracker.status_callback,
-                    is_cancelled=session_is_cancelled,
-                )
-                dev_dur = time.time() - dev_start
-                if success:
-                    tracker.finish_dashboard(
-                        f"✅ **MÁY {dev_name} HOÀN THÀNH GOOGLE MAPS**\n"
-                        f"Hồ sơ: `{target_name}`"
-                    )
-                else:
-                    tracker.finish_dashboard(
-                        f"❌ **MÁY {dev_name} GOOGLE MAPS THẤT BẠI**\n"
-                        f"Lỗi: `{err}`"
-                    )
-                send_device_finished_card(
-                    message.chat.id,
-                    dev_name,
-                    device_id,
-                    f"Google Maps: {target_name}",
-                    success,
-                    err,
-                    dev_dur,
-                )
-                return dev_name, success, err
-
-            def run_par_maps_bg():
-                results = []
-                with ThreadPoolExecutor(max_workers=len(target_devices)) as executor:
-                    futures = [
-                        executor.submit(run_maps_parallel, dev)
-                        for dev in target_devices
-                    ]
-                    for future in futures:
-                        results.append(future.result())
-                success_count = sum(1 for r in results if r[1])
-                summary = (
-                    f"🏁 **HOÀN THÀNH BƠM GOOGLE MAPS SONG SONG "
-                    f"({success_count}/{len(target_devices)} MÁY THÀNH CÔNG)**"
-                )
-                safe_edit_message(
-                    summary,
-                    message.chat.id,
-                    status_msg.message_id,
-                    reply_markup=None,
-                    parse_mode="Markdown",
-                )
-
-            threading.Thread(target=run_par_maps_bg, daemon=True).start()
-        return
 
     if action == "tiktok_automation":
         is_seq = cmd.get("is_sequential", False)

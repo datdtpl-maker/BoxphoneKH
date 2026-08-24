@@ -193,9 +193,14 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         captured = []
+        workflow_calls = []
         fake_adb = SimpleNamespace(
-            tiktok_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
-            facebook_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
+            tiktok_automation_workflow=lambda device, **_kwargs: (
+                workflow_calls.append((device, "tiktok")) or (True, "ok")
+            ),
+            facebook_automation_workflow=lambda device, **_kwargs: (
+                workflow_calls.append((device, "facebook")) or (True, "ok")
+            ),
         )
 
         with (
@@ -213,6 +218,14 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         self.assertTrue(kwargs["randomize_queue"])
         self.assertTrue(kwargs["randomize_wave_size"])
         self.assertTrue(callable(kwargs["on_wave"]))
+        self.assertCountEqual(
+            [
+                (device, platform)
+                for device in ("d1", "d2", "d3")
+                for platform in ("tiktok", "facebook")
+            ],
+            workflow_calls,
+        )
 
     def test_social_queue_prepares_only_requested_social_platform(self):
         app = GUIApp.__new__(GUIApp)
@@ -239,52 +252,6 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             [event for event in events if event[0] == "tiktok"],
         )
 
-    def test_google_maps_adaptive_uses_maps_policy(self):
-        app = GUIApp.__new__(GUIApp)
-        app._set_maps_results = lambda _lines: None
-        app.log_message = lambda _message: None
-        app.bulk_disable_rotation = lambda _devices, *args, **kwargs: None
-        captured = []
-
-        with (
-            patch("gui_app.main.adb.google_maps_automation_workflow", return_value=(True, None)),
-            patch("gui_app.run_adaptive", side_effect=_run_immediately(captured)),
-        ):
-            app._run_maps_automation(
-                (
-                    ["keyword-1", "keyword-2"],
-                    "Target",
-                    ["Location A", "Location B"],
-                    ["d1", "d2"],
-                ),
-                "thích ứng",
-            )
-
-        self.assertEqual(3, captured[0][1].max_workers)
-        self.assertEqual((2, 5), captured[0][1].stagger_seconds)
-
-    def test_google_maps_assigns_one_keyword_and_location_to_every_device(self):
-        tasks = GUIApp._assign_maps_tasks(
-            ["keyword-1", "keyword-2"],
-            ["Phan Thiết", "Lâm Đồng"],
-            ["d1", "d2", "d3"],
-        )
-
-        self.assertEqual(["d1", "d2", "d3"], [item[0] for item in tasks])
-        self.assertEqual(3, len(tasks))
-        self.assertTrue(
-            all(
-                keyword in {"keyword-1", "keyword-2"}
-                for _, keyword, _ in tasks
-            )
-        )
-        self.assertTrue(
-            all(
-                location in {"Phan Thiết", "Lâm Đồng"}
-                for _, _, location in tasks
-            )
-        )
-
     def test_tiktok_adaptive_uses_random_social_policy(self):
         app = GUIApp.__new__(GUIApp)
         app.ent_tt_selection = _Entry("1-2")
@@ -309,7 +276,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             app.run_par_tiktok(adaptive=True)
 
         self.assertEqual(3, captured[0][1].max_workers)
-        self.assertEqual((30, 90), captured[0][1].stagger_seconds)
+        self.assertEqual((5, 15), captured[0][1].stagger_seconds)
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
         self.assertTrue(callable(captured[0][2]["on_wave"]))
@@ -338,7 +305,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             app.run_par_facebook(adaptive=True)
 
         self.assertEqual(3, captured[0][1].max_workers)
-        self.assertEqual((30, 90), captured[0][1].stagger_seconds)
+        self.assertEqual((5, 15), captured[0][1].stagger_seconds)
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
         self.assertTrue(callable(captured[0][2]["on_wave"]))

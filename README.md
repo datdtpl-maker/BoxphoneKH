@@ -1,8 +1,37 @@
-# BoxPhone KH - Auto Tool
-## Cập nhật phiên bản mới nhất
-- **Google Maps Automation**: 
-  - Khắc phục triệt để lỗi không nhập được từ khóa trên Chrome: Áp dụng cơ chế gõ thẳng vào thanh URL (Omnibox) ở mọi giao diện, đảm bảo 100% ăn lệnh search mà không bị nhảy trang.
-  - Sửa lỗi không Click được Profile mục tiêu (đặc biệt trên các máy dùng giao diện tiếng Trung hoặc UI Scale khác biệt).
-  - Tích hợp công nghệ **Grid Scan (Dò dẫm thông minh)**: Tự động bấm thử các toạ độ khả nghi, xác minh xem có đúng là profile Khải Hoàn Skincare không. Nếu bấm nhầm đối thủ, tool tự động bấm Back (Quay lại) và tìm tiếp.
-  - Xử lý sạch sẽ lỗi dính text (nhập cả vị trí Phan Thiết vào ô search do xoá text cũ bị trượt).
-- **Tính năng Xoay Màn Hình**: Bắt buộc máy hiển thị ở chế độ màn hình dọc (Portrait) bằng 4 lớp ép buộc ở hệ thống.
+# BoxPhoneControl
+
+Ứng dụng Windows điều phối nhiều thiết bị Android qua ADB cho hai module TikTok và Facebook.
+
+## Chức năng chính
+
+- Chạy TikTok hoặc Facebook theo chế độ tuần tự, song song và thích ứng.
+- Chạy kết hợp hai module với thứ tự ngẫu nhiên theo từng thiết bị.
+- Chọn thiết bị theo vị trí, ví dụ `1-5,10`.
+- Khóa màn hình dọc và tắt âm lượng toàn bộ thiết bị.
+- Nhận lịch từ khóa TikTok/Facebook từ Notion.
+- Báo cáo tiến trình qua Telegram và cho phép tắt thông báo.
+- Lưu cấu hình cục bộ trong `.env` cạnh ứng dụng.
+
+## Chạy từ mã nguồn
+
+```powershell
+python gui_app.py
+```
+
+## Kiểm tra
+
+```powershell
+python -m unittest discover -p "test_*.py"
+```
+
+## Đóng gói
+
+```powershell
+python build_exe.py
+```
+
+File đầu ra: `BoxPhoneControl.exe`.
+
+## Bảo mật
+
+Không commit `.env`, token Telegram, token Notion hoặc thông tin đăng nhập. Chỉ chia sẻ bảng Notion cho integration cần sử dụng và cấp quyền tối thiểu.

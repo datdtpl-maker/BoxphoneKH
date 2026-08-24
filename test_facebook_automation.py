@@ -65,10 +65,9 @@ class FacebookAutomationTests(unittest.TestCase):
         self.assertEqual([], restarts)
         self.assertTrue(any("Facebook B2" in message for message in statuses))
 
-    @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     def test_cross_warmup_recovers_facebook_foreground_before_swipe(
-        self, _randint, _sleep
+        self, _randint
     ):
         controller = ADBController(adb_path="adb")
         swipes = []
@@ -88,11 +87,21 @@ class FacebookAutomationTests(unittest.TestCase):
             lambda _device_id: next(signatures)
         )
 
-        self.assertTrue(
-            controller.browse_facebook_surface(
-                "device-transition", 7, "facebook_cross_warmup"
+        clock = [0.0]
+        with (
+            patch(
+                "adb_controller.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(
+                    0, clock[0] + float(seconds)
+                ),
+            ),
+            patch("adb_controller.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            self.assertTrue(
+                controller.browse_facebook_surface(
+                    "device-transition", 7, "facebook_cross_warmup"
+                )
             )
-        )
 
         self.assertEqual(["device-transition"], recoveries)
         self.assertEqual(1, len(swipes))

@@ -15,7 +15,6 @@ PROPERTY_NAMES = {
     "title": "Tên lịch",
     "date": "Thời gian áp dụng",
     "active": "Đang áp dụng",
-    "google_maps": "Google Maps - Từ khóa theo dõi",
     "tiktok_seed": "TikTok - Từ khóa nhiệm vụ",
     "tiktok_target": "TikTok - Kênh mục tiêu",
     "facebook_seed": "Facebook - Từ khóa mồi",
@@ -42,7 +41,6 @@ class NotionKeywordSchedule:
     start_date: date
     end_date: date
     active: bool
-    google_maps_keywords: str
     tiktok_seed_keywords: str
     tiktok_target_channels: str
     facebook_seed_keywords: str
@@ -98,9 +96,6 @@ def parse_schedule_page(page):
         start_date=start_date,
         end_date=end_date,
         active=bool(active_prop.get("checkbox")),
-        google_maps_keywords=_plain_text(
-            _property(properties, PROPERTY_NAMES["google_maps"])
-        ),
         tiktok_seed_keywords=_plain_text(
             _property(properties, PROPERTY_NAMES["tiktok_seed"])
         ),

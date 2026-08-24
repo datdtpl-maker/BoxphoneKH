@@ -75,7 +75,7 @@ class AdaptiveSchedulerTests(unittest.TestCase):
 
         def deterministic_randint(low, high):
             randint_calls.append((low, high))
-            if low == 1:
+            if low in (1, 2):
                 return min(2, high)
             return 0
 
@@ -106,7 +106,21 @@ class AdaptiveSchedulerTests(unittest.TestCase):
             ],
             waves,
         )
-        self.assertIn((1, 3), randint_calls)
+        self.assertIn((2, 3), randint_calls)
+
+    def test_randomized_wave_starts_at_least_two_when_devices_are_available(self):
+        waves = []
+
+        run_adaptive(
+            ["S1", "S2", "S3"],
+            lambda device_id: device_id,
+            AdaptivePolicy(3, (0, 0)),
+            randint_fn=lambda low, _high: low,
+            randomize_wave_size=True,
+            on_wave=lambda devices, *_: waves.append(list(devices)),
+        )
+
+        self.assertEqual(2, len(waves[0]))
 
 
 if __name__ == "__main__":

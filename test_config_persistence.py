@@ -28,8 +28,6 @@ class ConfigPersistenceTests(unittest.TestCase):
         app.ent_token = _Entry("")
         app.ent_admins = _Entry("")
         app.ent_adb = _Entry("")
-        app.ent_maps_target = _Entry("")
-        app.ent_maps_location = _Entry("")
         app.ent_notion_token = _Entry("")
         app.ent_notion_source_id = _Entry("")
         app.ent_tt_channel = _Entry("")
@@ -43,8 +41,6 @@ class ConfigPersistenceTests(unittest.TestCase):
                 "TELEGRAM_BOT_TOKEN=123:placeholder\n"
                 "ALLOWED_USER_IDS=100,200\n"
                 "ADB_PATH=D:/tools/adb.exe\n"
-                "GOOGLE_MAPS_TARGET_NAME=Target Maps\n"
-                "GOOGLE_MAPS_LOCATION_TEXT=Phan Thiet\n"
                 "TIKTOK_TARGET_CHANNEL=Target TikTok\n"
                 "FACEBOOK_TARGET_PAGE_EXACT=Target Facebook\n"
                 "NOTION_API_TOKEN=notion-placeholder\n",
@@ -60,12 +56,10 @@ class ConfigPersistenceTests(unittest.TestCase):
 
             self.assertEqual(target.resolve(), saved_path)
             self.assertEqual(source.read_bytes(), target.read_bytes())
-            self.assertGreaterEqual(count, 8)
+            self.assertGreaterEqual(count, 6)
             self.assertEqual("123:placeholder", app.ent_token.value)
             self.assertEqual("100,200", app.ent_admins.value)
             self.assertEqual("D:/tools/adb.exe", app.ent_adb.value)
-            self.assertEqual("Target Maps", app.ent_maps_target.value)
-            self.assertEqual("Phan Thiet", app.ent_maps_location.value)
             self.assertEqual("Target TikTok", app.ent_tt_channel.value)
             self.assertEqual("Target Facebook", app.ent_fb_target.value)
             self.assertEqual("D:/tools/adb.exe", adb.adb_path)
@@ -94,8 +88,6 @@ class ConfigPersistenceTests(unittest.TestCase):
         app.ent_token = _Entry("123:telegram-placeholder")
         app.ent_admins = _Entry("123")
         app.ent_adb = _Entry("adb.exe")
-        app.ent_maps_target = _Entry("Target Maps")
-        app.ent_maps_location = _Entry("Phan Thiet")
         app.ent_notion_token = _Entry("notion-placeholder")
         app.ent_notion_source_id = _Entry("source-placeholder")
 
@@ -120,8 +112,6 @@ class ConfigPersistenceTests(unittest.TestCase):
         app.ent_token = _Entry("")
         app.ent_admins = _Entry("123")
         app.ent_adb = _Entry("adb.exe")
-        app.ent_maps_target = _Entry("Target Maps")
-        app.ent_maps_location = _Entry("Phan Thiet")
         app.ent_notion_token = _Entry("notion-placeholder")
         app.ent_notion_source_id = _Entry("source-placeholder")
 

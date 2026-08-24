@@ -33,7 +33,6 @@ class GuiNotionSyncTests(unittest.TestCase):
         app = GUIApp.__new__(GUIApp)
         app.ent_notion_token = _Entry("local-token")
         app.ent_notion_source_id = _Entry("source-id")
-        app.txt_maps_keywords = _Entry()
         app.ent_tt_seed = _Entry()
         app.ent_tt_channel = _Entry()
         app.ent_fb_seed = _Entry()
@@ -48,7 +47,6 @@ class GuiNotionSyncTests(unittest.TestCase):
             start_date=date(2026, 8, 12),
             end_date=date(2026, 8, 18),
             active=True,
-            google_maps_keywords="spa lấy mụn, chăm sóc da",
             tiktok_seed_keywords="chăm sóc da, skincare",
             tiktok_target_channels="kenh-a, kenh-b",
             facebook_seed_keywords="da khỏe, trị mụn",
@@ -70,9 +68,8 @@ class GuiNotionSyncTests(unittest.TestCase):
         picker.assert_called_once_with([schedule], "local-token")
         self.assertEqual("normal", app.btn_scan_notion.calls[-1]["state"])
 
-    def test_selected_schedule_maps_five_fields_and_keeps_maps_commas(self):
+    def test_selected_schedule_loads_tiktok_and_facebook_fields(self):
         app = GUIApp.__new__(GUIApp)
-        app.txt_maps_keywords = _Entry()
         app.ent_tt_seed = _Entry()
         app.ent_tt_channel = _Entry()
         app.ent_fb_seed = _Entry()
@@ -87,7 +84,6 @@ class GuiNotionSyncTests(unittest.TestCase):
             start_date=date(2026, 8, 12),
             end_date=date(2026, 8, 18),
             active=True,
-            google_maps_keywords="spa lấy mụn, chăm sóc da",
             tiktok_seed_keywords="chăm sóc da, skincare",
             tiktok_target_channels="kenh-a, kenh-b",
             facebook_seed_keywords="da khỏe, trị mụn",
@@ -101,7 +97,6 @@ class GuiNotionSyncTests(unittest.TestCase):
         ):
             app._load_notion_schedule(schedule, "local-token")
 
-        self.assertEqual("spa lấy mụn, chăm sóc da", app.txt_maps_keywords.value)
         self.assertEqual("chăm sóc da, skincare", app.ent_tt_seed.value)
         self.assertEqual("kenh-a, kenh-b", app.ent_tt_channel.value)
         self.assertEqual("da khỏe, trị mụn", app.ent_fb_seed.value)
@@ -119,7 +114,6 @@ class GuiNotionSyncTests(unittest.TestCase):
             start_date=date(2026, 8, 12),
             end_date=date(2026, 8, 18),
             active=True,
-            google_maps_keywords="a",
             tiktok_seed_keywords="b",
             tiktok_target_channels="c",
             facebook_seed_keywords="d",

@@ -17,7 +17,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import main
 from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
-from google_maps_rank import split_google_maps_keywords
 from notion_keyword_sync import (
     NotionSyncError,
     PUMP_STATUS_PROCESSING,
@@ -520,203 +519,16 @@ class GUIApp(ctk.CTk):
         self.module_tabs.grid(
             row=2, column=0, columnspan=3, sticky="nsew", pady=(0, 0)
         )
-        self.maps_tab = self.module_tabs.add("Google Maps")
         self.tiktok_tab = self.module_tabs.add("TikTok")
         self.facebook_tab = self.module_tabs.add("Facebook")
-        self.module_tabs.set("Google Maps")
+        self.module_tabs.set("TikTok")
         for module_tab in (
-            self.maps_tab,
             self.tiktok_tab,
             self.facebook_tab,
         ):
             module_tab.configure(fg_color="transparent")
             module_tab.grid_columnconfigure(0, weight=1)
             module_tab.grid_rowconfigure(0, weight=1)
-
-        # ---------------- GOOGLE MAPS AUTOMATION ----------------
-        self.maps_scroll = ctk.CTkScrollableFrame(
-            self.maps_tab,
-            **scroll_style,
-        )
-        self.maps_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-
-        self.maps_heading = ctk.CTkFrame(
-            self.maps_scroll, fg_color=orange_soft, corner_radius=16
-        )
-        self.maps_heading.pack(fill="x", padx=16, pady=(14, 10))
-
-        ctk.CTkLabel(
-            self.maps_heading,
-            text="M",
-            width=38,
-            height=38,
-            corner_radius=12,
-            fg_color="#ffffff",
-            text_color=orange,
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-        ).pack(side="left", padx=10, pady=9)
-
-        maps_heading_copy = ctk.CTkFrame(
-            self.maps_heading, fg_color="transparent"
-        )
-        maps_heading_copy.pack(side="left", fill="y", pady=8)
-        ctk.CTkLabel(
-            maps_heading_copy,
-            text="Bơm Google Maps",
-            font=title_font,
-            text_color=text,
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            maps_heading_copy,
-            text="Tự động tìm kiếm từ khóa, vào Profile mục tiêu, lướt xem và tương tác như người thật",
-            font=body_font,
-            text_color=muted,
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            self.maps_heading,
-            text="BƠM TỰ ĐỘNG",
-            height=26,
-            corner_radius=8,
-            fg_color="#ffffff",
-            text_color=green,
-            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-        ).pack(side="right", padx=10)
-
-        ctk.CTkLabel(
-            self.maps_scroll,
-            text="Từ khóa theo dõi • Phân cách bằng dấu phẩy • Random 1 từ/máy",
-            font=label_font,
-            text_color=text,
-            anchor="w",
-        ).pack(fill="x", padx=16, pady=(0, 3))
-        self.txt_maps_keywords = ctk.CTkTextbox(
-            self.maps_scroll,
-            fg_color=surface,
-            border_color=input_border,
-            text_color=text,
-            border_width=1,
-            corner_radius=12,
-            height=110,
-            font=body_font,
-            scrollbar_button_color="#c5d5e7",
-            scrollbar_button_hover_color="#a9bfd9",
-        )
-        self.txt_maps_keywords.pack(fill="x", padx=16, pady=(0, 8))
-
-        maps_fields = ctk.CTkFrame(self.maps_scroll, fg_color="transparent")
-        maps_fields.pack(fill="x", padx=16, pady=(0, 8))
-        maps_fields.columnconfigure((0, 1), weight=1)
-
-        self.ent_maps_target = ctk.CTkEntry(
-            maps_fields,
-            placeholder_text="Tên hồ sơ Google Maps mục tiêu (Mặc định: Nhà thuốc Khải Hoàn Skincare)",
-            height=42,
-            **field_style,
-        )
-        self.ent_maps_target.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        self.ent_maps_target.insert(
-            0,
-            config.GOOGLE_MAPS_TARGET_NAME
-            or config.GOOGLE_MAPS_TARGET_NAME_DEFAULT,
-        )
-
-        self.ent_maps_location = ctk.CTkEntry(
-            maps_fields,
-            placeholder_text="Khu vực • Phân cách dấu phẩy • Random 1 khu vực/máy (Mặc định: Phan Thiết, Lâm Đồng)",
-            height=42,
-            **field_style,
-        )
-        self.ent_maps_location.grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        self.ent_maps_location.insert(
-            0,
-            config.GOOGLE_MAPS_LOCATION_TEXT
-            or config.GOOGLE_MAPS_LOCATION_TEXT_DEFAULT,
-        )
-
-        ctk.CTkLabel(
-            self.maps_scroll,
-            text="Tên profile và vị trí chỉ để đối chiếu kết quả • Không nhập vào ô tìm kiếm Google",
-            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-            text_color="#b45309",
-            anchor="w",
-        ).pack(fill="x", padx=16, pady=(0, 8))
-
-        self.ent_maps_selection = ctk.CTkEntry(
-            self.maps_scroll,
-            placeholder_text=(
-                "Chọn máy chạy Google Maps (Ví dụ: 1-5,10 hoặc trống=Tất cả)"
-            ),
-            height=42,
-            **field_style,
-        )
-        self.ent_maps_selection.pack(fill="x", padx=16, pady=(0, 8))
-
-        maps_buttons = ctk.CTkFrame(self.maps_scroll, fg_color="transparent")
-        maps_buttons.pack(fill="x", padx=16, pady=(0, 8))
-        maps_buttons.columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(
-            maps_buttons,
-            text="Chạy tuần tự",
-            font=button_font,
-            fg_color=green,
-            hover_color=green_hover,
-            text_color="#ffffff",
-            corner_radius=13,
-            height=44,
-            cursor="hand2",
-            command=self.run_maps_sequential,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        ctk.CTkButton(
-            maps_buttons,
-            text="Chạy song song",
-            font=button_font,
-            fg_color=blue,
-            hover_color=blue_hover,
-            text_color="#ffffff",
-            corner_radius=13,
-            height=44,
-            cursor="hand2",
-            command=self.run_maps_parallel,
-        ).grid(row=0, column=1, sticky="ew", padx=4)
-        ctk.CTkButton(
-            maps_buttons,
-            text="Chạy thích ứng",
-            font=button_font,
-            fg_color=violet,
-            hover_color="#5b21b6",
-            text_color="#ffffff",
-            corner_radius=13,
-            height=44,
-            cursor="hand2",
-            command=lambda: self.run_maps_parallel(adaptive=True),
-        ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
-
-        self.txt_maps_results = ctk.CTkTextbox(
-            self.maps_scroll,
-            fg_color=glass_tint,
-            border_color=border,
-            text_color=text,
-            border_width=1,
-            corner_radius=12,
-            height=190,
-            font=body_font,
-            state="disabled",
-        )
-        self.txt_maps_results.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        ctk.CTkButton(
-            self.maps_scroll,
-            text="Dừng Google Maps khẩn cấp",
-            font=button_font,
-            fg_color=red_soft,
-            hover_color="#ffe1e4",
-            text_color=red,
-            border_width=1,
-            border_color="#f4b8bd",
-            corner_radius=13,
-            height=42,
-            cursor="hand2",
-            command=self.stop_all,
-        ).pack(fill="x", padx=16, pady=(0, 12))
 
         # ---------------- TIKTOK AUTOMATION ----------------
         self.tiktok_scroll = ctk.CTkScrollableFrame(
@@ -820,9 +632,9 @@ class GUIApp(ctk.CTk):
             self.tt_timeline_card,
             text=(
                 "LỘ TRÌNH TỰ ĐỘNG\n\n"
-                "00   Nuôi Facebook Feed  •  3–5 phút\n"
-                "01   Trang chủ  •  15–60 giây\n"
-                "02   Từ khóa nhiệm vụ  •  15–30 giây\n"
+                "00   Nuôi Facebook Feed  •  10–20 giây\n"
+                "01   Trang chủ  •  10–20 giây\n"
+                "02   Từ khóa nhiệm vụ  •  10–15 giây\n"
                 "03   Trong kênh  •  3–5 phút, đổi clip mỗi 15–30 giây"
             ),
             justify="left",
@@ -1030,10 +842,10 @@ class GUIApp(ctk.CTk):
             self.fb_timeline_card,
             text=(
                 "LỘ TRÌNH TỰ ĐỘNG\n\n"
-                "00   Nuôi TikTok video  •  3–5 phút\n"
-                "01   Nuôi Feed  •  90–120 giây\n"
-                "02   Từ khóa mồi  •  30–60 giây\n"
-                "03   Đúng Page target  •  2–3 phút"
+                "00   Nuôi TikTok video  •  10–20 giây\n"
+                "01   Nuôi Feed  •  10–20 giây\n"
+                "02   Từ khóa mồi  •  10–15 giây\n"
+                "03   Đúng Page target  •  3–5 phút"
             ),
             justify="left",
             anchor="w",
@@ -1325,7 +1137,6 @@ class GUIApp(ctk.CTk):
         # presentation-only effects and do not touch automation state.
         self._bind_glass_hover(self.top_header, "#1e293b", "#334155")
         self._bind_glass_hover(self.log_card, border, border_hover)
-        self._bind_glass_hover(self.maps_scroll, border, "#f1b98d")
         self._bind_glass_hover(self.tiktok_scroll, border, "#e4a7c5")
         self._bind_glass_hover(self.facebook_scroll, border, border_hover)
         self._bind_glass_hover(self.bottom_panel, border, border_hover)
@@ -1384,7 +1195,6 @@ class GUIApp(ctk.CTk):
     def _reset_operation_scrolls(self):
         """Luôn hiển thị tiêu đề hai card khi app vừa mở."""
         try:
-            self.maps_scroll._parent_canvas.yview_moveto(0)
             self.tiktok_scroll._parent_canvas.yview_moveto(0)
             self.facebook_scroll._parent_canvas.yview_moveto(0)
             # Giữ focus khởi động ở nút header để Textbox không tự yêu cầu
@@ -1396,7 +1206,7 @@ class GUIApp(ctk.CTk):
     def _finish_module_ui_setup(self):
         """Chọn tab mặc định trước khi bật callback Focus Workspace."""
         try:
-            self.module_tabs.set("Google Maps")
+            self.module_tabs.set("TikTok")
         finally:
             self._module_focus_ready = True
 
@@ -1406,7 +1216,6 @@ class GUIApp(ctk.CTk):
             return
         self._set_module_focus(True)
         scroll = {
-            "Google Maps": self.maps_scroll,
             "TikTok": self.tiktok_scroll,
             "Facebook": self.facebook_scroll,
         }.get(self.module_tabs.get())
@@ -1559,19 +1368,7 @@ class GUIApp(ctk.CTk):
         widget.delete(0, "end")
         widget.insert(0, value)
 
-    @staticmethod
-    def _normalize_maps_keywords(value):
-        return ", ".join(
-            item.strip()
-            for item in re.split(r"[,\n]+", value or "")
-            if item.strip()
-        )
-
     def _apply_notion_schedule(self, schedule):
-        self.txt_maps_keywords.delete("1.0", "end")
-        self.txt_maps_keywords.insert(
-            "1.0", self._normalize_maps_keywords(schedule.google_maps_keywords)
-        )
         self._replace_entry_value(
             self.ent_tt_seed, schedule.tiktok_seed_keywords
         )
@@ -1601,7 +1398,7 @@ class GUIApp(ctk.CTk):
         )
         self.log_message(
             f"[Notion] Đã nạp lịch '{schedule.title}' ({period}) "
-            "vào Google Maps, TikTok và Facebook."
+            "vào TikTok và Facebook."
         )
         messagebox.showinfo(
             "Đã chọn lịch Notion",
@@ -1797,14 +1594,6 @@ class GUIApp(ctk.CTk):
         config.ADB_PATH = get_value(
             "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
         )
-        config.GOOGLE_MAPS_TARGET_NAME = get_value(
-            "GOOGLE_MAPS_TARGET_NAME",
-            getattr(config, "GOOGLE_MAPS_TARGET_NAME_DEFAULT", "Nhà thuốc Khải Hoàn Skincare"),
-        )
-        config.GOOGLE_MAPS_LOCATION_TEXT = get_value(
-            "GOOGLE_MAPS_LOCATION_TEXT",
-            getattr(config, "GOOGLE_MAPS_LOCATION_TEXT_DEFAULT", "Phan Thiết, Lâm Đồng"),
-        )
         config.NOTION_API_TOKEN = get_value("NOTION_API_TOKEN")
         config.NOTION_DATA_SOURCE_ID = get_value("NOTION_DATA_SOURCE_ID")
         config.TIKTOK_TARGET_CHANNEL_DEFAULT = get_value("TIKTOK_TARGET_CHANNEL")
@@ -1819,8 +1608,6 @@ class GUIApp(ctk.CTk):
             "ent_token": config.TELEGRAM_BOT_TOKEN,
             "ent_admins": admin_ids,
             "ent_adb": config.ADB_PATH,
-            "ent_maps_target": config.GOOGLE_MAPS_TARGET_NAME,
-            "ent_maps_location": config.GOOGLE_MAPS_LOCATION_TEXT,
             "ent_notion_token": config.NOTION_API_TOKEN,
             "ent_notion_source_id": config.NOTION_DATA_SOURCE_ID,
             "ent_tt_channel": config.TIKTOK_TARGET_CHANNEL_DEFAULT,
@@ -1848,10 +1635,6 @@ class GUIApp(ctk.CTk):
             "TELEGRAM_NOTIFICATIONS_ENABLED",
             "ALLOWED_USER_IDS",
             "ADB_PATH",
-            "GOOGLE_MAPS_API_KEY",
-            "GOOGLE_MAPS_TARGET_NAME",
-            "GOOGLE_MAPS_LOCATION_TEXT",
-            "GOOGLE_MAPS_MAX_RESULTS",
             "NOTION_API_TOKEN",
             "NOTION_DATA_SOURCE_ID",
             "TIKTOK_TARGET_CHANNEL",
@@ -1899,8 +1682,6 @@ class GUIApp(ctk.CTk):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
         adb_path = self.ent_adb.get().strip()
-        maps_target = self.ent_maps_target.get().strip()
-        maps_location = self.ent_maps_location.get().strip()
         notion_token = self.ent_notion_token.get().strip()
         notion_source_id = self.ent_notion_source_id.get().strip()
         telegram_token_valid = main.is_valid_telegram_token(token)
@@ -1920,8 +1701,6 @@ class GUIApp(ctk.CTk):
             ),
             "ALLOWED_USER_IDS": admin_ids,
             "ADB_PATH": adb_path,
-            "GOOGLE_MAPS_TARGET_NAME": maps_target,
-            "GOOGLE_MAPS_LOCATION_TEXT": maps_location,
             "NOTION_API_TOKEN": notion_token,
             "NOTION_DATA_SOURCE_ID": notion_source_id,
         }
@@ -1953,8 +1732,6 @@ class GUIApp(ctk.CTk):
             if item.strip().isdigit()
         ]
         config.ADB_PATH = adb_path
-        config.GOOGLE_MAPS_TARGET_NAME = maps_target
-        config.GOOGLE_MAPS_LOCATION_TEXT = maps_location
         config.NOTION_API_TOKEN = notion_token
         config.NOTION_DATA_SOURCE_ID = notion_source_id
         main.adb.adb_path = adb_path
@@ -2192,277 +1969,6 @@ class GUIApp(ctk.CTk):
                 border_color="#bfdbfe",
             )
         self.after_idle(self._reset_operation_scrolls)
-
-    # ================= GOOGLE MAPS AUTOMATION =================
-    def _get_maps_inputs(self):
-        keywords = split_google_maps_keywords(
-            self.txt_maps_keywords.get("1.0", "end")
-        )
-        target = self.ent_maps_target.get().strip() or getattr(
-            config,
-            "GOOGLE_MAPS_TARGET_NAME",
-            getattr(
-                config,
-                "GOOGLE_MAPS_TARGET_NAME_DEFAULT",
-                "Nhà thuốc Khải Hoàn Skincare",
-            ),
-        )
-        locations = split_google_maps_keywords(self.ent_maps_location.get())
-        if not locations:
-            locations = [
-                getattr(
-                    config,
-                    "GOOGLE_MAPS_LOCATION_TEXT",
-                    getattr(
-                        config,
-                        "GOOGLE_MAPS_LOCATION_TEXT_DEFAULT",
-                        "Phan Thiết, Lâm Đồng",
-                    ),
-                )
-            ]
-        if not keywords:
-            messagebox.showwarning(
-                "Thiếu từ khóa",
-                "Vui lòng nhập ít nhất một từ khóa Google Maps.",
-            )
-            return None
-        if not target:
-            messagebox.showwarning(
-                "Thiếu hồ sơ mục tiêu",
-                "Vui lòng nhập tên hồ sơ Google Maps mục tiêu.",
-            )
-            return None
-        target_devices = self.parse_targets(
-            entry_widget=self.ent_maps_selection
-        )
-        if not target_devices:
-            return None
-        return keywords, target, locations, target_devices
-
-    def _set_maps_results(self, lines):
-        def update():
-            self.txt_maps_results.configure(state="normal")
-            self.txt_maps_results.delete("1.0", "end")
-            self.txt_maps_results.insert("1.0", "\n".join(lines))
-            self.txt_maps_results.configure(state="disabled")
-        self.after(0, update)
-
-    @staticmethod
-    def _assign_maps_tasks(keywords, locations, target_devices):
-        loc_choices = locations if locations else [""]
-        return [
-            (
-                device_id,
-                random.choice(keywords),
-                random.choice(loc_choices),
-            )
-            for device_id in target_devices
-        ]
-
-    def _run_maps_automation(self, inputs, mode):
-        keywords, target, locations, target_devices = inputs
-        tasks = self._assign_maps_tasks(keywords, locations, target_devices)
-        workflow_session = main.start_workflow_session()
-        is_cancelled = main.make_session_cancel_checker(workflow_session)
-        self.bulk_disable_rotation(target_devices, sync=True)
-
-        chat_id = (
-            config.ALLOWED_USER_IDS[0]
-            if config.ALLOWED_USER_IDS
-            else None
-        )
-        mode_label = mode.capitalize()
-        self._set_maps_results(
-            [
-                f"Đang chạy Bơm Google Maps ({mode_label}) trên {len(tasks)} máy...",
-                f"Hồ sơ mục tiêu: {target}",
-                "Mỗi máy random 1 từ khóa theo dõi; profile và khu vực chỉ dùng tham chiếu.",
-            ]
-        )
-
-        results = []
-
-        if mode == "tuần tự":
-            tracker = main.TelegramRealtimeTracker(main.bot, chat_id) if chat_id else None
-            if tracker:
-                tracker.start_dashboard(
-                    f"📍 **BƠM GOOGLE MAPS TUẦN TỰ**\n"
-                    f"Hồ sơ mục tiêu: `{target}`\n"
-                    f"Đang chạy trên {len(tasks)} máy..."
-                )
-
-            success_count = 0
-            for idx, (dev, kw, loc) in enumerate(tasks):
-                if is_cancelled():
-                    break
-                dev_name = main.get_device_name(dev)
-                loc_text = f" ({loc})" if loc else ""
-                self.log_message(
-                    f"[Google Maps] Máy {dev_name} bắt đầu: từ khóa '{kw}'{loc_text} • mục tiêu '{target}'"
-                )
-                if tracker:
-                    tracker.set_active_device(
-                        dev_name,
-                        dev,
-                        f"Maps: {target} ({kw})",
-                        idx + 1,
-                        len(tasks),
-                        platform="Google Maps",
-                    )
-                dev_start = time.time()
-                status_cb = tracker.status_callback if tracker else None
-                success, err = main.adb.google_maps_automation_workflow(
-                    dev,
-                    keywords=[kw],
-                    target_name=target,
-                    locations=[loc] if loc else None,
-                    status_callback=status_cb,
-                    is_cancelled=is_cancelled,
-                )
-                dev_dur = time.time() - dev_start
-                if success:
-                    success_count += 1
-                    self.log_message(
-                        f"✅ [Google Maps] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
-                    )
-                else:
-                    self.log_message(
-                        f"❌ [Google Maps] Máy {dev_name} thất bại: {err}"
-                    )
-                if chat_id:
-                    main.send_device_finished_card(
-                        chat_id,
-                        dev_name,
-                        dev,
-                        f"Google Maps: {target} ({kw})",
-                        success,
-                        err,
-                        dev_dur,
-                    )
-                results.append((dev, kw, loc, success, err))
-
-            if tracker:
-                tracker.finish_dashboard(
-                    f"🏁 **KẾT QUẢ BƠM GOOGLE MAPS TUẦN TỰ: "
-                    f"{success_count}/{len(tasks)} MÁY THÀNH CÔNG**"
-                )
-        elif mode == "thích ứng":
-            def run_single_adaptive(task_item):
-                dev, kw, loc = task_item
-                dev_name = main.get_device_name(dev)
-                self.log_message(
-                    f"[Google Maps thích ứng] Máy {dev_name} bắt đầu: từ khóa '{kw}'"
-                )
-                dev_start = time.time()
-                success, err = main.adb.google_maps_automation_workflow(
-                    dev,
-                    keywords=[kw],
-                    target_name=target,
-                    locations=[loc] if loc else None,
-                    status_callback=lambda _d, msg: self.log_message(f"[Máy {dev_name}] {msg}"),
-                    is_cancelled=is_cancelled,
-                )
-                dev_dur = time.time() - dev_start
-                if success:
-                    self.log_message(
-                        f"✅ [Google Maps thích ứng] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
-                    )
-                else:
-                    self.log_message(
-                        f"❌ [Google Maps thích ứng] Máy {dev_name} thất bại: {err}"
-                    )
-                if chat_id:
-                    main.send_device_finished_card(
-                        chat_id,
-                        dev_name,
-                        dev,
-                        f"Google Maps: {target} ({kw})",
-                        success,
-                        err,
-                        dev_dur,
-                    )
-                return dev, kw, loc, success, err
-
-            results = run_adaptive(
-                tasks,
-                run_single_adaptive,
-                PLATFORM_POLICIES["google_maps"],
-                is_cancelled=is_cancelled,
-                on_wait=lambda task, delay, position, total: self.log_message(
-                    f"[Google Maps thích ứng] Máy {main.get_device_name(task[0])} "
-                    f"chờ {delay}s ({position + 1}/{total})"
-                ),
-            )
-        else:
-            from concurrent.futures import ThreadPoolExecutor
-
-            def run_single_parallel(task_item):
-                dev, kw, loc = task_item
-                dev_name = main.get_device_name(dev)
-                self.log_message(
-                    f"[Google Maps song song] Máy {dev_name} bắt đầu: từ khóa '{kw}'"
-                )
-                dev_start = time.time()
-                success, err = main.adb.google_maps_automation_workflow(
-                    dev,
-                    keywords=[kw],
-                    target_name=target,
-                    locations=[loc] if loc else None,
-                    status_callback=lambda _d, msg: self.log_message(f"[Máy {dev_name}] {msg}"),
-                    is_cancelled=is_cancelled,
-                )
-                dev_dur = time.time() - dev_start
-                if success:
-                    self.log_message(
-                        f"✅ [Google Maps song song] Máy {dev_name} hoàn thành ({dev_dur:.0f}s)"
-                    )
-                else:
-                    self.log_message(
-                        f"❌ [Google Maps song song] Máy {dev_name} thất bại: {err}"
-                    )
-                if chat_id:
-                    main.send_device_finished_card(
-                        chat_id,
-                        dev_name,
-                        dev,
-                        f"Google Maps: {target} ({kw})",
-                        success,
-                        err,
-                        dev_dur,
-                    )
-                return dev, kw, loc, success, err
-
-            max_workers = min(6, len(tasks))
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                results = list(executor.map(run_single_parallel, tasks))
-
-        summary_lines = []
-        for dev, kw, loc, success, err in results:
-            dname = main.get_device_name(dev)
-            loc_s = f" ({loc})" if loc else ""
-            status_s = "✅ Thành công" if success else f"❌ Lỗi: {err}"
-            summary_lines.append(f"Máy {dname}: '{kw}'{loc_s} -> {status_s}")
-
-        if not summary_lines:
-            summary_lines = ["Đã dừng quy trình Bơm Google Maps."]
-        self._set_maps_results(summary_lines)
-
-    def run_seq_maps(self):
-        inputs = self._get_maps_inputs()
-        if inputs:
-            self.run_in_thread(self._run_maps_automation, inputs, "tuần tự")
-
-    def run_par_maps(self, adaptive=False):
-        inputs = self._get_maps_inputs()
-        if inputs:
-            mode = "thích ứng" if adaptive else "song song"
-            self.run_in_thread(self._run_maps_automation, inputs, mode)
-
-    def run_maps_sequential(self):
-        self.run_seq_maps()
-
-    def run_maps_parallel(self, adaptive=False):
-        self.run_par_maps(adaptive=adaptive)
 
     @staticmethod
     def _random_social_order():

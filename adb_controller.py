@@ -916,7 +916,7 @@ class ADBController:
     ):
         """Lướt feed/kết quả/Page theo nhịp ngẫu nhiên giống người dùng."""
         width, height = self.get_effective_screen_size(device_id)
-        elapsed = 0
+        deadline = time.monotonic() + max(0, total_seconds)
         item_index = 1
         label_names = {
             "feed": "Feed Facebook",
@@ -941,7 +941,7 @@ class ADBController:
             self.lock_portrait(device_id, retries=3)
             return self.is_facebook_in_foreground(device_id)
 
-        while elapsed < total_seconds:
+        while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
@@ -968,19 +968,30 @@ class ADBController:
                         )
                     self.lock_portrait(device_id, retries=3)
                     return True
-            dwell = min(random.randint(6, 15), total_seconds - elapsed)
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            dwell = min(float(random.randint(6, 15)), remaining)
             if status_callback:
                 status_callback(
                     device_id,
-                    f"Xem {label_name} lượt {item_index} ({dwell}s) • "
-                    f"còn {total_seconds - elapsed}s...",
+                    f"Xem {label_name} lượt {item_index} ({int(dwell)}s) • "
+                    f"còn {int(remaining)}s...",
                 )
-            for _ in range(dwell):
-                time.sleep(1.0)
+            dwell_remaining = dwell
+            while dwell_remaining > 0 and time.monotonic() < deadline:
+                sleep_step = min(
+                    1.0,
+                    dwell_remaining,
+                    max(0.0, deadline - time.monotonic()),
+                )
+                if sleep_step <= 0:
+                    break
+                time.sleep(sleep_step)
+                dwell_remaining -= sleep_step
                 if is_cancelled and is_cancelled():
                     raise RuntimeError("Bị dừng bởi người dùng")
-            elapsed += dwell
-            if elapsed < total_seconds:
+            if time.monotonic() < deadline:
                 if not ensure_safe_foreground():
                     raise RuntimeError(
                         f"{label_name}: Facebook không ở foreground; "
@@ -1021,7 +1032,7 @@ class ADBController:
     def warmup_facebook_before_tiktok(
         self, device_id, status_callback=None, is_cancelled=None
     ):
-        """Nuôi Facebook Feed 3-5 phút trước khi chuyển sang TikTok."""
+        """Nuôi Facebook Feed ngắn trước khi chuyển sang TikTok."""
         if status_callback:
             status_callback(
                 device_id,
@@ -1246,7 +1257,7 @@ class ADBController:
     def warmup_tiktok_before_facebook(
         self, device_id, status_callback=None, is_cancelled=None
     ):
-        """Xem video TikTok 3-5 phút trước khi chuyển sang Facebook."""
+        """Xem video TikTok ngắn trước khi chuyển sang Facebook."""
         if status_callback:
             status_callback(
                 device_id,
@@ -1273,9 +1284,9 @@ class ADBController:
                 f"{total_seconds // 60} phút {total_seconds % 60:02d} giây...",
             )
 
-        elapsed = 0
+        deadline = time.monotonic() + max(0, total_seconds)
         video_index = 1
-        while elapsed < total_seconds:
+        while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
@@ -1284,19 +1295,30 @@ class ADBController:
                     "TikTok không ở foreground; đã dừng nuôi chéo để "
                     "tránh thao tác nhầm ứng dụng"
                 )
-            dwell = min(random.randint(8, 18), total_seconds - elapsed)
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            dwell = min(float(random.randint(8, 18)), remaining)
             if status_callback:
                 status_callback(
                     device_id,
                     f"[Nuôi chéo] Xem video TikTok {video_index} "
-                    f"({dwell}s) • còn {total_seconds - elapsed}s...",
+                    f"({int(dwell)}s) • còn {int(remaining)}s...",
                 )
-            for _ in range(dwell):
-                time.sleep(1.0)
+            dwell_remaining = dwell
+            while dwell_remaining > 0 and time.monotonic() < deadline:
+                sleep_step = min(
+                    1.0,
+                    dwell_remaining,
+                    max(0.0, deadline - time.monotonic()),
+                )
+                if sleep_step <= 0:
+                    break
+                time.sleep(sleep_step)
+                dwell_remaining -= sleep_step
                 if is_cancelled and is_cancelled():
                     raise RuntimeError("Bị dừng bởi người dùng")
-            elapsed += dwell
-            if elapsed < total_seconds:
+            if time.monotonic() < deadline:
                 if not self.is_tiktok_in_foreground(device_id):
                     raise RuntimeError(
                         "TikTok không ở foreground trước khi swipe; "
@@ -1484,7 +1506,7 @@ class ADBController:
                 config.FACEBOOK_STEP1_FEED_MAX,
             )
             update_status(
-                f"[Facebook B1] Nuôi Feed trong {feed_total}s (90-120s)..."
+                f"[Facebook B1] Nuôi Feed trong {feed_total}s (10-20s)..."
             )
             self.browse_facebook_surface(
                 device_id,
@@ -1516,7 +1538,7 @@ class ADBController:
             )
             update_status(
                 f"[Facebook B2] Lướt kết quả trong {seed_result_total}s "
-                "(tối đa 60s)..."
+                "(10-15s)..."
             )
             self.browse_facebook_surface(
                 device_id,
@@ -4074,7 +4096,7 @@ class ADBController:
     def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
         """
         Quy trình TikTok cố định:
-        B1 dạo For You 15-60 giây; B2 lướt kết quả 15-30 giây;
+        B1 dạo For You 10-20 giây; B2 lướt kết quả 10-15 giây;
         B3 vào đúng profile, xem 3-5 phút và đổi clip mỗi 15-30 giây.
         min_delay/max_delay được giữ để tương thích lời gọi cũ nhưng không còn sử dụng.
         """
@@ -4149,7 +4171,7 @@ class ADBController:
             )
             update_status(
                 f"[TikTok B1] Dạo Trang chủ trong {step1_total}s "
-                f"(mặc định 15-60s)..."
+                f"(mặc định 10-20s)..."
             )
             step1_elapsed = 0
             step1_video = 1
@@ -4224,7 +4246,7 @@ class ADBController:
             )
             update_status(
                 f"[TikTok B2] Lướt kết quả '{seed_kw}' trong {step2_total}s "
-                f"(mặc định 15-30s)..."
+                f"(mặc định 10-15s)..."
             )
             step2_elapsed = 0
             result_index = 1
@@ -4361,981 +4383,6 @@ class ADBController:
             msg = str(e)
             update_status(f"Lỗi TikTok: {msg}")
             return False, msg
-
-    # ================= GOOGLE MAPS AUTOMATION WORKFLOW =================
-
-    @staticmethod
-    def _normalize_maps_text(value):
-        """Chuẩn hóa chuỗi tiếng Việt để so khớp không dấu và không phân biệt hoa thường."""
-        if not value:
-            return ""
-        normalized = unicodedata.normalize("NFD", str(value))
-        without_marks = "".join(
-            ch for ch in normalized if unicodedata.category(ch) != "Mn"
-        )
-        without_marks = without_marks.replace("đ", "d").replace("Đ", "D")
-        cleaned = re.sub(r"[^\w\s]", " ", without_marks.lower())
-        return " ".join(cleaned.split())
-
-    def is_chrome_in_foreground(self, device_id):
-        """Kiểm tra xem ứng dụng Google Chrome có đang ở foreground hay không."""
-        package = getattr(config, "CHROME_PACKAGE", "com.android.chrome")
-        for cmd_target in (
-            ["shell", "dumpsys", "window", "windows"],
-            ["shell", "dumpsys", "activity", "activities"],
-        ):
-            code, stdout, _ = self.execute_adb(device_id, cmd_target)
-            if code == 0 and package in stdout:
-                for line in stdout.splitlines():
-                    if any(
-                        token in line
-                        for token in (
-                            "mCurrentFocus",
-                            "mFocusedApp",
-                            "topResumedActivity",
-                            "mResumedActivity",
-                            "ResumedActivity",
-                        )
-                    ):
-                        if package in line:
-                            return True
-        return False
-
-    def launch_chrome(self, device_id, url=None):
-        """Khởi động ứng dụng Google Chrome trên thiết bị (hoặc mở một URL cụ thể)."""
-        package = getattr(config, "CHROME_PACKAGE", "com.android.chrome")
-        if url:
-            self.execute_adb(
-                device_id,
-                [
-                    "shell",
-                    "am",
-                    "start",
-                    "-a",
-                    "android.intent.action.VIEW",
-                    "-d",
-                    url,
-                    "-n",
-                    f"{package}/com.google.android.apps.chrome.Main",
-                ],
-            )
-        else:
-            self.launch_app(device_id, package)
-
-    def dismiss_chrome_popups(self, device_id):
-        """Xử lý các popup điều khoản, chọn tài khoản, đồng bộ ban đầu của Google Chrome."""
-        root = self._get_maps_ui_root(device_id, prefix="chrome_popup")
-        if root is None:
-            return False
-
-        dismiss_keywords = [
-            "chap nhan va tiep tuc",
-            "accept & continue",
-            "khong, cam on",
-            "khong cam on",
-            "no thanks",
-            "de sau",
-            "luc khac",
-            "bo qua",
-            "skip",
-            "not now",
-            "later",
-            "huy",
-            "cancel",
-            "dong",
-            "close",
-            "tiep tuc",
-            "continue",
-            "trong khi dung ung dung",
-            "cho phep",
-            "allow",
-            "while using the app",
-        ]
-        for elem in root.iter():
-            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-            norm = self._normalize_maps_text(text)
-            if any(kw in norm for kw in dismiss_keywords):
-                bounds = elem.get("bounds", "")
-                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                if m:
-                    x1, y1, x2, y2 = map(int, m.groups())
-                    self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                    time.sleep(1.0)
-                    return True
-        return False
-
-    def ensure_chrome_ready(self, device_id, retries=3):
-        """Đảm bảo Google Chrome đã mở và đang ở foreground theo hướng dọc."""
-        self.lock_portrait(device_id, retries=2)
-        if self.is_chrome_in_foreground(device_id):
-            self.dismiss_chrome_popups(device_id)
-            return True
-        for _ in range(retries):
-            self.launch_chrome(device_id)
-            for _ in range(4):
-                time.sleep(1.0)
-                if self.is_chrome_in_foreground(device_id):
-                    self.lock_portrait(device_id, retries=2)
-                    self.dismiss_chrome_popups(device_id)
-                    return True
-        return self.is_chrome_in_foreground(device_id)
-
-    def is_chrome_homepage(self, device_id):
-        """Xác minh Chrome đang ở trang chủ có ô tìm kiếm lớn giữa màn hình."""
-        width, height = self.get_effective_screen_size(device_id)
-        root = self._get_maps_ui_root(device_id, prefix="chrome_home_check")
-        if root is None:
-            return False
-
-        home_search_markers = (
-            "tim kiem tren google hoac nhap url",
-            "search google or type a url",
-            "tim kiem tren google hoac nhap dia chi web",
-        )
-        home_search_res_ids = (
-            "search_box_text",
-            "search_widget_text",
-            "search_omnibox_edit_text",
-        )
-        for elem in root.iter():
-            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-            norm = self._normalize_maps_text(text)
-            res_id = (elem.get("resource-id", "") or "").lower()
-            if not (
-                any(marker in norm for marker in home_search_markers)
-                or any(marker in res_id for marker in home_search_res_ids)
-            ):
-                continue
-
-            bounds = elem.get("bounds", "")
-            match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-            if not match:
-                continue
-            x1, y1, x2, y2 = map(int, match.groups())
-            center_y = (y1 + y2) // 2
-            if y2 > y1 and x2 > x1 and height * 0.15 <= center_y <= height * 0.55:
-                return True
-        return False
-
-    def open_chrome_homepage(self, device_id, status_callback=None):
-        """Bấm biểu tượng Home của Chrome, không dùng phím Home của Android."""
-        if self.is_chrome_homepage(device_id):
-            return True
-
-        width, height = self.get_effective_screen_size(device_id)
-        root = self._get_maps_ui_root(device_id, prefix="chrome_home_button")
-        home_coords = None
-
-        if root is not None:
-            for elem in root.iter():
-                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-                norm = self._normalize_maps_text(text)
-                res_id = (elem.get("resource-id", "") or "").lower()
-                is_home = (
-                    norm in ("home", "trang chu", "homepage")
-                    or "home_button" in res_id
-                    or res_id.endswith(":id/home")
-                )
-                if not is_home:
-                    continue
-
-                bounds = elem.get("bounds", "")
-                match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                if not match:
-                    continue
-                x1, y1, x2, y2 = map(int, match.groups())
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
-                if center_x <= width * 0.25 and center_y <= height * 0.20:
-                    home_coords = (center_x, center_y)
-                    break
-
-        if status_callback:
-            status_callback(
-                device_id,
-                "[Google Chrome B2] Bấm Home của Chrome để về trang chủ trước khi tìm kiếm...",
-            )
-
-        if home_coords is None:
-            home_coords = (int(width * 0.075), int(height * 0.08))
-        self.tap(device_id, home_coords[0], home_coords[1])
-        time.sleep(2.0)
-        self.dismiss_chrome_popups(device_id)
-        return self.is_chrome_homepage(device_id)
-
-    def find_and_search_chrome(self, device_id, search_text, status_callback=None):
-        """
-        Quy trình chuẩn theo yêu cầu:
-        1. Bấm nút HOME (góc trái trên) để về trang chủ (Google New Tab)
-        2. Bấm vào ô tìm kiếm to giữa màn hình (y ~ 32%)
-        3. Nhập từ khóa (từng từ một)
-        """
-        width, height = self.get_effective_screen_size(device_id)
-        cx = width // 2
-
-        if status_callback:
-            status_callback(device_id, f"[Google Chrome B2] Về trang chủ và nhập từ khóa: '{search_text}'...")
-
-        # 1. Bấm vào nút Home góc trái trên cùng để về trang chủ (x ~ 10%, y ~ 11%)
-        self.tap(device_id, int(width * 0.10), int(height * 0.11))
-        time.sleep(2.5)
-
-        # 2. Bấm vào Ô "Tìm kiếm trên Google hoặc nhập URL" ở khoảng 1/3 màn hình (y ~ 32%)
-        self.tap(device_id, cx, int(height * 0.32))
-        time.sleep(1.5)
-        
-        # Bấm thêm 1 nhát nữa lỡ bấm trượt
-        self.tap(device_id, cx, int(height * 0.32))
-        time.sleep(1.0)
-
-        # Xoá text cũ nếu có (bấm góc phải nút X hoặc gửi backspace)
-        self.tap(device_id, int(width * 0.85), int(height * 0.11))
-        time.sleep(0.3)
-        self.clear_input_field(device_id, max_chars=80)
-        time.sleep(0.5)
-
-        # 3. Nhập text từng từ để trị bệnh Chrome giật focus làm đứt quãng
-        if status_callback:
-            status_callback(device_id, f"[Google Chrome B2] Đang gõ từ khoá...")
-        
-        words = search_text.split()
-        for i, word in enumerate(words):
-            self.input_text(device_id, word)
-            time.sleep(0.3)
-            if i < len(words) - 1:
-                self.keyevent(device_id, 62) # Dấu cách SPACE
-                time.sleep(0.15)
-        
-        time.sleep(1.0)
-
-        # 4. Gửi phím Enter (66) 2 lần để chắc chắn ăn phím
-        self.keyevent(device_id, 66)
-        time.sleep(1.0)
-        self.keyevent(device_id, 66)
-        time.sleep(4.0)
-
-        return True
-
-    def find_and_click_chrome_search(self, device_id):
-        """Tìm và bấm vào ô tìm kiếm / URL bar trên Google Chrome."""
-        width, height = self.get_effective_screen_size(device_id)
-        root = self._get_maps_ui_root(device_id, prefix="chrome_search")
-        search_coords = None
-
-        if root is not None:
-            search_markers = [
-                "tim kiem hoac nhap dia chi web",
-                "search or type web address",
-                "tim kiem hoac nhap url",
-                "search or type url",
-                "tim kiem",
-                "search",
-                "google",
-                "nhap dia chi web",
-            ]
-            search_res_ids = [
-                "url_bar",
-                "search_box_text",
-                "search_widget_text",
-                "search_engine",
-                "omnibox_title_section",
-                "search_omnibox_edit_text",
-            ]
-            for elem in root.iter():
-                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-                norm = self._normalize_maps_text(text)
-                res_id = (elem.get("resource-id", "") or "").lower()
-
-                is_match = any(m in norm for m in search_markers) or any(
-                    rid in res_id for rid in search_res_ids
-                )
-                if is_match:
-                    bounds = elem.get("bounds", "")
-                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                    if m:
-                        x1, y1, x2, y2 = map(int, m.groups())
-                        cy = (y1 + y2) // 2
-                        if cy < height * 0.45:
-                            search_coords = ((x1 + x2) // 2, cy)
-                            break
-
-        if not search_coords:
-            search_coords = (width // 2, int(height * 0.12))
-
-        self.tap(device_id, search_coords[0], search_coords[1])
-        time.sleep(1.5)
-        return True
-
-    def input_chrome_search(self, device_id, search_text):
-        """Nhập từ khóa vào ô tìm kiếm Chrome và gửi phím Enter."""
-        self.clear_input_field(device_id, max_chars=40)
-        time.sleep(0.5)
-        self.input_text(device_id, search_text)
-        time.sleep(1.0)
-        self.keyevent(device_id, 66)  # KEYCODE_ENTER
-        time.sleep(4.0)
-        return True
-
-    def is_google_maps_in_foreground(self, device_id):
-        """Kiểm tra xem ứng dụng Google Maps có đang ở foreground hay không."""
-        package = getattr(config, "GOOGLE_MAPS_PACKAGE", "com.google.android.apps.maps")
-        for cmd_target in (
-            ["shell", "dumpsys", "window", "windows"],
-            ["shell", "dumpsys", "activity", "activities"],
-        ):
-            code, stdout, _ = self.execute_adb(device_id, cmd_target)
-            if code == 0 and package in stdout:
-                for line in stdout.splitlines():
-                    if any(
-                        token in line
-                        for token in (
-                            "mCurrentFocus",
-                            "mFocusedApp",
-                            "topResumedActivity",
-                            "mResumedActivity",
-                            "ResumedActivity",
-                        )
-                    ):
-                        if package in line:
-                            return True
-        return False
-
-    def launch_google_maps(self, device_id):
-        """Khởi động ứng dụng Google Maps trên thiết bị."""
-        package = getattr(config, "GOOGLE_MAPS_PACKAGE", "com.google.android.apps.maps")
-        self.launch_app(device_id, package)
-
-    def ensure_google_maps_ready(self, device_id, retries=3):
-        """Đảm bảo Google Maps đã mở và đang ở foreground."""
-        self.lock_portrait(device_id, retries=2)
-        if self.is_google_maps_in_foreground(device_id):
-            return True
-        for attempt in range(retries):
-            self.launch_google_maps(device_id)
-            for _ in range(4):
-                time.sleep(1.0)
-                if self.is_google_maps_in_foreground(device_id):
-                    self.dismiss_google_maps_popups(device_id)
-                    return True
-        return self.is_google_maps_in_foreground(device_id)
-
-    def _get_maps_ui_root(self, device_id, prefix="maps"):
-        """Dump XML UI của Google Maps và trả về root element."""
-        safe_id = re.sub(r"[^\w\-]", "_", device_id)
-        remote_xml = f"/sdcard/dump_{prefix}_{safe_id}.xml"
-        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
-        code, _, _ = self.execute_adb(
-            device_id, ["shell", "uiautomator", "dump", remote_xml], timeout=15
-        )
-        if code != 0:
-            return None
-
-        local_xml = os.path.join(
-            os.path.dirname(__file__), f"temp_dump_{prefix}_{safe_id}.xml"
-        )
-        try:
-            pull_code, _, _ = self.execute_adb(
-                device_id, ["pull", remote_xml, local_xml], timeout=15
-            )
-            if pull_code == 0 and os.path.exists(local_xml):
-                tree = ET.parse(local_xml)
-                return tree.getroot()
-        except Exception:
-            pass
-        finally:
-            if os.path.exists(local_xml):
-                try:
-                    os.remove(local_xml)
-                except Exception:
-                    pass
-            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
-        return None
-
-    def dismiss_google_maps_popups(self, device_id):
-        """Xử lý các popup cấp quyền, cập nhật hoặc lời nhắc trên Google Maps."""
-        root = self._get_maps_ui_root(device_id, prefix="maps_popup")
-        if root is None:
-            return False
-
-        dismiss_keywords = [
-            "không phải bây giờ",
-            "để sau",
-            "lúc khác",
-            "bỏ qua",
-            "skip",
-            "not now",
-            "later",
-            "hủy",
-            "cancel",
-            "đóng",
-            "close",
-            "chấp nhận và tiếp tục",
-            "accept & continue",
-            "trong khi dùng ứng dụng",
-            "cho phép",
-            "allow",
-            "while using the app",
-        ]
-        for elem in root.iter():
-            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-            norm = self._normalize_maps_text(text)
-            if any(kw in norm for kw in dismiss_keywords):
-                bounds = elem.get("bounds", "")
-                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                if m:
-                    x1, y1, x2, y2 = map(int, m.groups())
-                    self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                    time.sleep(1.0)
-                    return True
-        return False
-
-    def find_and_click_google_maps_search(self, device_id):
-        """Tìm và bấm vào ô tìm kiếm trên giao diện Google Maps."""
-        width, height = self.get_effective_screen_size(device_id)
-        root = self._get_maps_ui_root(device_id, prefix="maps_search")
-        search_coords = None
-
-        if root is not None:
-            search_markers = [
-                "tim kiem o day",
-                "search here",
-                "tim kiem tren google maps",
-                "search google maps",
-                "tim kiem",
-                "search",
-            ]
-            search_res_ids = [
-                "search_box",
-                "search_omnibox_edit_text",
-                "search_omnibox_text",
-                "search_query_title",
-                "textbox",
-            ]
-            for elem in root.iter():
-                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-                norm = self._normalize_maps_text(text)
-                res_id = (elem.get("resource-id", "") or "").lower()
-
-                is_match = any(m in norm for m in search_markers) or any(
-                    rid in res_id for rid in search_res_ids
-                )
-                if is_match:
-                    bounds = elem.get("bounds", "")
-                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                    if m:
-                        x1, y1, x2, y2 = map(int, m.groups())
-                        cy = (y1 + y2) // 2
-                        if cy < height * 0.4:
-                            search_coords = ((x1 + x2) // 2, cy)
-                            break
-
-        if not search_coords:
-            search_coords = (width // 2, int(height * 0.08))
-
-        self.tap(device_id, search_coords[0], search_coords[1])
-        time.sleep(1.5)
-        return True
-
-    def input_google_maps_search(self, device_id, search_text):
-        """Nhập từ khóa vào ô tìm kiếm và gửi phím Enter."""
-        self.clear_input_field(device_id, max_chars=35)
-        time.sleep(0.5)
-        self.input_text(device_id, search_text)
-        time.sleep(1.0)
-        self.keyevent(device_id, 66)  # KEYCODE_ENTER
-        time.sleep(3.5)
-        return True
-
-    def _verify_correct_profile(self, device_id, normalized_targets):
-        """Xác nhận profile vừa mở có đúng là Khải Hoàn Skincare không."""
-        root = self._get_maps_ui_root(device_id, prefix="verify_target")
-        if root is None:
-            return False
-            
-        for elem in root.iter():
-            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-            norm = self._normalize_maps_text(text)
-            if "khai hoan" in norm or "khaihoan" in norm or any(t in norm for t in normalized_targets if len(t) >= 6):
-                return True
-        return False
-
-    def is_in_google_maps_profile(self, device_id):
-        """Xác định màn hình hiện tại có đang ở Trang Chi Tiết Hồ Sơ Địa Điểm (Profile) hay không."""
-        root = self._get_maps_ui_root(device_id, prefix="check_profile")
-        if root is None:
-            return False
-
-        profile_markers = [
-            "tong quan",
-            "bai danh gia",
-            "hinh anh",
-            "overview",
-            "reviews",
-            "photos",
-            "ve chung toi",
-            "about",
-            "duong di",
-            "chi duong",
-            "directions",
-            "trang web",
-            "website",
-            "chia se",
-            "share",
-            "luu",
-            "save",
-        ]
-        
-        for elem in root.iter():
-            text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-            norm = self._normalize_maps_text(text)
-            if any(pm in norm for pm in profile_markers):
-                return True
-        return False
-
-    def find_and_click_google_maps_target(
-        self, device_id, target_names, locations=None, status_callback=None, max_attempts=4
-    ):
-        width, height = self.get_effective_screen_size(device_id)
-        cx = width // 2
-
-        if isinstance(target_names, str):
-            target_list = [target_names]
-        else:
-            target_list = list(target_names)
-
-        normalized_targets = [
-            self._normalize_maps_text(name) for name in target_list if name
-        ]
-        for fallback in [
-            "nha thuoc khai hoan skincare",
-            "khai hoan skincare",
-            "nha thuoc khai hoan",
-            "khai hoan",
-            "khaihoan",
-        ]:
-            if fallback not in normalized_targets:
-                normalized_targets.append(fallback)
-
-        other_places_keywords = [
-            "doanh nghiep khac",
-            "cac doanh nghiep khac",
-            "dia diem khac",
-            "cac dia diem khac",
-            "more places",
-            "more businesses",
-            "xem them dia diem",
-            "xem them doanh nghiep",
-            "xem them",
-            "ket qua khac",
-            "danh sach",
-            "xem danh sach",
-            "view list",
-            "商家",
-            "更多商家",
-            "更多"
-        ]
-
-        # 1. Kiểm tra trước nếu máy đã vào profile rồi
-        if self.is_in_google_maps_profile(device_id) and self._verify_correct_profile(device_id, normalized_targets):
-            if status_callback:
-                status_callback(device_id, f"[Google Maps B3] ✅ Đã ở trong trang Profile '{target_list[0]}'")
-            return True
-
-        # Đợi 2.5s để trang tìm kiếm Google và Local Pack render ổn định hoàn toàn
-        time.sleep(2.5)
-
-        # HÀM PHỤ TRỢ: BẤM VÀ KIỂM TRA PROFILE
-        def _try_tap_and_verify(tap_x, tap_y):
-            self.tap(device_id, tap_x, tap_y)
-            time.sleep(3.0)
-            if self.is_in_google_maps_profile(device_id):
-                if self._verify_correct_profile(device_id, normalized_targets):
-                    if status_callback:
-                        status_callback(device_id, f"[Google Maps B3] ✅ Đã mở thành công Profile '{target_list[0]}'")
-                    return True
-                else:
-                    if status_callback:
-                        status_callback(device_id, f"[Google Maps B3] Bấm nhầm profile khác, đang quay lại...")
-                    self.keyevent(device_id, 4) # Bấm nút Back
-                    time.sleep(2.0)
-            return False
-
-        # 2. ƯU TIÊN SỐ 1: Quét XML tìm tọa độ chính xác của Khải Hoàn Skincare
-        root = self._get_maps_ui_root(device_id, prefix="maps_scan_first")
-        if root is not None:
-            for elem in root.iter():
-                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-                norm = self._normalize_maps_text(text)
-                if norm and ("khai hoan" in norm or "khaihoan" in norm or any(t in norm for t in normalized_targets if len(t) >= 6)):
-                    bounds = elem.get("bounds", "")
-                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                    if m:
-                        x1, y1, x2, y2 = map(int, m.groups())
-                        if y2 > int(height * 0.12):
-                            h_node = y2 - y1
-                            click_x = (x1 + x2) // 2
-                            click_y = y1 + min(int(h_node * 0.25), 45) if h_node > 70 else (y1 + y2) // 2
-                            if status_callback:
-                                status_callback(device_id, f"[Google Maps B3] Tìm thấy XML '{text[:35]}', bấm mở...")
-                            if _try_tap_and_verify(click_x, click_y):
-                                return True
-
-        # 3. GRID SCAN: NẾU XML THẤT BẠI, DÒ TÌM CARD 1 BẰNG NHIỀU ĐIỂM Y
-        if status_callback:
-            status_callback(device_id, "[Google Maps B3] XML không nhận diện được, đang quét dò tìm Profile...")
-
-        y_candidates = [
-            0.18, 0.23, 0.28, # Tầng trên (Header bị cuộn)
-            0.35, 0.41, 0.48, # Tầng giữa (Header hiển thị nửa/UI scale nhỏ)
-            0.55, 0.61, 0.68  # Tầng dưới (Header Google đầy đủ/UI scale lớn)
-        ]
-        
-        for y_pct in y_candidates:
-            if _try_tap_and_verify(int(width * 0.42), int(height * y_pct)):
-                return True
-
-        # 4. TÌM NÚT "DOANH NGHIỆP KHÁC" ĐỂ MỞ RỘNG
-        if status_callback:
-            status_callback(device_id, "[Google Maps B3] Đang tìm nút 'Doanh nghiệp khác'...")
-        
-        root2 = self._get_maps_ui_root(device_id, prefix="maps_scan_more")
-        if root2 is not None:
-            for elem in root2.iter():
-                text = (elem.get("text", "") or elem.get("content-desc", "")).strip()
-                norm = self._normalize_maps_text(text)
-                if any(op in norm for op in other_places_keywords):
-                    bounds = elem.get("bounds", "")
-                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                    if m:
-                        x1, y1, x2, y2 = map(int, m.groups())
-                        if y2 > int(height * 0.15):
-                            self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                            time.sleep(3.5)
-                            # Trong danh sách mở rộng, dò từ trên xuống dưới
-                            for y_pct in [0.18, 0.28, 0.38, 0.48, 0.58, 0.68]:
-                                if _try_tap_and_verify(int(width * 0.42), int(height * y_pct)):
-                                    return True
-                            break
-
-        return False
-
-    def browse_google_maps_profile(
-        self,
-        device_id,
-        target_name,
-        total_seconds=150,
-        status_callback=None,
-        is_cancelled=None,
-    ):
-        """Lướt xem profile mục tiêu như người thật trong 2 - 3 phút."""
-        width, height = self.get_effective_screen_size(device_id)
-        cx = width // 2
-
-        # Đảm bảo chắc chắn 100% đã ở trong Profile trước khi cuộn
-        if not self.is_in_google_maps_profile(device_id):
-            if status_callback:
-                status_callback(device_id, "[Google Maps B4] ⚠️ Cảnh báo: Không ở trong Profile! Bỏ qua lướt.")
-            return
-
-        elapsed = 0
-        cycle = 1
-
-        tab_keywords = {
-            "tổng quan": ["tong quan", "overview"],
-            "bài đánh giá": ["bai danh gia", "danh gia", "reviews", "review"],
-            "ảnh": ["anh", "hinh anh", "photos", "photo"],
-        }
-
-        # Vòng lặp cuộn và tương tác tự nhiên trong khoảng thời gian dwell_total
-        while elapsed < total_seconds:
-            if is_cancelled and is_cancelled():
-                raise RuntimeError("Bị dừng bởi người dùng")
-
-            remaining = total_seconds - elapsed
-
-            # Thao tác 1: Vuốt cuộn nội dung trang profile
-            scroll_duration = random.randint(400, 700)
-            if cycle % 5 == 0:
-                # Mỗi 5 lượt thì cuộn ngược lên một chút
-                self.swipe(
-                    device_id,
-                    cx,
-                    int(height * 0.40),
-                    cx,
-                    int(height * 0.70),
-                    duration=scroll_duration,
-                )
-            else:
-                self.swipe(
-                    device_id,
-                    cx,
-                    int(height * 0.70),
-                    cx,
-                    int(height * 0.40),
-                    duration=scroll_duration,
-                )
-
-            dwell_pause = random.randint(4, 8)
-            time.sleep(dwell_pause)
-            elapsed += dwell_pause
-
-            if status_callback and cycle % 2 == 0:
-                status_callback(
-                    device_id,
-                    f"[Google Maps B4] Đang xem thông tin profile • còn {max(0, remaining - dwell_pause)}s...",
-                )
-
-            cycle += 1
-
-        return True
-
-    def interact_google_maps_profile_actions(self, device_id, status_callback=None):
-        """
-        Bấm tương tác ngẫu nhiên trên profile Google Maps:
-        1. Cuộn trang lên đầu profile để hàng nút tròn (Đường đi, Chia sẻ, Trang web, Lưu, Gọi điện) và các tab hiện rõ ràng.
-        2. Quét XML UI hoặc dùng tọa độ chuẩn xác để bấm nút.
-        3. Chờ 3.5 giây ghi nhận tương tác thật và đóng dialog (nếu có) trước khi hoàn tất.
-        """
-        width, height = self.get_effective_screen_size(device_id)
-        cx = width // 2
-
-        if status_callback:
-            status_callback(
-                device_id,
-                "[Google Maps B5] Cuộn về đầu trang Profile để thực hiện tương tác...",
-            )
-
-        # 1. Vuốt mạnh từ trên xuống 3 lần để cuộn lên đỉnh trang Profile
-        for _ in range(3):
-            self.swipe(
-                device_id,
-                cx,
-                int(height * 0.25),
-                cx,
-                int(height * 0.80),
-                duration=350,
-            )
-            time.sleep(0.4)
-
-        time.sleep(1.0)
-
-        # 2. Định nghĩa danh sách các nút hành động tròn và tab trên Profile
-        # Hàng nút tròn (y ~ 58%): Gọi điện (x ~ 11%), Đường đi (x ~ 29%), Chia sẻ (x ~ 47%), Trang web (x ~ 65%), Lưu (x ~ 83%)
-        # Hàng tab (y ~ 24%): Tổng quan (x ~ 20%), Bài đánh giá (x ~ 45%), Ảnh (x ~ 70%)
-        action_names = {
-            "đường đi": ["chi duong", "duong di", "directions"],
-            "chia sẻ": ["chia se", "share"],
-            "trang web": ["trang web", "website", "web"],
-            "lưu": ["luu", "save", "saved"],
-            "gọi điện": ["goi", "goi dien", "call"],
-            "bài đánh giá": ["bai danh gia", "danh gia", "reviews", "review"],
-            "ảnh": ["anh", "hinh anh", "photos", "photo"],
-        }
-
-        default_actions = [
-            ("Đường đi", (int(width * 0.29), int(height * 0.58))),
-            ("Chia sẻ", (int(width * 0.47), int(height * 0.58))),
-            ("Trang web", (int(width * 0.65), int(height * 0.58))),
-            ("Lưu", (int(width * 0.83), int(height * 0.58))),
-            ("Bài đánh giá", (int(width * 0.45), int(height * 0.24))),
-            ("Ảnh", (int(width * 0.70), int(height * 0.24))),
-        ]
-
-        action_candidates = []
-        root = self._get_maps_ui_root(device_id, prefix="maps_actions")
-        if root is not None:
-            for elem in root.iter():
-                text = (
-                    elem.get("text", "") or elem.get("content-desc", "")
-                ).strip()
-                norm = self._normalize_maps_text(text)
-                for label, kws in action_names.items():
-                    if any(kw == norm or (len(kw) >= 4 and kw in norm) for kw in kws):
-                        bounds = elem.get("bounds", "")
-                        m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-                        if m:
-                            x1, y1, x2, y2 = map(int, m.groups())
-                            cy = (y1 + y2) // 2
-                            if 120 < cy < height - 100:
-                                action_candidates.append(
-                                    (label.title(), ((x1 + x2) // 2, cy))
-                                )
-
-        if not action_candidates:
-            action_candidates = default_actions
-
-        chosen_label, (ax, ay) = random.choice(action_candidates)
-        if status_callback:
-            status_callback(
-                device_id,
-                f"[Google Maps B5] Bấm tương tác nút '{chosen_label}' trên profile...",
-            )
-        self.tap(device_id, ax, ay)
-        time.sleep(3.5)
-
-        # Nếu là nút Chia sẻ / Lưu / Gọi điện mở dialog, bấm phím Back để thu hồi
-        if any(w in chosen_label.lower() for w in ["chia sẻ", "share", "lưu", "save", "gọi"]):
-            self.keyevent(device_id, 4)
-            time.sleep(1.0)
-
-        return True
-
-    @serialized_device_workflow
-    def google_maps_automation_workflow(
-        self,
-        device_id,
-        keywords=None,
-        target_name=None,
-        locations=None,
-        min_dwell=None,
-        max_dwell=None,
-        status_callback=None,
-        is_cancelled=None,
-    ):
-        """Quy trình Bơm Google Maps:
-
-        1. Mở Chrome và bấm Home của Chrome để về trang chủ.
-        2. Chỉ nhập một từ khóa ngẫu nhiên từ ô "Từ khóa theo dõi".
-        3. Tìm và mở đúng profile mục tiêu (nếu trang đầu không có thì bấm Các địa điểm khác/cuộn).
-        4. Lướt xem như người thật 2-3 phút (Tổng quan, Đánh giá, Ảnh).
-        5. Bấm ngẫu nhiên các nút trên profile và hoàn tất.
-        """
-        def update_status(msg):
-            print(f"[Device {device_id[:6]}] {msg}")
-            if status_callback:
-                status_callback(device_id, msg)
-
-        def check_cancelled():
-            if is_cancelled and is_cancelled():
-                raise RuntimeError("Bị dừng bởi người dùng")
-
-        if not keywords:
-            raise RuntimeError("Chưa nhập từ khóa Google Maps")
-        if isinstance(keywords, str):
-            kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
-        else:
-            kw_list = [str(k).strip() for k in keywords if str(k).strip()]
-        if not kw_list:
-            raise RuntimeError("Danh sách từ khóa Google Maps trống")
-
-        loc_list = []
-        if locations:
-            if isinstance(locations, str):
-                loc_list = [loc.strip() for loc in locations.split(",") if loc.strip()]
-            else:
-                loc_list = [str(loc).strip() for loc in locations if str(loc).strip()]
-
-        if not target_name:
-            target_name = getattr(
-                config,
-                "GOOGLE_MAPS_TARGET_NAME",
-                getattr(config, "GOOGLE_MAPS_TARGET_NAME_DEFAULT", "Nhà thuốc Khải Hoàn Skincare"),
-            )
-        target_name = str(target_name).strip()
-
-        selected_keyword = random.choice(kw_list)
-        selected_location = random.choice(loc_list) if loc_list else ""
-
-        # Tên profile target và vị trí chỉ dùng tham chiếu sau khi có kết quả.
-        # Tuyệt đối không ghép hai trường này vào nội dung nhập trên Google.
-        search_query = selected_keyword
-
-        dwell_min = min_dwell if min_dwell is not None else getattr(config, "GOOGLE_MAPS_DWELL_MIN", 120)
-        dwell_max = max_dwell if max_dwell is not None else getattr(config, "GOOGLE_MAPS_DWELL_MAX", 180)
-        dwell_total = random.randint(min(dwell_min, dwell_max), max(dwell_min, dwell_max))
-
-        try:
-            check_cancelled()
-
-            # Tắt triệt để các app mạng xã hội khác nếu đang mở để tránh đè màn hình Google Chrome
-            self.stop_app(device_id, "com.ss.android.ugc.trill")
-            self.stop_app(device_id, "com.zhiliaoapp.musically")
-            self.stop_app(device_id, "com.facebook.katana")
-            time.sleep(0.5)
-
-            # ================= BƯỚC 1: MỞ GOOGLE CHROME =================
-            update_status("[Google Chrome B1] Mở ứng dụng Google Chrome...")
-            self.launch_chrome(device_id)
-            time.sleep(2.5)
-            check_cancelled()
-
-            if not self.ensure_chrome_ready(device_id):
-                update_status("[Google Chrome B1] Thử mở lại Google Chrome...")
-                self.launch_chrome(device_id)
-                time.sleep(3.0)
-                if not self.ensure_chrome_ready(device_id):
-                    raise RuntimeError("Không thể mở ứng dụng Google Chrome")
-
-            self.dismiss_chrome_popups(device_id)
-            check_cancelled()
-
-            # ================= BƯỚC 2: TÌM KIẾM TỪ KHÓA TRÊN GOOGLE CHROME =================
-            loc_msg = f" (Khu vực tham chiếu: '{selected_location}')" if selected_location else ""
-            update_status(
-                f"[Google Chrome B2] Bốc từ khóa ngẫu nhiên '{selected_keyword}'{loc_msg} • Đang tìm kiếm trên Google..."
-            )
-            self.find_and_search_chrome(
-                device_id, search_query, status_callback=status_callback
-            )
-            check_cancelled()
-
-            # ================= BƯỚC 3: TÌM VÀ VÀO PROFILE MỤC TIÊU =================
-            update_status(
-                f"[Google Maps B3] Quét tìm profile mục tiêu '{target_name}'..."
-            )
-            found_profile = self.find_and_click_google_maps_target(
-                device_id,
-                target_names=[target_name, "Khải Hoàn Skincare", "Nhà thuốc Khải Hoàn"],
-                locations=[selected_location] if selected_location else None,
-                status_callback=status_callback,
-                max_attempts=4,
-            )
-            if not found_profile:
-                update_status(
-                    f"[Google Maps B3] Không thấy profile '{target_name}' trong danh sách, thử tap vị trí kết quả đầu tiên..."
-                )
-                width, height = self.get_effective_screen_size(device_id)
-                self.tap(device_id, width // 2, int(height * 0.38))
-                time.sleep(2.5)
-
-            check_cancelled()
-
-            # ================= BƯỚC 4: LƯỚT XEM NHƯ NGƯỜI THẬT (2-3 PHÚT) =================
-            update_status(
-                f"[Google Maps B4] Đã vào profile • Bắt đầu lướt xem tự nhiên trong "
-                f"{dwell_total // 60} phút {dwell_total % 60:02d} giây ({dwell_total}s)..."
-            )
-            self.browse_google_maps_profile(
-                device_id,
-                target_name=target_name,
-                total_seconds=dwell_total,
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            check_cancelled()
-
-            # ================= BƯỚC 5: BẤM TƯƠNG TÁC NÚT NGẪU NHIÊN =================
-            update_status(
-                "[Google Maps B5] Bấm ngẫu nhiên các nút tương tác trên profile..."
-            )
-            self.interact_google_maps_profile_actions(
-                device_id, status_callback=status_callback
-            )
-            check_cancelled()
-
-            update_status("Hoàn thành tác vụ Bơm Google Maps!")
-            return True, "Thành công"
-
-        except Exception as e:
-            msg = str(e)
-            update_status(f"Lỗi Google Maps: {msg}")
-            return False, msg
-
-
-
-
-
-
 
 # Chạy thử nghiệm trực tiếp nếu chạy độc lập file này
 if __name__ == "__main__":
