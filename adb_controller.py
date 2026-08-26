@@ -4563,6 +4563,7 @@ class ADBController:
         target = self._normalize_tiktok_text(channel_name)
         has_target = False
         has_search_input = False
+        has_search_results_marker = False
         has_profile_action = False
         video_nodes = 0
 
@@ -4581,6 +4582,14 @@ class ADBController:
                 has_target = True
             if "edittext" in class_name.lower():
                 has_search_input = True
+            if any(
+                value in (
+                    "top", "người dùng", "users", "cửa hàng", "shop",
+                    "xem tất cả", "see all",
+                )
+                for value in text_values
+            ):
+                has_search_results_marker = True
             if any(
                 value in (
                     "message",
@@ -4603,20 +4612,30 @@ class ADBController:
         return (
             has_target
             and not has_search_input
+            and not has_search_results_marker
             and (has_profile_action or video_nodes >= 2)
         )
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
         target = self._normalize_tiktok_text(channel_name)
-        _, screen_height = self.get_effective_screen_size(device_id)
+        screen_width, screen_height = self.get_effective_screen_size(device_id)
         search_bar_bottom = int(screen_height * 0.12)
+        max_scan_attempts = 5
 
-        for attempt in range(3):
+        for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_channel_{attempt}")
             if root is None:
                 time.sleep(1.0)
                 continue
+
+            # Có máy đã nhận tap ở lần trước nhưng UI profile tải chậm hơn
+            # nhịp xác minh. Nếu đúng profile đã mở thì hoàn tất ngay, không
+            # tiếp tục tìm/tap lại trên giao diện profile.
+            if self.is_on_tiktok_target_profile(
+                device_id, channel_name, root=root
+            ):
+                return True
 
             parent_map = {child: parent for parent in root.iter() for child in parent}
             matches = []
@@ -4638,7 +4657,11 @@ class ADBController:
                     ),
                 }
                 text_values.discard("")
-                if not target or target not in text_values:
+                exact_identity = target in text_values
+                prefixed_identity = any(
+                    value.startswith(target) for value in text_values
+                )
+                if not target or not (exact_identity or prefixed_identity):
                     continue
 
                 clickable = elem
@@ -4659,6 +4682,21 @@ class ADBController:
                     marker in resource_id or marker in target_resource_id
                     for marker in identity_markers
                 )
+                subtree_texts = {
+                    self._normalize_tiktok_text(
+                        f"{node.get('text', '')} "
+                        f"{node.get('content-desc', '')}"
+                    )
+                    for node in target_elem.iter()
+                }
+                profile_row_cues = (
+                    "follow", "following", "theo dõi", "đang follow",
+                    "đã follow", "account", "tài khoản", "user",
+                )
+                has_profile_row_cue = any(
+                    any(cue in value for cue in profile_row_cues)
+                    for value in subtree_texts
+                )
                 bounds_match = re.match(
                     r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
                     target_elem.get("bounds", ""),
@@ -4674,12 +4712,42 @@ class ADBController:
                     and "edittext" not in target_class
                     and "search" not in target_resource_id
                     and (has_identity_resource or compact_identity_card)
+                    # Text gộp như "Tên, @handle, Follow" chỉ được nhận khi
+                    # card có dấu hiệu hàng tài khoản. Nhờ vậy caption video
+                    # của kênh khác dù nhắc tên target vẫn bị loại.
+                    and (
+                        exact_identity
+                        or has_identity_resource
+                        or has_profile_row_cue
+                    )
                 ):
                     score = 14 if has_identity_resource else 10
+                    if has_profile_row_cue:
+                        score += 3
                     matches.append((score, coords, target))
 
             if not matches:
-                time.sleep(1.0)
+                if attempt >= max_scan_attempts - 1:
+                    break
+                if not self.wait_for_tiktok_foreground(device_id):
+                    return False
+                # Một số tài khoản hiển thị Shopping/Video trước và đẩy hàng
+                # Người dùng xuống dưới. Vuốt kết quả từng nhịp, rồi dump lại
+                # để chỉ click khi đã đọc thấy đúng tên target.
+                print(
+                    f"[Device {device_id[:6]}] Chưa thấy Kênh target ở vùng "
+                    f"hiện tại • cuộn kết quả tìm kiếm ({attempt + 1}/"
+                    f"{max_scan_attempts - 1})..."
+                )
+                self.swipe(
+                    device_id,
+                    screen_width // 2,
+                    int(screen_height * 0.78),
+                    screen_width // 2,
+                    int(screen_height * 0.32),
+                    duration=650,
+                )
+                time.sleep(1.2)
                 continue
 
             _, coords, matched_text = max(matches, key=lambda item: item[0])
@@ -4696,14 +4764,22 @@ class ADBController:
         return False
 
     def click_random_tiktok_profile_video(self, device_id, channel_name):
-        """Chọn một clip đang hiển thị trên profile và xác minh đã mở player."""
+        """Tìm một clip trên profile, kể cả khi phải cuộn mới thấy lưới."""
         width, height = self.get_effective_screen_size(device_id)
-        for attempt in range(3):
+        max_scan_attempts = 5
+        profile_confirmed = False
+        for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_profile_videos_{attempt}")
-            if root is None or not self.is_on_tiktok_target_profile(
-                device_id, channel_name, root=root
-            ):
-                return False
+            if root is None:
+                time.sleep(0.8)
+                continue
+            if not profile_confirmed:
+                profile_confirmed = self.is_on_tiktok_target_profile(
+                    device_id, channel_name, root=root
+                )
+                if not profile_confirmed:
+                    time.sleep(0.8)
+                    continue
 
             candidates = []
             candidate_set = set()
@@ -4730,6 +4806,10 @@ class ADBController:
                 is_known_video = (
                     "user_video_view" in resource_id
                     or resource_id.endswith(":id/eti")
+                    or resource_id.endswith(":id/erf")
+                    or resource_id.endswith(":id/cover")
+                    or "video_tile" in resource_id
+                    or "video_item" in resource_id
                     or desc.startswith("video by ")
                 )
                 if not is_known_video:
@@ -4745,14 +4825,32 @@ class ADBController:
                 coords = self._element_center(target_elem)
                 if (
                     coords
-                    and 0 < coords[1] < height
+                    and int(height * 0.20) < coords[1] < height
                     and coords not in candidate_set
                 ):
                     candidates.append(coords)
                     candidate_set.add(coords)
 
             if not candidates:
-                return False
+                if attempt >= max_scan_attempts - 1:
+                    break
+                if not self.wait_for_tiktok_foreground(device_id):
+                    return False
+                print(
+                    f"[Device {device_id[:6]}] Profile đúng Kênh nhưng lưới "
+                    f"clip chưa hiện • cuộn tìm clip ({attempt + 1}/"
+                    f"{max_scan_attempts - 1})..."
+                )
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.78),
+                    width // 2,
+                    int(height * 0.35),
+                    duration=650,
+                )
+                time.sleep(1.2)
+                continue
 
             coords = random.choice(candidates)
             self.tap(device_id, coords[0], coords[1])
@@ -4922,43 +5020,19 @@ class ADBController:
                 )
             time.sleep(3.5)
             check_cancelled()
-            seed_results_ready = self.wait_for_tiktok_search_results(
-                device_id, seed_kw
-            )
-            if not seed_results_ready:
-                update_status(
-                    "[TikTok B2] Kết quả tải chậm • nhập lại từ khóa mồi "
-                    "và thử thêm một lần..."
-                )
-                # Retry ngay tại Search hiện tại. Không gọi
-                # ensure_tiktok_foreground_ready vì hàm đó chuẩn hóa về Home,
-                # làm mất kết quả B2 và có thể khiến thao tác kế tiếp lệch app.
-                if not self.wait_for_tiktok_foreground(device_id):
-                    raise RuntimeError(
-                        "TikTok B2 mất foreground khi retry kết quả"
-                    )
-                if not self.find_and_click_tiktok_search(device_id):
-                    raise RuntimeError(
-                        "TikTok B2 không mở lại được ô tìm kiếm khi retry"
-                    )
-                if not self.replace_tiktok_search_text(device_id, seed_kw):
-                    raise RuntimeError(
-                        "TikTok B2 không nhập lại đúng từ khóa mồi khi retry"
-                    )
-                if not self.submit_tiktok_search(device_id):
-                    raise RuntimeError(
-                        "TikTok B2 không gửi lại được tìm kiếm từ khóa mồi"
-                    )
-                time.sleep(3.5)
-                check_cancelled()
-                seed_results_ready = self.wait_for_tiktok_search_results(
-                    device_id, seed_kw
-                )
-            if not seed_results_ready:
+            # Enter thành công là cổng hoàn tất B2. Không dump/chờ UI XML ở
+            # đây: khi chạy nhiều máy, UIAutomator thường chậm dù kết quả đã
+            # hiển thị, khiến code cũ nhập lại từ khóa mồi và dừng sai. Chỉ
+            # kiểm tra đúng TikTok còn foreground trước khi bắt đầu swipe.
+            if not self.wait_for_tiktok_foreground(device_id):
                 raise RuntimeError(
-                    "TikTok B2 chưa hiển thị đúng kết quả từ khóa mồi sau retry"
+                    "TikTok B2 mất foreground sau khi Enter từ khóa mồi"
                 )
             seed_search_completed = True
+            update_status(
+                "[TikTok B2] Đã Enter từ khóa mồi • tiếp tục lướt kết quả, "
+                "không nhập lại lần hai..."
+            )
 
             step2_total = random.randint(
                 config.TIKTOK_STEP2_TOTAL_MIN,

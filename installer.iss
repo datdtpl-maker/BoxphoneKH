@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.6"
+  #define MyAppVersion "1.0.9"
 #endif
 
 #define MyAppName "BoxPhoneControl"

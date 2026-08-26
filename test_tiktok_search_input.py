@@ -701,7 +701,9 @@ class TikTokSearchInputTests(unittest.TestCase):
             """
         )
         roots = iter([search_root, profile_root])
-        self.controller._get_tiktok_ui_root = lambda *_args: next(roots)
+        self.controller._get_tiktok_ui_root = (
+            lambda *_args: next(roots, profile_root)
+        )
         taps = []
         self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
 
@@ -742,7 +744,9 @@ class TikTokSearchInputTests(unittest.TestCase):
             """
         )
         roots = iter([search_root, profile_root])
-        self.controller._get_tiktok_ui_root = lambda *_args: next(roots)
+        self.controller._get_tiktok_ui_root = (
+            lambda *_args: next(roots, profile_root)
+        )
         taps = []
         self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
 
@@ -788,6 +792,145 @@ class TikTokSearchInputTests(unittest.TestCase):
             taps,
             "Caption nhắc tên target không được coi là card danh tính kênh",
         )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_click_accepts_combined_user_accessibility_label(self, _sleep):
+        """Một số TikTok gộp tên, handle và Follow vào content-desc."""
+        search_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Users"
+                    bounds="[20,190][200,250]" />
+              <node class="android.widget.FrameLayout" clickable="true"
+                    bounds="[0,260][1080,560]" resource-id="id/obfuscated_row">
+                <node class="android.widget.ImageView"
+                      resource-id="id/obfuscated_avatar"
+                      bounds="[30,300][190,460]" />
+                <node class="android.widget.TextView"
+                      resource-id="id/obfuscated_name"
+                      content-desc="Kênh TikTok Mẫu, @kenhmau, Follow"
+                      bounds="[220,310][790,390]" />
+                <node class="android.widget.Button" text="Follow"
+                      bounds="[820,320][1040,430]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Kênh TikTok Mẫu" />
+              <node class="android.widget.Button" text="Follow" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+            </hierarchy>
+            """
+        )
+        roots = iter([search_root, profile_root])
+        self.controller._get_tiktok_ui_root = (
+            lambda *_args: next(roots, profile_root)
+        )
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_channel(
+                "device-combined-label", "Kênh TikTok Mẫu"
+            )
+        )
+        self.assertEqual([(540, 410)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_click_accepts_profile_already_open_after_previous_tap(
+        self, _sleep
+    ):
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Kênh TikTok Mẫu" />
+              <node class="android.widget.Button" text="Follow" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+            </hierarchy>
+            """
+        )
+        self.controller._get_tiktok_ui_root = lambda *_args: profile_root
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_channel(
+                "device-profile-open", "Kênh TikTok Mẫu"
+            )
+        )
+        self.assertEqual([], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_search_scrolls_past_products_to_target_user(self, _sleep):
+        products_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Top" />
+              <node class="android.widget.TextView" text="Mua sắm" />
+              <node class="android.widget.FrameLayout" clickable="true"
+                    bounds="[0,260][1080,1680]" resource-id="shop_products">
+                <node text="Kem dưỡng da" />
+                <node text="551.325đ" />
+              </node>
+            </hierarchy>
+            """
+        )
+        user_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Người dùng" />
+              <node class="android.widget.FrameLayout" clickable="true"
+                    bounds="[0,980][1080,1280]" resource-id="user_result">
+                <node class="android.widget.TextView"
+                      text="Kênh TikTok Mẫu" bounds="[220,1020][760,1090]" />
+                <node class="android.widget.Button" text="Đã follow" />
+              </node>
+            </hierarchy>
+            """
+        )
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Kênh TikTok Mẫu" />
+              <node class="android.widget.Button" text="Đã follow" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+            </hierarchy>
+            """
+        )
+        state = {"scrolled": False, "tapped": False}
+
+        def get_root(*_args):
+            if state["tapped"]:
+                return profile_root
+            return user_root if state["scrolled"] else products_root
+
+        swipes = []
+        taps = []
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        self.controller._get_tiktok_ui_root = get_root
+        self.controller.swipe = (
+            lambda *_args, **_kwargs:
+            swipes.append("scroll-results")
+            or state.update(scrolled=True)
+        )
+        self.controller.tap = (
+            lambda _device_id, x, y:
+            taps.append((x, y)) or state.update(tapped=True)
+        )
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_channel(
+                "device-products-first", "Kênh TikTok Mẫu"
+            )
+        )
+        self.assertGreaterEqual(len(swipes), 1)
+        self.assertEqual([(540, 1130)], taps)
 
     def test_profile_verifier_rejects_target_mentioned_only_in_bio(self):
         wrong_profile_root = ET.fromstring(
@@ -879,6 +1022,55 @@ class TikTokSearchInputTests(unittest.TestCase):
             )
         )
         self.assertEqual([(179, 1143)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_profile_video_click_scrolls_until_grid_is_visible(self, _sleep):
+        tall_header_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Kênh TikTok Mẫu" />
+              <node class="android.widget.Button" text="Follow" />
+              <node class="android.widget.TextView"
+                    text="Tiểu sử dài đang che phần lưới clip" />
+            </hierarchy>
+            """
+        )
+        grid_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.GridView" bounds="[0,520][1080,1920]">
+                <node class="android.widget.FrameLayout" clickable="true"
+                      resource-id="id/obfuscated_video_tile"
+                      bounds="[0,560][358,1080]">
+                  <node class="android.widget.ImageView"
+                        resource-id="id/cover" bounds="[0,560][358,1080]" />
+                </node>
+              </node>
+            </hierarchy>
+            """
+        )
+        state = {"scrolled": False}
+        swipes = []
+        taps = []
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        self.controller._get_tiktok_ui_root = (
+            lambda *_args: grid_root if state["scrolled"] else tall_header_root
+        )
+        self.controller.swipe = (
+            lambda *_args, **_kwargs:
+            swipes.append("scroll-profile")
+            or state.update(scrolled=True)
+        )
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        self.controller.is_tiktok_video_player = lambda _device_id: True
+
+        self.assertTrue(
+            self.controller.click_random_tiktok_profile_video(
+                "device-tall-profile", "Kênh TikTok Mẫu"
+            )
+        )
+        self.assertGreaterEqual(len(swipes), 1)
+        self.assertEqual([(179, 820)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
     def test_advance_tiktok_feed_retries_when_photo_post_does_not_change(
@@ -1122,65 +1314,71 @@ class TikTokSearchInputTests(unittest.TestCase):
     @patch("builtins.print")
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     @patch("adb_controller.time.sleep", return_value=None)
-    def test_workflow_never_enters_target_when_seed_results_are_not_verified(
+    def test_workflow_does_not_retype_seed_when_result_xml_is_unreadable(
         self, _sleep, _randint, _print
     ):
         entered = []
+        result_detector_calls = []
+        statuses = []
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
         self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
         self.controller.launch_tiktok = lambda _device_id: None
         self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
         self.controller.advance_tiktok_feed = lambda _device_id: True
+        self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.find_and_click_tiktok_search = lambda _device_id: True
         self.controller.replace_tiktok_search_text = (
             lambda _device_id, text: entered.append(text) or True
         )
         self.controller.submit_tiktok_search = lambda _device_id: True
-        self.controller.wait_for_tiktok_search_results = lambda *_args: False
+        self.controller.wait_for_tiktok_search_results = (
+            lambda *_args:
+            result_detector_calls.append("xml-check") or False
+        )
+        self.controller.find_and_click_tiktok_channel = lambda *_args: True
+        self.controller.click_random_tiktok_profile_video = lambda *_args: True
 
         success, message = self.controller.tiktok_automation_workflow(
             "device-1",
             seed_keywords=["từ khóa mồi"],
             target_channel="Kênh mục tiêu",
+            status_callback=lambda _device_id, status: statuses.append(status),
         )
 
-        self.assertFalse(success)
-        self.assertEqual(["từ khóa mồi", "từ khóa mồi"], entered)
-        self.assertIn("đúng kết quả", message)
+        self.assertTrue(success, message)
+        self.assertEqual(["từ khóa mồi", "Kênh mục tiêu"], entered)
+        self.assertEqual(
+            [],
+            result_detector_calls,
+            "B2 không được chờ UI XML sau khi Enter đã thành công",
+        )
+        self.assertFalse(any("tải chậm" in status for status in statuses))
+        self.assertTrue(
+            any("không nhập lại" in status for status in statuses)
+        )
 
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("builtins.print")
-    def test_workflow_retries_seed_search_once_when_results_are_delayed(
+    def test_workflow_enters_seed_exactly_once_before_exact_target(
         self, _print, _sleep, _randint
     ):
         entered = []
-        foreground_normalizations_after_result_check = []
-        result_check_started = {"value": False}
-        checks = iter([False, True])
+        submitted = []
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
         self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
         self.controller.launch_tiktok = lambda _device_id: None
-        self.controller.ensure_tiktok_foreground_ready = (
-            lambda *_args, **_kwargs:
-            (
-                foreground_normalizations_after_result_check.append("normalize")
-                if result_check_started["value"]
-                else None
-            ) or True
-        )
+        self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
         self.controller.wait_for_tiktok_foreground = lambda _device_id: True
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: True
         self.controller.replace_tiktok_search_text = (
             lambda _device_id, text: entered.append(text) or True
         )
-        self.controller.submit_tiktok_search = lambda _device_id: True
-        def wait_for_results(*_args):
-            result_check_started["value"] = True
-            return next(checks)
-
-        self.controller.wait_for_tiktok_search_results = wait_for_results
+        self.controller.submit_tiktok_search = (
+            lambda _device_id: submitted.append(entered[-1]) or True
+        )
         self.controller.find_and_click_tiktok_channel = lambda *_args: True
         self.controller.click_random_tiktok_profile_video = lambda *_args: True
         self.controller.swipe = lambda *_args, **_kwargs: None
@@ -1193,13 +1391,13 @@ class TikTokSearchInputTests(unittest.TestCase):
 
         self.assertTrue(success, message)
         self.assertEqual(
-            ["từ khóa mồi", "từ khóa mồi", "Kênh mục tiêu"],
+            ["từ khóa mồi", "Kênh mục tiêu"],
             entered,
         )
         self.assertEqual(
-            [],
-            foreground_normalizations_after_result_check,
-            "Retry B2 phải giữ nguyên trang Search, không được đưa TikTok về Home",
+            ["từ khóa mồi", "Kênh mục tiêu"],
+            submitted,
+            "Mỗi lớp từ khóa chỉ được nhập và Enter đúng một lần",
         )
 
     @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
