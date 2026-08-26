@@ -9,61 +9,114 @@ from adb_controller import ADBController
 
 class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_home_refresh_uses_back_and_reopen_without_any_swipe(self, _sleep):
+        controller = ADBController(adb_path="adb")
+        events = []
+        home_states = iter([True, True])
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.is_facebook_home = lambda _device_id: next(home_states)
+        controller.keyevent = lambda _device_id, key: events.append(("back", key))
+        controller.launch_app = (
+            lambda _device_id, package: events.append(("launch", package))
+        )
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.swipe = lambda *_args, **_kwargs: events.append(("swipe",))
+
+        self.assertTrue(controller.reveal_facebook_header("device-s5"))
+
+        self.assertEqual(
+            [("back", 4), ("launch", "com.facebook.katana")],
+            events,
+        )
+
+    def test_home_refresh_is_ignored_outside_facebook_home(self):
+        controller = ADBController(adb_path="adb")
+        events = []
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.is_facebook_home = lambda _device_id: False
+        controller.keyevent = lambda *_args: events.append(("back",))
+        controller.launch_app = lambda *_args: events.append(("launch",))
+        controller.swipe = lambda *_args, **_kwargs: events.append(("swipe",))
+
+        self.assertFalse(controller.reveal_facebook_header("device-page"))
+        self.assertEqual([], events)
+
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
-    def test_cross_warmup_skips_blank_feed_without_restarting_app(
-        self, _randint, _sleep
+    def test_cross_warmup_swipes_immediately_when_ui_dump_is_busy(
+        self, _randint
     ):
         controller = ADBController(adb_path="adb")
         controller.lock_portrait = lambda *_args, **_kwargs: True
         controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
         controller.is_facebook_in_foreground = lambda _device_id: True
-        controller.swipe = lambda *_args, **_kwargs: (0, "", "")
+        controller.is_facebook_home = lambda _device_id: True
+        events = []
+        controller.swipe = (
+            lambda *_args, **_kwargs:
+            events.append("swipe") or (0, "", "")
+        )
         controller.get_facebook_feed_signature = lambda _device_id: None
-        restarts = []
-        controller.restart_facebook_home = (
-            lambda device_id: restarts.append(device_id) or True
+        controller.reveal_facebook_header = (
+            lambda _device_id: events.append("reopen") or True
         )
-        statuses = []
+        clock = [0.0]
 
-        self.assertTrue(
-            controller.browse_facebook_surface(
-                "device-blank",
-                13,
-                "facebook_cross_warmup",
-                status_callback=lambda _device_id, message: statuses.append(message),
+        with (
+            patch(
+                "adb_controller.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(
+                    0, clock[0] + float(seconds)
+                ),
+            ),
+            patch("adb_controller.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            self.assertTrue(
+                controller.browse_facebook_surface(
+                    "device-blank", 1, "facebook_cross_warmup"
+                )
             )
-        )
 
-        self.assertEqual([], restarts)
-        self.assertTrue(any("bỏ qua" in message for message in statuses))
+        self.assertEqual(["swipe"], events)
 
-    @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
-    def test_facebook_main_feed_skips_to_seed_when_stalled(
-        self, _randint, _sleep
+    def test_facebook_main_feed_reopens_and_swipes_again_when_stalled(
+        self, _randint
     ):
         controller = ADBController(adb_path="adb")
         controller.lock_portrait = lambda *_args, **_kwargs: True
         controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
         controller.is_facebook_in_foreground = lambda _device_id: True
-        controller.swipe = lambda *_args, **_kwargs: (0, "", "")
-        controller.get_facebook_feed_signature = lambda _device_id: None
-        restarts = []
-        controller.restart_facebook_home = (
-            lambda device_id: restarts.append(device_id) or False
+        controller.is_facebook_home = lambda _device_id: True
+        events = []
+        controller.swipe = (
+            lambda *_args, **_kwargs:
+            events.append("swipe") or (0, "", "")
         )
-        statuses = []
+        signatures = iter([("same",), ("same",), ("fresh",), ("moved",)])
+        controller.get_facebook_feed_signature = (
+            lambda _device_id: next(signatures)
+        )
+        controller.reveal_facebook_header = (
+            lambda _device_id: events.append("reopen") or True
+        )
+        clock = [0.0]
 
-        self.assertTrue(
-            controller.browse_facebook_surface(
-                "device-blank",
-                13,
-                "feed",
-                status_callback=lambda _device_id, message: statuses.append(message),
+        with (
+            patch(
+                "adb_controller.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(
+                    0, clock[0] + float(seconds)
+                ),
+            ),
+            patch("adb_controller.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            self.assertTrue(
+                controller.browse_facebook_surface(
+                    "device-stalled", 3, "feed"
+                )
             )
-        )
-        self.assertEqual([], restarts)
-        self.assertTrue(any("Facebook B2" in message for message in statuses))
+
+        self.assertEqual(["swipe", "reopen", "swipe"], events)
 
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     def test_cross_warmup_recovers_facebook_foreground_before_swipe(
@@ -255,6 +308,91 @@ class FacebookAutomationTests(unittest.TestCase):
             taps,
             "Không cấu hình tên chính xác thì ưu tiên tên Page đầy đủ hơn",
         )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_page_click_accepts_target_phrase_when_exact_label_is_truncated(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.EditText"
+                    text="Khải Hoàn Skincare"
+                    bounds="[60,25][900,145]" />
+              <node clickable="true" bounds="[20,260][1060,500]">
+                <node class="android.widget.TextView"
+                      text="Khải Hoàn Skincare"
+                      bounds="[100,300][850,380]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        taps = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            clicked = controller.find_and_click_facebook_page(
+                "device-pixel",
+                "Khải Hoàn Skincare",
+                exact_page_name=(
+                    "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa"
+                ),
+            )
+
+        self.assertTrue(clicked)
+        self.assertEqual([(540, 380)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_target_results_return_to_top_and_select_pages_filter(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node clickable="true" bounds="[830,120][1060,230]">
+                <node class="android.widget.TextView"
+                      text="Trang"
+                      bounds="[880,145][1010,205]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        swipes = []
+        taps = []
+        controller.swipe = (
+            lambda _device_id, x1, y1, x2, y2, duration=500:
+            swipes.append((x1, y1, x2, y2, duration))
+        )
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            prepared = controller.prepare_facebook_target_results(
+                "device-pixel"
+            )
+
+        self.assertTrue(prepared)
+        self.assertGreaterEqual(len(swipes), 2)
+        self.assertTrue(
+            all(y1 < y2 for _, y1, _, y2, _ in swipes),
+            "Đưa kết quả về đầu phải vuốt ngón tay từ trên xuống dưới",
+        )
+        self.assertEqual([(945, 175)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
@@ -519,6 +657,36 @@ class FacebookAutomationTests(unittest.TestCase):
                 )
             )
 
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_target_page_verification_accepts_short_profile_header(
+        self, _exists, _remove
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node text="Khải Hoàn Skincare" />
+              <node text="Theo dõi" />
+              <node text="Bài viết" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            opened = controller.is_facebook_target_page_open(
+                "device-short-header",
+                "Khải Hoàn Skincare",
+                exact_page_name=(
+                    "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa"
+                ),
+            )
+
+        self.assertTrue(opened)
+
     @patch("adb_controller.random.randint", side_effect=[100, 45, 150])
     @patch(
         "adb_controller.random.choice",
@@ -568,6 +736,74 @@ class FacebookAutomationTests(unittest.TestCase):
             ready_calls,
         )
 
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[0])
+    def test_workflow_retries_target_page_when_first_result_scan_is_late(
+        self, _choice, _randint
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.warmup_tiktok_before_facebook = lambda *_args, **_kwargs: True
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.ensure_facebook_ready = lambda _device_id: True
+        controller.browse_facebook_surface = lambda *_args, **_kwargs: True
+        controller.reveal_facebook_header = lambda _device_id: True
+        controller.find_and_click_facebook_search = lambda _device_id: True
+        controller.replace_facebook_search_text = lambda *_args: True
+        controller.submit_facebook_search = lambda _device_id: True
+        controller.facebook_loading_delay = lambda *_args, **_kwargs: None
+        page_scans = iter([False, True])
+        scan_count = []
+
+        def find_page(*_args, **_kwargs):
+            scan_count.append(1)
+            return next(page_scans)
+
+        controller.find_and_click_facebook_page = find_page
+        controller.is_facebook_target_page_open = lambda *_args, **_kwargs: True
+
+        with patch("builtins.print"):
+            success, message = controller.facebook_automation_workflow(
+                "device-late-result",
+                seed_keywords="chăm sóc da",
+                target_pages="Khải Hoàn Skincare",
+            )
+
+        self.assertTrue(success, message)
+        self.assertEqual(2, len(scan_count))
+
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[0])
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_workflow_waits_for_target_profile_verification_after_click(
+        self, _sleep, _choice, _randint
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.warmup_tiktok_before_facebook = lambda *_args, **_kwargs: True
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.ensure_facebook_ready = lambda _device_id: True
+        controller.browse_facebook_surface = lambda *_args, **_kwargs: True
+        controller.reveal_facebook_header = lambda _device_id: True
+        controller.find_and_click_facebook_search = lambda _device_id: True
+        controller.replace_facebook_search_text = lambda *_args: True
+        controller.submit_facebook_search = lambda _device_id: True
+        controller.facebook_loading_delay = lambda *_args, **_kwargs: None
+        controller.find_and_click_facebook_page = lambda *_args, **_kwargs: True
+        profile_checks = iter([False, True])
+        controller.is_facebook_target_page_open = (
+            lambda *_args, **_kwargs: next(profile_checks)
+        )
+
+        with patch("builtins.print"):
+            success, message = controller.facebook_automation_workflow(
+                "device-slow-profile",
+                seed_keywords="chăm sóc da",
+                target_pages="Khải Hoàn Skincare",
+            )
+
+        self.assertTrue(success, message)
+
     @patch("adb_controller.random.randint", side_effect=[100, 45, 150])
     @patch(
         "adb_controller.random.choice",
@@ -605,6 +841,10 @@ class FacebookAutomationTests(unittest.TestCase):
             lambda _device_id, context, **_kwargs:
             events.append(("load", context))
         )
+        controller.prepare_facebook_target_results = (
+            lambda _device_id: events.append(("prepare_target_results",))
+            or True
+        )
         controller.find_and_click_facebook_page = (
             lambda _device_id, target, exact_page_name=None:
             events.append(("page", target)) or True
@@ -636,6 +876,7 @@ class FacebookAutomationTests(unittest.TestCase):
                 ("replace", "Thương Hiệu Mẫu"),
                 ("enter",),
                 ("load", "target_results"),
+                ("prepare_target_results",),
                 ("page", "Thương Hiệu Mẫu"),
                 ("load", "target_page"),
                 ("verify", "Thương Hiệu Mẫu"),

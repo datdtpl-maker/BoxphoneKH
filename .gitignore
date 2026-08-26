@@ -36,6 +36,7 @@ test_search_and_dump.py
 # Local versioned builds; public installer lives in release/
 BoxPhoneControl.exe
 BoxPhoneControl-fixed-v*.exe
+release/BoxPhoneControl/
 build-*/
 dist-*/
 build/

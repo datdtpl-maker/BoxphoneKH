@@ -199,6 +199,136 @@ class ADBController:
         """Gửi mã phím hệ thống (ví dụ: 3=Home, 4=Back, 66=Enter)"""
         return self.execute_adb(device_id, ["shell", "input", "keyevent", str(keycode)])
 
+    def clear_recent_apps(self, device_id, max_scrolls=6):
+        """Mở màn hình đa nhiệm và bấm Xóa tất cả trên nhiều launcher."""
+        self.lock_portrait(device_id, retries=3)
+        self.keyevent(device_id, 187)  # KEYCODE_APP_SWITCH
+        time.sleep(0.8)
+        width, height = self.get_effective_screen_size(device_id)
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_recents_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_recents_{safe_device_id}.xml",
+        )
+        clear_markers = (
+            "clear all",
+            "close all",
+            "remove all",
+            "clear all apps",
+            "xoa tat ca",
+            "dong tat ca",
+            "don dep",
+            "don sach",
+        )
+        empty_markers = (
+            "no recent items",
+            "no recent apps",
+            "khong co ung dung gan day",
+            "khong co muc gan day",
+        )
+        chinese_clear_markers = (
+            "全部清除",
+            "清除全部",
+            "一键清理",
+            "清理全部",
+            "全部关闭",
+        )
+
+        for attempt in range(max(0, max_scrolls) + 1):
+            root = None
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+            dump_code, _, _ = self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", remote_xml]
+            )
+            if dump_code == 0:
+                pull_code, _, _ = self.execute_adb(
+                    device_id, ["pull", remote_xml, local_xml]
+                )
+                if pull_code == 0 and os.path.exists(local_xml):
+                    try:
+                        root = ET.parse(local_xml).getroot()
+                    except Exception:
+                        root = None
+
+            try:
+                if root is not None:
+                    parent_map = {
+                        child: parent
+                        for parent in root.iter()
+                        for child in parent
+                    }
+                    screen_text = []
+                    clear_candidates = []
+                    for node in root.iter():
+                        raw_label = " ".join(
+                            part
+                            for part in (
+                                node.get("text", ""),
+                                node.get("content-desc", ""),
+                            )
+                            if part
+                        ).strip()
+                        normalized = self._normalize_facebook_text(raw_label)
+                        if normalized:
+                            screen_text.append(normalized)
+                        is_clear = any(
+                            marker in normalized for marker in clear_markers
+                        ) or any(
+                            marker in raw_label for marker in chinese_clear_markers
+                        )
+                        if not is_clear:
+                            continue
+                        clickable = node
+                        while (
+                            clickable is not None
+                            and clickable.get("clickable", "false") != "true"
+                        ):
+                            clickable = parent_map.get(clickable)
+                        click_node = clickable if clickable is not None else node
+                        coords = self._element_center(click_node)
+                        if coords:
+                            clear_candidates.append(coords)
+
+                    if clear_candidates:
+                        x, y = clear_candidates[0]
+                        self.tap(device_id, x, y)
+                        time.sleep(0.8)
+                        self.keyevent(device_id, 3)
+                        self.lock_portrait(device_id, retries=2)
+                        return True
+
+                    combined_text = " ".join(screen_text)
+                    if any(marker in combined_text for marker in empty_markers):
+                        self.keyevent(device_id, 3)
+                        self.lock_portrait(device_id, retries=2)
+                        return True
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                self.execute_adb(
+                    device_id, ["shell", "rm", "-f", remote_xml]
+                )
+
+            if attempt < max(0, max_scrolls):
+                # Pixel đặt Clear all ở mép trái của carousel. Vuốt ngón tay
+                # sang phải nhiều lượt để đưa nút này vào vùng hiển thị.
+                self.swipe(
+                    device_id,
+                    int(width * 0.18),
+                    int(height * 0.52),
+                    int(width * 0.86),
+                    int(height * 0.52),
+                    duration=560,
+                )
+                time.sleep(0.4)
+
+        self.keyevent(device_id, 3)
+        self.lock_portrait(device_id, retries=2)
+        return False
+
     def launch_app(self, device_id, package_name):
         """Khởi chạy một ứng dụng bằng package name"""
         # Sử dụng monkey để khởi chạy nhanh app từ launcher
@@ -510,6 +640,100 @@ class ADBController:
             re.sub(r"[^a-z0-9]+", " ", without_marks.casefold()).split()
         )
 
+    def prepare_facebook_target_results(self, device_id):
+        """Đưa kết quả target về đầu và ưu tiên bộ lọc Page/Trang."""
+        self.lock_portrait(device_id, retries=3)
+        if not self.is_facebook_in_foreground(device_id):
+            return False
+
+        width, height = self.get_effective_screen_size(device_id)
+        # B2 có lướt kết quả mồi nên Facebook đôi lúc giữ nguyên offset khi
+        # tìm target. Vuốt ngón tay xuống trong vùng nội dung để trở về đầu;
+        # tuyệt đối không bắt đầu sát status bar để tránh kéo notification.
+        for swipe_duration in (620, 700, 660):
+            self.swipe(
+                device_id,
+                width // 2,
+                int(height * 0.32),
+                width // 2,
+                int(height * 0.82),
+                duration=swipe_duration,
+            )
+            time.sleep(0.45)
+        self.lock_portrait(device_id, retries=3)
+
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_target_tabs_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_fb_target_tabs_{safe_device_id}.xml",
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                # Đã hoàn tất phần bắt buộc là đưa danh sách về đầu; Facebook
+                # có phiên bản không xuất tab Trang vào cây accessibility.
+                return True
+            root = ET.parse(local_xml).getroot()
+            parent_map = {
+                child: parent for parent in root.iter() for child in parent
+            }
+            page_tabs = []
+            for node in root.iter():
+                label = self._normalize_facebook_text(
+                    " ".join(
+                        part
+                        for part in (
+                            node.get("text", ""),
+                            node.get("content-desc", ""),
+                        )
+                        if part
+                    )
+                )
+                if label not in {"trang", "page", "pages"}:
+                    continue
+                clickable = node
+                while (
+                    clickable is not None
+                    and clickable.get("clickable", "false") != "true"
+                ):
+                    clickable = parent_map.get(clickable)
+                click_node = clickable if clickable is not None else node
+                match = re.match(
+                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                    click_node.get("bounds", ""),
+                )
+                if not match:
+                    continue
+                x1, y1, x2, y2 = map(int, match.groups())
+                cy = (y1 + y2) // 2
+                if int(height * 0.05) <= cy <= int(height * 0.30):
+                    page_tabs.append((cy, (x1 + x2) // 2))
+            if page_tabs:
+                tab_y, tab_x = min(page_tabs)
+                self.tap(device_id, tab_x, tab_y)
+                time.sleep(2.0)
+                self.lock_portrait(device_id, retries=3)
+            return True
+        except Exception as exc:
+            print(
+                f"[Device {device_id[:6]}] Không đọc được tab Trang "
+                f"Facebook, tiếp tục từ đầu kết quả: {exc}"
+            )
+            return True
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
     def find_and_click_facebook_page(
         self,
         device_id,
@@ -522,7 +746,8 @@ class ADBController:
         desired_normalized = self._normalize_facebook_text(
             exact_page_name or target_phrase
         )
-        target_tokens = [token for token in desired_normalized.split() if token]
+        target_tokens = [token for token in target_normalized.split() if token]
+        desired_tokens = [token for token in desired_normalized.split() if token]
         if not target_tokens:
             return False
 
@@ -584,10 +809,14 @@ class ADBController:
                         x1, y1, x2, y2 = map(int, match.groups())
                         if y2 <= int(height * 0.08):
                             continue
+                        exact_match = bool(desired_tokens) and all(
+                            token in label_normalized.split()
+                            for token in desired_tokens
+                        )
                         contiguous = desired_normalized in label_normalized
                         candidates.append(
                             (
-                                0 if contiguous else 1,
+                                0 if exact_match or contiguous else 1,
                                 -len(label_normalized),
                                 (x1 + x2) // 2,
                                 (y1 + y2) // 2,
@@ -906,6 +1135,55 @@ class ADBController:
             remaining -= step
         return delay
 
+    def advance_facebook_feed(self, device_id):
+        """Vuốt Feed ngay một lần và xác minh nội dung đã đổi khi có thể."""
+        if not self.is_facebook_in_foreground(device_id):
+            return False
+
+        width, height = self.get_effective_screen_size(device_id)
+        before = self.get_facebook_feed_signature(device_id)
+        x = width // 2 + random.randint(-80, 80)
+        swipe_result = self.swipe(
+            device_id,
+            x,
+            int(height * 0.78) + random.randint(-45, 45),
+            x + random.randint(-30, 30),
+            int(height * 0.28) + random.randint(-45, 45),
+            duration=random.randint(650, 1050),
+        )
+        swipe_code = (
+            swipe_result[0]
+            if isinstance(swipe_result, tuple) and swipe_result
+            else None
+        )
+        time.sleep(1.0)
+        self.lock_portrait(device_id, retries=3)
+        if not self.is_facebook_in_foreground(device_id):
+            return False
+
+        after = self.get_facebook_feed_signature(device_id)
+        if before is not None and after is not None:
+            return after != before
+
+        # Một số Android cũ không dump được UI khi video đang phát. Khi ADB đã
+        # nhận swipe thành công và Facebook vẫn foreground, coi thao tác là đạt.
+        return swipe_code == 0
+
+    def ensure_facebook_feed_motion(
+        self, device_id, label_name="Facebook Feed", status_callback=None
+    ):
+        """Swipe ngay; nếu Feed đứng thì Back, mở lại Home và swipe lần nữa."""
+        if self.advance_facebook_feed(device_id):
+            return True
+        if status_callback:
+            status_callback(
+                device_id,
+                f"[{label_name}] Feed đứng • Back và mở lại Facebook để thử lại...",
+            )
+        if not self.reveal_facebook_header(device_id):
+            return False
+        return self.advance_facebook_feed(device_id)
+
     def browse_facebook_surface(
         self,
         device_id,
@@ -925,6 +1203,7 @@ class ADBController:
             "facebook_cross_warmup": "Facebook Feed nuôi chéo",
         }
         label_name = label_names.get(label, label)
+        feed_surface = label in ("facebook_cross_warmup", "feed")
 
         def ensure_safe_foreground():
             if self.is_facebook_in_foreground(device_id):
@@ -941,6 +1220,23 @@ class ADBController:
             self.lock_portrait(device_id, retries=3)
             return self.is_facebook_in_foreground(device_id)
 
+        # Facebook Home phải có chuyển động ngay sau khi sẵn sàng. Không chờ
+        # 6-15 giây ở bài đầu vì người vận hành sẽ tưởng máy bị treo.
+        if feed_surface and time.monotonic() < deadline:
+            if not ensure_safe_foreground():
+                raise RuntimeError(
+                    f"{label_name}: Facebook không ở foreground; "
+                    "đã dừng để tránh thao tác nhầm ứng dụng"
+                )
+            if not self.ensure_facebook_feed_motion(
+                device_id,
+                label_name=label_name,
+                status_callback=status_callback,
+            ):
+                raise RuntimeError(
+                    f"{label_name}: Feed vẫn đứng sau khi Back và mở lại Facebook"
+                )
+
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
             if is_cancelled and is_cancelled():
@@ -950,24 +1246,6 @@ class ADBController:
                     f"{label_name}: Facebook không ở foreground; "
                     "đã dừng để tránh thao tác nhầm ứng dụng"
                 )
-            current_signature = None
-            skip_if_stalled = label in ("facebook_cross_warmup", "feed")
-            if skip_if_stalled:
-                current_signature = self.get_facebook_feed_signature(device_id)
-                if current_signature is None:
-                    if status_callback:
-                        next_step = (
-                            "chuyển sang TikTok"
-                            if label == "facebook_cross_warmup"
-                            else "chuyển sang Facebook B2 tìm từ khóa mồi"
-                        )
-                        status_callback(
-                            device_id,
-                            f"[{label_name}] Feed trắng/chưa tải • "
-                            f"xác nhận đã làm nóng, bỏ qua và {next_step}...",
-                        )
-                    self.lock_portrait(device_id, retries=3)
-                    return True
             remaining = max(0.0, deadline - time.monotonic())
             if remaining <= 0:
                 break
@@ -997,34 +1275,27 @@ class ADBController:
                         f"{label_name}: Facebook không ở foreground; "
                         "không thực hiện swipe"
                     )
-                before = current_signature
-                x = width // 2 + random.randint(-80, 80)
-                self.swipe(
-                    device_id,
-                    x,
-                    int(height * 0.78) + random.randint(-45, 45),
-                    x + random.randint(-30, 30),
-                    int(height * 0.28) + random.randint(-45, 45),
-                    duration=random.randint(650, 1050),
-                )
-                self.lock_portrait(device_id, retries=3)
-                if skip_if_stalled:
-                    time.sleep(1.0)
-                    after = self.get_facebook_feed_signature(device_id)
-                    if before is None or after is None or after == before:
-                        if status_callback:
-                            next_step = (
-                                "chuyển sang TikTok"
-                                if label == "facebook_cross_warmup"
-                                else "chuyển sang Facebook B2 tìm từ khóa mồi"
-                            )
-                            status_callback(
-                                device_id,
-                                f"[{label_name}] Feed trắng/đứng • "
-                                f"xác nhận đã làm nóng, bỏ qua và {next_step}...",
-                            )
-                        self.lock_portrait(device_id, retries=3)
-                        return True
+                if feed_surface:
+                    if not self.ensure_facebook_feed_motion(
+                        device_id,
+                        label_name=label_name,
+                        status_callback=status_callback,
+                    ):
+                        raise RuntimeError(
+                            f"{label_name}: Feed vẫn đứng sau khi Back "
+                            "và mở lại Facebook"
+                        )
+                else:
+                    x = width // 2 + random.randint(-80, 80)
+                    self.swipe(
+                        device_id,
+                        x,
+                        int(height * 0.78) + random.randint(-45, 45),
+                        x + random.randint(-30, 30),
+                        int(height * 0.28) + random.randint(-45, 45),
+                        duration=random.randint(650, 1050),
+                    )
+                    self.lock_portrait(device_id, retries=3)
                 item_index += 1
         self.lock_portrait(device_id, retries=3)
         return True
@@ -1254,6 +1525,37 @@ class ADBController:
                 return True
         return False
 
+    def ensure_tiktok_feed_motion(
+        self, device_id, status_callback=None, home_ready=False
+    ):
+        """Swipe Home ngay; nếu đứng thì Back, mở lại TikTok và swipe lại."""
+        if home_ready and not self.is_tiktok_in_foreground(device_id):
+            home_ready = False
+        if not home_ready:
+            if not self.ensure_tiktok_foreground_ready(
+                device_id, status_callback=status_callback
+            ):
+                return False
+        if self.advance_tiktok_feed(device_id):
+            return True
+        if status_callback:
+            status_callback(
+                device_id,
+                "[TikTok] Feed đứng • Back và mở lại TikTok để thử lại...",
+            )
+        if not self.is_tiktok_in_foreground(device_id):
+            return False
+
+        self.keyevent(device_id, 4)
+        time.sleep(0.8)
+        self.lock_portrait(device_id, retries=3)
+        self.launch_tiktok(device_id)
+        if not self.ensure_tiktok_foreground_ready(
+            device_id, status_callback=status_callback
+        ):
+            return False
+        return self.advance_tiktok_feed(device_id)
+
     def warmup_tiktok_before_facebook(
         self, device_id, status_callback=None, is_cancelled=None
     ):
@@ -1264,15 +1566,6 @@ class ADBController:
                 "[Nuôi chéo] Mở TikTok trước khi chạy Facebook...",
             )
         self.launch_tiktok(device_id)
-        if not self.is_tiktok_in_foreground(device_id):
-            raise RuntimeError(
-                "Không mở được TikTok cho bước nuôi chéo trước Facebook"
-            )
-        if not self.ensure_tiktok_home_feed(device_id):
-            raise RuntimeError(
-                "Không đưa được TikTok về Home/For You để nuôi chéo"
-            )
-        self.lock_portrait(device_id, retries=3)
         total_seconds = random.randint(
             config.SOCIAL_CROSS_WARMUP_MIN,
             config.SOCIAL_CROSS_WARMUP_MAX,
@@ -1285,6 +1578,13 @@ class ADBController:
             )
 
         deadline = time.monotonic() + max(0, total_seconds)
+        if not self.ensure_tiktok_feed_motion(
+            device_id, status_callback=status_callback
+        ):
+            raise RuntimeError(
+                "TikTok đứng màn hình và không thể phục hồi bằng Back/mở lại"
+            )
+        self.lock_portrait(device_id, retries=3)
         video_index = 1
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
@@ -1324,47 +1624,40 @@ class ADBController:
                         "TikTok không ở foreground trước khi swipe; "
                         "đã dừng an toàn"
                     )
-                moved = self.advance_tiktok_feed(device_id)
-                if not moved:
-                    if status_callback:
-                        status_callback(
-                            device_id,
-                            "[Nuôi chéo] Video chưa đổi • làm mới Home và thử lại...",
-                        )
-                    if not self.ensure_tiktok_home_feed(
-                        device_id, force_refresh=True
-                    ):
-                        raise RuntimeError(
-                            "TikTok đứng màn hình và không thể phục hồi Home"
-                        )
-                    if not self.advance_tiktok_feed(device_id):
-                        raise RuntimeError(
-                            "TikTok không đổi video sau khi đã phục hồi Home"
-                        )
+                if not self.ensure_tiktok_feed_motion(
+                    device_id,
+                    status_callback=status_callback,
+                    home_ready=True,
+                ):
+                    raise RuntimeError(
+                        "TikTok không đổi video sau khi Back và mở lại Home"
+                    )
                 self.lock_portrait(device_id, retries=3)
                 video_index += 1
         self.lock_portrait(device_id, retries=3)
         return True
 
     def reveal_facebook_header(self, device_id):
-        """Kéo Feed về đầu trang để thanh Search Facebook hiện lại."""
+        """Làm mới Home bằng Back rồi mở lại, không kéo thanh trạng thái."""
+        if (
+            not self.is_facebook_in_foreground(device_id)
+            or not self.is_facebook_home(device_id)
+        ):
+            return False
+
+        self.lock_portrait(device_id, retries=3)
+        self.keyevent(device_id, 4)
+        time.sleep(0.8)
+        self.lock_portrait(device_id, retries=3)
+        self.launch_app(device_id, config.FACEBOOK_PACKAGE)
+        time.sleep(1.5)
+        self.lock_portrait(device_id, retries=3)
+
         if not self.is_facebook_in_foreground(device_id):
             return False
-        width, height = self.get_effective_screen_size(device_id)
-        for _ in range(4):
-            self.swipe(
-                device_id,
-                width // 2,
-                int(height * 0.20),
-                width // 2,
-                int(height * 0.88),
-                duration=350,
-            )
-            time.sleep(0.7)
-            self.lock_portrait(device_id, retries=3)
-            if not self.is_facebook_in_foreground(device_id):
-                return False
-        return self.is_facebook_home(device_id)
+        if self.is_facebook_home(device_id):
+            return True
+        return self.ensure_facebook_home(device_id)
 
     def is_facebook_target_page_open(
         self, device_id, target_phrase, exact_page_name=None
@@ -1395,8 +1688,11 @@ class ADBController:
                     for node in root.iter()
                 )
             )
+            # Header Page có thể bị rút gọn khác nhau giữa các phiên bản
+            # Facebook. Tên đầy đủ dùng để ưu tiên lúc chọn kết quả; khi xác
+            # minh chỉ bắt buộc cụm target do người dùng cấu hình.
             target_tokens = self._normalize_facebook_text(
-                exact_page_name or target_phrase
+                target_phrase
             ).split()
             has_target = all(token in all_text.split() for token in target_tokens)
             profile_markers = (
@@ -1564,11 +1860,45 @@ class ADBController:
                 status_callback=status_callback,
                 is_cancelled=is_cancelled,
             )
-            if not self.find_and_click_facebook_page(
-                device_id,
-                target_phrase,
-                exact_page_name=exact_page_name,
-            ):
+            update_status(
+                "[Facebook B3] Đưa kết quả về đầu và ưu tiên tab Trang..."
+            )
+            if not self.prepare_facebook_target_results(device_id):
+                raise RuntimeError(
+                    "Facebook rời foreground khi chuẩn bị kết quả Page target"
+                )
+            page_clicked = False
+            for target_attempt in range(2):
+                if self.find_and_click_facebook_page(
+                    device_id,
+                    target_phrase,
+                    exact_page_name=exact_page_name,
+                ):
+                    page_clicked = True
+                    break
+                if target_attempt == 0:
+                    check_cancelled()
+                    update_status(
+                        "[Facebook B3] Chưa thấy Page ở lượt đầu • "
+                        "tải lại kết quả và thử thêm một lần..."
+                    )
+                    ensure_facebook_action_context("Facebook B3 retry")
+                    if self.find_and_click_facebook_search(device_id):
+                        self.replace_facebook_search_text(
+                            device_id, target_phrase
+                        )
+                        self.submit_facebook_search(device_id)
+                    self.facebook_loading_delay(
+                        device_id,
+                        "target_results",
+                        status_callback=status_callback,
+                        is_cancelled=is_cancelled,
+                    )
+                    if not self.prepare_facebook_target_results(device_id):
+                        raise RuntimeError(
+                            "Facebook rời foreground khi tải lại Page target"
+                        )
+            if not page_clicked:
                 raise RuntimeError(
                     f"Không tìm thấy Page Facebook chứa đủ cụm '{target_phrase}'"
                 )
@@ -1578,11 +1908,24 @@ class ADBController:
                 status_callback=status_callback,
                 is_cancelled=is_cancelled,
             )
-            if not self.is_facebook_target_page_open(
-                device_id,
-                target_phrase,
-                exact_page_name=exact_page_name,
-            ):
+            target_verified = False
+            for verify_attempt in range(3):
+                if self.is_facebook_target_page_open(
+                    device_id,
+                    target_phrase,
+                    exact_page_name=exact_page_name,
+                ):
+                    target_verified = True
+                    break
+                if verify_attempt < 2:
+                    check_cancelled()
+                    update_status(
+                        "[Facebook B3] Page đang mở nhưng header chưa tải đủ • "
+                        f"xác minh lại ({verify_attempt + 2}/3)..."
+                    )
+                    time.sleep(1.5)
+                    self.lock_portrait(device_id, retries=3)
+            if not target_verified:
                 raise RuntimeError(
                     f"Đã bấm kết quả nhưng chưa vào đúng Page '{target_phrase}'"
                 )
@@ -3743,9 +4086,15 @@ class ADBController:
         expected = self._normalize_tiktok_text(keyword)
         query_matches = False
         marker_hits = set()
+        result_content_seen = False
         result_markers = {
             "top", "người dùng", "users", "people", "video", "videos",
             "ảnh", "photos", "cửa hàng", "shop", "shops",
+        }
+        parent_map = {
+            child: parent
+            for parent in root.iter()
+            for child in parent
         }
         for elem in root.iter():
             class_name = elem.get("class", "").casefold()
@@ -3766,9 +4115,30 @@ class ADBController:
                 if text == marker:
                     marker_hits.add(marker)
 
-        return query_matches and len(marker_hits) >= 2
+            if (
+                text
+                and text != expected
+                and text not in result_markers
+                and "edittext" not in class_name
+                and len(text) >= 3
+            ):
+                bounds_node = elem
+                match = None
+                while bounds_node is not None and match is None:
+                    match = re.match(
+                        r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                        bounds_node.get("bounds", ""),
+                    )
+                    bounds_node = parent_map.get(bounds_node)
+                if match and int(match.group(2)) >= 180:
+                    result_content_seen = True
 
-    def wait_for_tiktok_search_results(self, device_id, keyword, checks=4):
+        return query_matches and (
+            len(marker_hits) >= 2
+            or (len(marker_hits) >= 1 and result_content_seen)
+        )
+
+    def wait_for_tiktok_search_results(self, device_id, keyword, checks=8):
         """Chờ UI kết quả đúng từ khóa; không coi keyevent thành công là đủ."""
         for attempt in range(max(1, checks)):
             if self.is_tiktok_search_results_for(device_id, keyword):
@@ -4158,11 +4528,11 @@ class ADBController:
             update_status("[TikTok B1] Mở ứng dụng TikTok...")
             self.launch_tiktok(device_id)
             check_cancelled()
-            if not self.ensure_tiktok_foreground_ready(
+            if not self.ensure_tiktok_feed_motion(
                 device_id, status_callback=status_callback
             ):
                 raise RuntimeError(
-                    "Không mở được TikTok; đã dừng để tránh thao tác trên ứng dụng khác"
+                    "TikTok B1 không thể swipe Home sau khi Back/mở lại"
                 )
 
             step1_total = random.randint(
@@ -4190,16 +4560,13 @@ class ADBController:
                     check_cancelled()
                 step1_elapsed += dwell
                 if step1_elapsed < step1_total:
-                    if not self.ensure_tiktok_foreground_ready(
-                        device_id, status_callback=status_callback
+                    if not self.ensure_tiktok_feed_motion(
+                        device_id,
+                        status_callback=status_callback,
+                        home_ready=True,
                     ):
                         raise RuntimeError(
-                            "TikTok B1 không thể phục hồi foreground; đã dừng trước khi swipe"
-                        )
-                    if not self.advance_tiktok_feed(device_id):
-                        update_status(
-                            "[TikTok B1] Bài ảnh chưa đổi sau 3 lần vuốt • "
-                            "tiếp tục thử ở lượt kế tiếp..."
+                            "TikTok B1 không thể phục hồi Feed bằng Back/mở lại"
                         )
                     step1_video += 1
 
@@ -4234,9 +4601,40 @@ class ADBController:
                 )
             time.sleep(3.5)
             check_cancelled()
-            if not self.wait_for_tiktok_search_results(device_id, seed_kw):
+            seed_results_ready = self.wait_for_tiktok_search_results(
+                device_id, seed_kw
+            )
+            if not seed_results_ready:
+                update_status(
+                    "[TikTok B2] Kết quả tải chậm • nhập lại từ khóa mồi "
+                    "và thử thêm một lần..."
+                )
+                if not self.ensure_tiktok_foreground_ready(
+                    device_id, status_callback=status_callback
+                ):
+                    raise RuntimeError(
+                        "TikTok B2 mất foreground khi retry kết quả"
+                    )
+                if not self.find_and_click_tiktok_search(device_id):
+                    raise RuntimeError(
+                        "TikTok B2 không mở lại được ô tìm kiếm khi retry"
+                    )
+                if not self.replace_tiktok_search_text(device_id, seed_kw):
+                    raise RuntimeError(
+                        "TikTok B2 không nhập lại đúng từ khóa mồi khi retry"
+                    )
+                if not self.submit_tiktok_search(device_id):
+                    raise RuntimeError(
+                        "TikTok B2 không gửi lại được tìm kiếm từ khóa mồi"
+                    )
+                time.sleep(3.5)
+                check_cancelled()
+                seed_results_ready = self.wait_for_tiktok_search_results(
+                    device_id, seed_kw
+                )
+            if not seed_results_ready:
                 raise RuntimeError(
-                    "TikTok B2 chưa hiển thị đúng kết quả từ khóa mồi"
+                    "TikTok B2 chưa hiển thị đúng kết quả từ khóa mồi sau retry"
                 )
             seed_search_completed = True
 

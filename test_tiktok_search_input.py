@@ -144,6 +144,27 @@ class TikTokSearchInputTests(unittest.TestCase):
             )
         )
 
+    def test_seed_results_accept_compact_layout_with_one_tab_and_result_card(self):
+        compact_root = ET.fromstring(
+            '<hierarchy>'
+            '<node class="android.widget.EditText" text="nặn mụn" '
+            'resource-id="com.ss.android.ugc.trill:id/search_edit_text" />'
+            '<node text="Top" />'
+            '<node clickable="true" bounds="[20,260][1060,900]">'
+            '<node text="Cách chăm sóc da mụn hiệu quả" />'
+            '</node>'
+            '</hierarchy>'
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: compact_root
+        )
+
+        self.assertTrue(
+            self.controller.is_tiktok_search_results_for(
+                "device-compact", "nặn mụn"
+            )
+        )
+
     def test_tiktok_keyword_is_never_sent_while_facebook_is_foreground(self):
         self.controller.is_tiktok_in_foreground = lambda _device_id: False
         broadcasts = []
@@ -242,18 +263,16 @@ class TikTokSearchInputTests(unittest.TestCase):
         self, _sleep, _randint
     ):
         self.controller.launch_tiktok = lambda _device_id: None
-        foreground = iter([True, False])
-        self.controller.is_tiktok_in_foreground = (
-            lambda _device_id: next(foreground)
+        self.controller.ensure_tiktok_foreground_ready = (
+            lambda *_args, **_kwargs: False
         )
-        self.controller.ensure_tiktok_home_feed = lambda *_args, **_kwargs: True
         self.controller.lock_portrait = lambda *_args, **_kwargs: True
         advances = []
         self.controller.advance_tiktok_feed = (
             lambda device_id: advances.append(device_id) or True
         )
 
-        with self.assertRaisesRegex(RuntimeError, "TikTok.*foreground"):
+        with self.assertRaisesRegex(RuntimeError, "TikTok.*phục hồi"):
             self.controller.warmup_tiktok_before_facebook("device-1")
 
         self.assertEqual([], advances)
@@ -276,6 +295,96 @@ class TikTokSearchInputTests(unittest.TestCase):
 
         self.assertTrue(self.controller.advance_tiktok_feed("device-1"))
         self.assertEqual([(540, 1536, 540, 384, 450)], swipes)
+
+    def test_feed_motion_swipes_immediately_after_home_is_ready(self):
+        events = []
+        self.controller.ensure_tiktok_foreground_ready = (
+            lambda *_args, **_kwargs: events.append("ready") or True
+        )
+        self.controller.advance_tiktok_feed = (
+            lambda _device_id: events.append("swipe") or True
+        )
+        self.controller.keyevent = (
+            lambda *_args: events.append("back")
+        )
+        self.controller.launch_tiktok = (
+            lambda _device_id: events.append("launch")
+        )
+
+        self.assertTrue(
+            self.controller.ensure_tiktok_feed_motion("device-s4")
+        )
+        self.assertEqual(["ready", "swipe"], events)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_stalled_tiktok_feed_backs_reopens_and_swipes_again(self, _sleep):
+        events = []
+        moves = iter([False, True])
+        self.controller.ensure_tiktok_foreground_ready = (
+            lambda *_args, **_kwargs: events.append("ready") or True
+        )
+        self.controller.advance_tiktok_feed = (
+            lambda _device_id:
+            events.append("swipe") or next(moves)
+        )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.keyevent = (
+            lambda _device_id, keycode:
+            events.append("back") if keycode == 4 else None
+        )
+        self.controller.launch_tiktok = (
+            lambda _device_id: events.append("launch")
+        )
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+
+        self.assertTrue(
+            self.controller.ensure_tiktok_feed_motion("device-s4")
+        )
+        self.assertEqual(
+            ["ready", "swipe", "back", "launch", "ready", "swipe"],
+            events,
+        )
+
+    @patch("builtins.print")
+    @patch("adb_controller.random.uniform", return_value=1.0)
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    def test_workflow_starts_feed_motion_before_first_dwell(
+        self, _randint, _uniform, _print
+    ):
+        events = []
+        self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = (
+            lambda *_args, **_kwargs: True
+        )
+        self.controller.launch_tiktok = (
+            lambda _device_id: events.append("launch")
+        )
+        self.controller.ensure_tiktok_feed_motion = (
+            lambda *_args, **_kwargs: events.append("motion") or True
+        )
+        self.controller.ensure_tiktok_foreground_ready = (
+            lambda *_args, **_kwargs: True
+        )
+        self.controller.find_and_click_tiktok_search = lambda _device_id: True
+        self.controller.replace_tiktok_search_text = lambda *_args: True
+        self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = lambda *_args: True
+        self.controller.find_and_click_tiktok_channel = lambda *_args: True
+        self.controller.click_random_tiktok_profile_video = lambda *_args: True
+        self.controller.swipe = lambda *_args, **_kwargs: None
+
+        with patch(
+            "adb_controller.time.sleep",
+            side_effect=lambda _seconds: events.append("dwell"),
+        ):
+            success, message = self.controller.tiktok_automation_workflow(
+                "device-s4",
+                seed_keywords=["nặn mụn"],
+                target_channel="Kênh TikTok Mẫu",
+            )
+
+        self.assertTrue(success, message)
+        self.assertLess(events.index("motion"), events.index("dwell"))
 
     @patch("adb_controller.time.sleep", return_value=None)
     def test_home_recovery_never_backs_out_when_ui_dump_is_busy(self, _sleep):
@@ -561,20 +670,18 @@ class TikTokSearchInputTests(unittest.TestCase):
     @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MIN", 16)
     @patch("adb_controller.config.SOCIAL_CROSS_WARMUP_MAX", 16)
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
-    def test_cross_warmup_recovers_when_tiktok_feed_does_not_move(
+    def test_cross_warmup_starts_feed_motion_immediately(
         self, _randint
     ):
-        self.controller.launch_tiktok = lambda _device_id: None
+        events = []
+        self.controller.launch_tiktok = (
+            lambda _device_id: events.append("launch")
+        )
         self.controller.is_tiktok_in_foreground = lambda _device_id: True
         self.controller.lock_portrait = lambda _device_id, retries=2: True
-        recoveries = []
-        self.controller.ensure_tiktok_home_feed = (
-            lambda device_id, force_refresh=False:
-            recoveries.append((device_id, force_refresh)) or True
-        )
-        moves = iter([False, True])
-        self.controller.advance_tiktok_feed = (
-            lambda _device_id: next(moves)
+        self.controller.ensure_tiktok_feed_motion = (
+            lambda _device_id, **_kwargs:
+            events.append("motion") or True
         )
 
         clock = [0.0]
@@ -590,10 +697,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             self.assertTrue(
                 self.controller.warmup_tiktok_before_facebook("device-1")
             )
-        self.assertEqual(
-            [("device-1", False), ("device-1", True)],
-            recoveries,
-        )
+        self.assertEqual(["launch", "motion"], events[:2])
 
     def test_home_feed_accepts_tiktok_duplicate_text_and_description(self):
         root = ET.fromstring(
@@ -779,8 +883,46 @@ class TikTokSearchInputTests(unittest.TestCase):
         )
 
         self.assertFalse(success)
-        self.assertEqual(["từ khóa mồi"], entered)
+        self.assertEqual(["từ khóa mồi", "từ khóa mồi"], entered)
         self.assertIn("đúng kết quả", message)
+
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("builtins.print")
+    def test_workflow_retries_seed_search_once_when_results_are_delayed(
+        self, _print, _sleep, _randint
+    ):
+        entered = []
+        checks = iter([False, True])
+        self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
+        self.controller.wait_for_tiktok_foreground = lambda _device_id: True
+        self.controller.advance_tiktok_feed = lambda _device_id: True
+        self.controller.find_and_click_tiktok_search = lambda _device_id: True
+        self.controller.replace_tiktok_search_text = (
+            lambda _device_id, text: entered.append(text) or True
+        )
+        self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.wait_for_tiktok_search_results = (
+            lambda *_args: next(checks)
+        )
+        self.controller.find_and_click_tiktok_channel = lambda *_args: True
+        self.controller.click_random_tiktok_profile_video = lambda *_args: True
+        self.controller.swipe = lambda *_args, **_kwargs: None
+
+        success, message = self.controller.tiktok_automation_workflow(
+            "device-delayed-results",
+            seed_keywords=["từ khóa mồi"],
+            target_channel="Kênh mục tiêu",
+        )
+
+        self.assertTrue(success, message)
+        self.assertEqual(
+            ["từ khóa mồi", "từ khóa mồi", "Kênh mục tiêu"],
+            entered,
+        )
 
     @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
     @patch("adb_controller.random.uniform", return_value=1.0)

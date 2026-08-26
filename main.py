@@ -55,6 +55,29 @@ def configure_telegram_bot_token(token):
 bot = create_telegram_bot(config.TELEGRAM_BOT_TOKEN)
 adb = ADBController()
 
+
+def clear_device_recents_after_success(device_id, status_callback=None):
+    """Dọn đa nhiệm sau phiên thành công, không đổi kết quả nghiệp vụ."""
+    def notify(message):
+        print(f"[Device {device_id[:6]}] {message}")
+        if status_callback:
+            try:
+                status_callback(device_id, message)
+            except Exception:
+                pass
+
+    notify("[Hoàn tất] Đang xóa toàn bộ ứng dụng trong đa nhiệm...")
+    try:
+        cleared = bool(adb.clear_recent_apps(device_id))
+    except Exception as exc:
+        notify(f"[Cảnh báo] Chưa xóa được đa nhiệm: {exc}")
+        return False
+    if cleared:
+        notify("[Hoàn tất] Đã xóa toàn bộ đa nhiệm và trở về màn hình chính.")
+    else:
+        notify("[Cảnh báo] Launcher không hiển thị nút Xóa tất cả đa nhiệm.")
+    return cleared
+
 # Các biến toàn cục điều khiển chạy tuần tự và hủy bỏ tác vụ
 cancel_sequential = False
 cancel_flag = False
@@ -100,6 +123,9 @@ def is_cancelled():
 
 # Caching mapping thiết bị toàn cục để tra cứu nhanh
 cached_mapping = {}
+_device_mapping_cache_key = None
+_ordered_devices_cache = []
+_device_mapping_cache_lock = threading.Lock()
 
 
 class _TelegramNotificationsDisabled:
@@ -326,9 +352,10 @@ def get_xiaowei_leveldb_dirs():
     ]
 
 
-def get_ordered_devices():
+def _scan_ordered_devices(raw_devices=None):
     global cached_mapping
-    raw_devices = adb.get_devices()
+    if raw_devices is None:
+        raw_devices = adb.get_devices()
     search_dirs = get_xiaowei_leveldb_dirs()
     
     # 1. Thu thập tất cả file leveldb cùng mtime của chúng
@@ -412,11 +439,42 @@ def get_ordered_devices():
     
     return filtered_devices
 
+
+def get_ordered_devices():
+    """Trả danh sách theo thứ tự Xiaowei và tái dùng mapping khi chưa đổi."""
+    global _device_mapping_cache_key, _ordered_devices_cache
+    raw_devices = adb.get_devices()
+    db_fingerprint = []
+    for search_dir in get_xiaowei_leveldb_dirs():
+        if not os.path.exists(search_dir):
+            continue
+        for root, _, files in os.walk(search_dir):
+            for filename in files:
+                filepath = os.path.join(root, filename)
+                if not os.path.isfile(filepath):
+                    continue
+                try:
+                    db_fingerprint.append(
+                        (filepath, os.path.getmtime(filepath))
+                    )
+                except OSError:
+                    continue
+    db_fingerprint.sort(key=lambda item: item[1])
+    cache_key = (tuple(raw_devices), tuple(db_fingerprint))
+
+    with _device_mapping_cache_lock:
+        if cache_key == _device_mapping_cache_key:
+            return list(_ordered_devices_cache)
+        ordered_devices = _scan_ordered_devices(raw_devices)
+        _device_mapping_cache_key = cache_key
+        _ordered_devices_cache = list(ordered_devices)
+        return list(ordered_devices)
+
 def get_device_name(serial):
     """Lấy tên map thực tế của thiết bị (ví dụ: S1, S10) hoặc rút gọn serial nếu không có"""
     global cached_mapping
     # Nếu chưa có cache, chạy quét nhanh dựng mapping
-    if not cached_mapping:
+    if _device_mapping_cache_key is None:
         raw_devices = adb.get_devices()
         db_files = []
         search_dirs = get_xiaowei_leveldb_dirs()
@@ -749,6 +807,10 @@ def handle_all_messages(message):
                         is_cancelled=session_is_cancelled
                     )
                     dev_dur = time.time() - dev_start
+                    if success:
+                        clear_device_recents_after_success(
+                            dev, status_callback=tracker.status_callback
+                        )
                     send_device_finished_card(message.chat.id, dev_name, dev, f"TikTok: {target_ch}", success, err, dev_dur)
                     if success:
                         success_count += 1
@@ -789,6 +851,9 @@ def handle_all_messages(message):
                 )
                 dev_dur = time.time() - dev_start
                 if success:
+                    clear_device_recents_after_success(
+                        device_id, status_callback=tracker.status_callback
+                    )
                     tracker.finish_dashboard(
                         f"✅ **MÁY {dev_name} HOÀN THÀNH TIKTOK**\n"
                         f"Kênh: `{target_ch}`"

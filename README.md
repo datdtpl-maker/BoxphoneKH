@@ -10,7 +10,7 @@
 - Khóa màn hình dọc và tắt âm lượng toàn bộ thiết bị.
 - Nhận lịch từ khóa TikTok/Facebook từ Notion.
 - Báo cáo tiến trình qua Telegram và cho phép tắt thông báo.
-- Lưu cấu hình cục bộ trong `.env` cạnh ứng dụng.
+- Lưu cấu hình cục bộ trong `%LOCALAPPDATA%\BoxPhoneControl\.env` ở bản cài Windows.
 
 ## Chạy từ mã nguồn
 
@@ -26,11 +26,18 @@ python -m unittest discover -p "test_*.py"
 
 ## Đóng gói
 
+Yêu cầu máy build có PyInstaller và Inno Setup 6.
+
 ```powershell
 python build_exe.py
 ```
 
-File đầu ra: `BoxPhoneControl.exe`.
+File cài đặt đầu ra: `release\BoxPhoneControl-Setup.exe`.
+
+Bộ cài đưa ứng dụng vào `C:\Program Files\BoxPhoneControl`, tạo lối tắt
+Start Menu/Desktop và đăng ký trình gỡ cài đặt trong Windows. Bản đóng gói
+`onedir` giúp mở nhanh hơn bản portable `onefile` do không phải tự giải nén
+mỗi lần khởi động.
 
 ## Bảo mật
 

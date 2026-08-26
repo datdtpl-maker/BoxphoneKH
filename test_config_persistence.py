@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -64,17 +65,18 @@ class ConfigPersistenceTests(unittest.TestCase):
             self.assertEqual("Target Facebook", app.ent_fb_target.value)
             self.assertEqual("D:/tools/adb.exe", adb.adb_path)
 
-    def test_frozen_app_stores_env_beside_executable_not_meipass(self):
+    def test_frozen_app_stores_env_in_local_app_data(self):
         with tempfile.TemporaryDirectory() as folder:
             executable = Path(folder) / "BoxPhoneControl.exe"
             bundled_module = Path(folder) / "_MEI12345" / "config.py"
             with (
                 patch.object(sys, "frozen", True, create=True),
                 patch.object(sys, "executable", str(executable)),
+                patch.dict(os.environ, {"LOCALAPPDATA": folder}),
             ):
                 base_dir = config.resolve_runtime_base_dir(bundled_module)
 
-            self.assertEqual(executable.parent, base_dir)
+            self.assertEqual(Path(folder) / "BoxPhoneControl", base_dir)
 
     def test_source_app_stores_env_beside_config_module(self):
         module_file = Path("C:/project/phone_telegram_bot/config.py")

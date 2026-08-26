@@ -6,6 +6,7 @@ import random
 import shutil
 import threading
 import tkinter as tk
+from collections import deque
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
@@ -34,8 +35,14 @@ class GUIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("BoxPhoneControl")
-        self.geometry("1760x980")
-        self.minsize(1360, 800)
+        # Mở vừa vùng làm việc thực tế thay vì dùng kích thước cố định lớn hơn
+        # màn hình, tránh cắt huy hiệu và nút thao tác ngoài cùng bên phải.
+        available_width = max(960, self.winfo_screenwidth() - 64)
+        available_height = max(700, self.winfo_screenheight() - 96)
+        window_width = min(1660, available_width)
+        window_height = min(940, available_height)
+        self.geometry(f"{window_width}x{window_height}")
+        self.minsize(min(1280, window_width), min(720, window_height))
         self.configure(fg_color="#eef3f9")
 
         # Design tokens: light "liquid glass" surfaces rendered with native
@@ -133,7 +140,7 @@ class GUIApp(ctk.CTk):
         
         self.lbl_sub_brand = ctk.CTkLabel(
             self.brand_copy,
-            text="Trung tâm điều hành  •  Tự động hóa đa thiết bị",
+            text="Điều hành Facebook + TikTok  •  Theo dõi đa thiết bị",
             font=body_font,
             text_color="#94a3b8",
         )
@@ -141,7 +148,7 @@ class GUIApp(ctk.CTk):
 
         self.platform_badge = ctk.CTkLabel(
             self.brand_badge,
-            text="3 QUY TRÌNH",
+            text="2 QUY TRÌNH",
             height=34,
             corner_radius=17,
             fg_color="#1e293b",
@@ -334,19 +341,19 @@ class GUIApp(ctk.CTk):
         )
         ctk.CTkLabel(
             self.workspace_header,
-            text="QUY TRÌNH TỰ ĐỘNG",
+            text="VẬN HÀNH FACEBOOK + TIKTOK",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color="#475569",
         ).pack(side="left")
         ctk.CTkLabel(
             self.workspace_header,
-            text="Chọn nền tảng, cấu hình dữ liệu và khởi chạy theo từng nhóm thiết bị",
+            text="Chọn máy  →  chọn chế độ chạy  →  theo dõi nhật ký trực tiếp",
             font=body_font,
             text_color=muted,
         ).pack(side="left", padx=12)
         ctk.CTkLabel(
             self.workspace_header,
-            text="SẴN SÀNG  •  3 MÔ-ĐUN",
+            text="SẴN SÀNG  •  2 MÔ-ĐUN",
             height=28,
             corner_radius=9,
             fg_color="#ecfdf5",
@@ -429,20 +436,20 @@ class GUIApp(ctk.CTk):
         )
         ctk.CTkLabel(
             self.social_combined_copy,
-            text="CHẠY TỔNG FACEBOOK + TIKTOK",
+            text="CHẠY TRỌN BỘ FACEBOOK + TIKTOK",
             font=label_font,
             text_color=text,
         ).pack(anchor="w")
         ctk.CTkLabel(
             self.social_combined_copy,
-            text="Mỗi máy chạy đủ hai quy trình • Thứ tự luân phiên ngẫu nhiên",
+            text="Mỗi máy hoàn tất đủ 2 quy trình • Trạng thái cập nhật trong nhật ký",
             font=body_font,
             text_color=muted,
         ).pack(anchor="w")
 
         self.ent_social_selection = ctk.CTkEntry(
             self.social_combined_panel,
-            placeholder_text="Chọn máy (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+            placeholder_text="Máy cần chạy: 1-5,10 • Bỏ trống = tất cả",
             width=290,
             height=40,
             **field_style,
@@ -459,9 +466,9 @@ class GUIApp(ctk.CTk):
         )
         self.btn_social_combined_seq = ctk.CTkButton(
             self.social_combined_actions,
-            text="Chạy tổng tuần tự",
-            width=138,
-            height=40,
+            text="Tuần tự từng máy",
+            width=142,
+            height=44,
             font=button_font,
             fg_color=green,
             hover_color=green_hover,
@@ -473,9 +480,9 @@ class GUIApp(ctk.CTk):
         self.btn_social_combined_seq.pack(side="left", padx=(0, 6))
         self.btn_social_combined_par = ctk.CTkButton(
             self.social_combined_actions,
-            text="Song song",
-            width=108,
-            height=40,
+            text="Song song nhiều máy",
+            width=156,
+            height=44,
             font=button_font,
             fg_color=blue,
             hover_color=blue_hover,
@@ -487,9 +494,9 @@ class GUIApp(ctk.CTk):
         self.btn_social_combined_par.pack(side="left", padx=6)
         self.btn_social_combined_adaptive = ctk.CTkButton(
             self.social_combined_actions,
-            text="Thích ứng",
-            width=108,
-            height=40,
+            text="Tự điều phối",
+            width=128,
+            height=44,
             font=button_font,
             fg_color=violet,
             hover_color="#5b21b6",
@@ -588,7 +595,7 @@ class GUIApp(ctk.CTk):
 
         self.lbl_tt_seed = ctk.CTkLabel(
             self.tiktok_scroll,
-            text="Từ khóa nhiệm vụ • Phân cách bằng dấu phẩy",
+            text="1. Từ khóa nhiệm vụ • Phân cách bằng dấu phẩy",
             font=label_font,
             text_color=text,
         )
@@ -605,7 +612,7 @@ class GUIApp(ctk.CTk):
 
         self.lbl_tt_channel = ctk.CTkLabel(
             self.tiktok_scroll,
-            text="Kênh TikTok mục tiêu • Phân cách bằng dấu phẩy • Random 1 kênh",
+            text="2. Kênh TikTok mục tiêu • Phân cách bằng dấu phẩy • Random 1 kênh",
             font=label_font,
             text_color=text,
         )
@@ -644,9 +651,15 @@ class GUIApp(ctk.CTk):
         )
         self.lbl_tt_timeline.pack(fill="x", padx=14, pady=12)
 
+        ctk.CTkLabel(
+            self.tiktok_scroll,
+            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả",
+            font=label_font,
+            text_color=text,
+        ).pack(padx=16, pady=(0, 3), anchor="w")
         self.ent_tt_selection = ctk.CTkEntry(
             self.tiktok_scroll,
-            placeholder_text="Chọn máy chạy TikTok (Ví dụ: 1-5,10 hoặc trống=Tất cả)",
+            placeholder_text="Ví dụ: 1-5,10",
             height=42,
             **field_style,
         )
@@ -662,7 +675,7 @@ class GUIApp(ctk.CTk):
         self.tt_combined_card.pack(fill="x", padx=16, pady=(1, 9))
         self.switch_tt_combined = ctk.CTkSwitch(
             self.tt_combined_card,
-            text="Kết hợp ngẫu nhiên TikTok + Facebook",
+            text="Chạy đủ TikTok + Facebook (thứ tự ngẫu nhiên)",
             variable=self.tiktok_combined_var,
             onvalue=True,
             offvalue=False,
@@ -676,7 +689,7 @@ class GUIApp(ctk.CTk):
         self.switch_tt_combined.pack(fill="x", padx=12, pady=(10, 2))
         ctk.CTkLabel(
             self.tt_combined_card,
-            text="Chỉ áp dụng khi bấm nút chạy trong module TikTok",
+            text="Bật để lệnh chạy này thực hiện đủ cả hai mô-đun",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=muted,
             anchor="w",
@@ -690,7 +703,7 @@ class GUIApp(ctk.CTk):
 
         self.btn_tt_seq = ctk.CTkButton(
             self.tt_btn_grid,
-            text="Chạy tuần tự",
+            text="Tuần tự từng máy",
             font=button_font,
             fg_color=green,
             hover_color=green_hover,
@@ -704,7 +717,7 @@ class GUIApp(ctk.CTk):
 
         self.btn_tt_par = ctk.CTkButton(
             self.tt_btn_grid,
-            text="Chạy song song",
+            text="Song song nhiều máy",
             font=button_font,
             fg_color=pink,
             hover_color="#9f1f5a",
@@ -718,7 +731,7 @@ class GUIApp(ctk.CTk):
 
         self.btn_tt_adaptive = ctk.CTkButton(
             self.tt_btn_grid,
-            text="Chạy thích ứng",
+            text="Tự điều phối",
             font=button_font,
             fg_color=violet,
             hover_color="#5b21b6",
@@ -734,7 +747,7 @@ class GUIApp(ctk.CTk):
 
         self.btn_tt_stop = ctk.CTkButton(
             self.tiktok_scroll,
-            text="Dừng TikTok khẩn cấp",
+            text="Dừng toàn bộ tác vụ đang chạy",
             font=button_font,
             fg_color=red_soft,
             hover_color="#ffe1e4",
@@ -794,14 +807,14 @@ class GUIApp(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             self.facebook_heading_copy,
-            text="Nuôi Feed và tìm đúng Page mục tiêu",
+            text="Nuôi Feed, làm mới Home an toàn và tìm đúng Page mục tiêu",
             font=body_font,
             text_color=muted,
         ).pack(anchor="w")
 
         ctk.CTkLabel(
             self.facebook_scroll,
-            text="Tầng 1 • Từ khóa mồi • Phân cách bằng dấu phẩy",
+            text="1. Từ khóa mồi • Phân cách bằng dấu phẩy",
             font=label_font,
             text_color=text,
         ).pack(padx=16, pady=(0, 3), anchor="w")
@@ -815,7 +828,7 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.facebook_scroll,
-            text="Tầng 2 • Page target • Mỗi cụm cách nhau dấu phẩy",
+            text="2. Page target • Mỗi cụm cách nhau dấu phẩy",
             font=label_font,
             text_color=text,
         ).pack(padx=16, pady=(0, 3), anchor="w")
@@ -843,7 +856,8 @@ class GUIApp(ctk.CTk):
             text=(
                 "LỘ TRÌNH TỰ ĐỘNG\n\n"
                 "00   Nuôi TikTok video  •  10–20 giây\n"
-                "01   Nuôi Feed  •  10–20 giây\n"
+                "01   Home Facebook  •  Nuôi Feed 10–20 giây\n"
+                "     Làm mới an toàn: Back → mở lại app (chỉ tại Home)\n"
                 "02   Từ khóa mồi  •  10–15 giây\n"
                 "03   Đúng Page target  •  3–5 phút"
             ),
@@ -853,11 +867,15 @@ class GUIApp(ctk.CTk):
             text_color=text,
         ).pack(fill="x", padx=14, pady=12)
 
+        ctk.CTkLabel(
+            self.facebook_scroll,
+            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả",
+            font=label_font,
+            text_color=text,
+        ).pack(padx=16, pady=(0, 3), anchor="w")
         self.ent_fb_selection = ctk.CTkEntry(
             self.facebook_scroll,
-            placeholder_text=(
-                "Chọn máy chạy Facebook (Ví dụ: 1-5,10 hoặc trống=Tất cả)"
-            ),
+            placeholder_text="Ví dụ: 1-5,10",
             height=42,
             **field_style,
         )
@@ -873,7 +891,7 @@ class GUIApp(ctk.CTk):
         self.fb_combined_card.pack(fill="x", padx=16, pady=(1, 9))
         self.switch_fb_combined = ctk.CTkSwitch(
             self.fb_combined_card,
-            text="Kết hợp ngẫu nhiên Facebook + TikTok",
+            text="Chạy đủ Facebook + TikTok (thứ tự ngẫu nhiên)",
             variable=self.facebook_combined_var,
             onvalue=True,
             offvalue=False,
@@ -887,7 +905,7 @@ class GUIApp(ctk.CTk):
         self.switch_fb_combined.pack(fill="x", padx=12, pady=(10, 2))
         ctk.CTkLabel(
             self.fb_combined_card,
-            text="Chỉ áp dụng khi bấm nút chạy trong module Facebook",
+            text="Bật để lệnh chạy này thực hiện đủ cả hai mô-đun",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=muted,
             anchor="w",
@@ -902,7 +920,7 @@ class GUIApp(ctk.CTk):
         self.fb_btn_grid.columnconfigure(2, weight=1)
         self.btn_fb_seq = ctk.CTkButton(
             self.fb_btn_grid,
-            text="Chạy tuần tự",
+            text="Tuần tự từng máy",
             font=button_font,
             fg_color=green,
             hover_color=green_hover,
@@ -915,7 +933,7 @@ class GUIApp(ctk.CTk):
         self.btn_fb_seq.grid(row=0, column=0, padx=(0, 4), sticky="ew")
         self.btn_fb_par = ctk.CTkButton(
             self.fb_btn_grid,
-            text="Chạy song song",
+            text="Song song nhiều máy",
             font=button_font,
             fg_color=blue,
             hover_color=blue_hover,
@@ -928,7 +946,7 @@ class GUIApp(ctk.CTk):
         self.btn_fb_par.grid(row=0, column=1, padx=4, sticky="ew")
         self.btn_fb_adaptive = ctk.CTkButton(
             self.fb_btn_grid,
-            text="Chạy thích ứng",
+            text="Tự điều phối",
             font=button_font,
             fg_color=violet,
             hover_color="#5b21b6",
@@ -943,7 +961,7 @@ class GUIApp(ctk.CTk):
         )
         self.btn_fb_stop = ctk.CTkButton(
             self.facebook_scroll,
-            text="Dừng Facebook khẩn cấp",
+            text="Dừng toàn bộ tác vụ đang chạy",
             font=button_font,
             fg_color=red_soft,
             hover_color="#ffe1e4",
@@ -1133,6 +1151,12 @@ class GUIApp(ctk.CTk):
         # footer but no longer consumes a large part of the operations canvas.
         self.settings_card.pack_forget()
 
+        # V2 commercial shell: rebuild the information architecture around a
+        # fixed command rail, focused workspace and persistent activity panel.
+        # Existing entries/buttons/callbacks stay intact; only their visual
+        # composition and presentation are changed.
+        self._apply_commercial_layout()
+
         # Subtle glass border response and a short window fade-in. These are
         # presentation-only effects and do not touch automation state.
         self._bind_glass_hover(self.top_header, "#1e293b", "#334155")
@@ -1160,6 +1184,394 @@ class GUIApp(ctk.CTk):
         self.after(15000, self._portrait_guard_tick)
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
+
+    def _apply_commercial_layout(self):
+        """Compose the commercial operations shell without touching workflows."""
+        navy = "#0B1220"
+        navy_2 = "#111C31"
+        canvas = "#F4F7FB"
+        card = "#FFFFFF"
+        border = "#DDE5EF"
+        text = "#0F172A"
+        muted = "#64748B"
+        blue = "#1667D9"
+        blue_hover = "#0F55BA"
+        soft_blue = "#EAF2FF"
+        green = "#087A55"
+        red = "#C62F3D"
+
+        self.configure(fg_color=canvas)
+        self.grid_columnconfigure(0, weight=0, minsize=258)
+        self.grid_columnconfigure(1, weight=3, minsize=620)
+        self.grid_columnconfigure(2, weight=1, minsize=330)
+        self.grid_rowconfigure(0, weight=0)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.grid_rowconfigure(3, weight=0)
+
+        for widget in (
+            self.top_header,
+            self.log_card,
+            self.ops_frame,
+            self.bottom_panel,
+        ):
+            widget.grid_forget()
+
+        # Fixed command rail.
+        self.top_header.configure(
+            fg_color=navy,
+            corner_radius=0,
+            border_width=0,
+            width=258,
+        )
+        self.top_header.grid(
+            row=0,
+            column=0,
+            rowspan=3,
+            sticky="nsew",
+        )
+        self.top_header.grid_propagate(False)
+        self.brand_badge.pack_forget()
+        self.brand_badge.configure(fg_color="transparent")
+        self.brand_badge.pack(fill="both", expand=True, padx=18, pady=20)
+
+        for child in self.brand_badge.winfo_children():
+            child.pack_forget()
+
+        self.brand_icon.configure(
+            text="BP",
+            width=46,
+            height=46,
+            corner_radius=13,
+            fg_color=blue,
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+        )
+        self.brand_icon.pack(anchor="w", pady=(0, 10))
+        self.brand_copy.pack(fill="x", pady=(0, 8))
+        self.lbl_brand.configure(
+            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            text_color="#FFFFFF",
+        )
+        self.lbl_sub_brand.configure(
+            text="Social operations console\nĐiều hành đa thiết bị",
+            text_color="#91A4C2",
+            justify="left",
+        )
+
+        if "sidebar_rule_top" not in self.__dict__:
+            self.sidebar_rule_top = ctk.CTkFrame(
+                self.brand_badge, height=1, fg_color="#24324A"
+            )
+            self.sidebar_nav_label = ctk.CTkLabel(
+                self.brand_badge,
+                text="KHÔNG GIAN LÀM VIỆC",
+                anchor="w",
+                text_color="#7186A6",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            )
+            nav_style = {
+                "height": 42,
+                "corner_radius": 10,
+                "anchor": "w",
+                "font": ctk.CTkFont(
+                    family="Segoe UI", size=12, weight="bold"
+                ),
+                "text_color": "#C8D4E6",
+                "fg_color": "transparent",
+                "hover_color": "#1A2942",
+                "cursor": "hand2",
+            }
+            self.btn_nav_overview = ctk.CTkButton(
+                self.brand_badge,
+                text="Tổng quan vận hành",
+                command=self._show_operations_overview,
+                **nav_style,
+            )
+            self.btn_nav_tiktok = ctk.CTkButton(
+                self.brand_badge,
+                text="TikTok Automation",
+                command=lambda: self._navigate_module("TikTok"),
+                **nav_style,
+            )
+            self.btn_nav_facebook = ctk.CTkButton(
+                self.brand_badge,
+                text="Facebook Automation",
+                command=lambda: self._navigate_module("Facebook"),
+                **nav_style,
+            )
+            self.btn_nav_activity = ctk.CTkButton(
+                self.brand_badge,
+                text="Nhật ký hệ thống",
+                command=self._open_activity_workspace,
+                **nav_style,
+            )
+            self.sidebar_rule_middle = ctk.CTkFrame(
+                self.brand_badge, height=1, fg_color="#24324A"
+            )
+            self.sidebar_tools_label = ctk.CTkLabel(
+                self.brand_badge,
+                text="CÔNG CỤ NHANH",
+                anchor="w",
+                text_color="#7186A6",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            )
+            self.sidebar_footer = ctk.CTkLabel(
+                self.brand_badge,
+                text="BOXPHONE CONTROL  •  DESKTOP",
+                anchor="w",
+                text_color="#607392",
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            )
+
+        self.sidebar_rule_top.pack(fill="x", pady=(10, 14))
+        self.sidebar_nav_label.pack(fill="x", pady=(0, 7))
+        for nav_button in (
+            self.btn_nav_overview,
+            self.btn_nav_tiktok,
+            self.btn_nav_facebook,
+            self.btn_nav_activity,
+        ):
+            nav_button.pack(fill="x", pady=2)
+
+        self.sidebar_rule_middle.pack(fill="x", pady=(16, 14))
+        self.sidebar_tools_label.pack(fill="x", pady=(0, 8))
+        self.device_status_badge.configure(
+            height=34,
+            corner_radius=9,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.device_status_badge.pack(fill="x", pady=(0, 8))
+        self.platform_badge.configure(
+            text="2 MODULE SOCIAL",
+            height=30,
+            corner_radius=9,
+            fg_color=navy_2,
+            text_color="#9CB0CF",
+        )
+        self.platform_badge.pack(fill="x", pady=(0, 10))
+
+        sidebar_buttons = (
+            (self.btn_refresh, "Quét thiết bị", blue, blue_hover),
+            (self.btn_mute_all, "Tắt âm toàn bộ", "#6447C7", "#5136AD"),
+            (self.btn_scan_notion, "Đồng bộ từ Notion", "#0B7B72", "#08645E"),
+            (self.btn_complete_notion, "Hoàn thành lịch tuần", "#475569", "#334155"),
+        )
+        for button, label, color, hover in sidebar_buttons:
+            button.configure(
+                text=label,
+                width=0,
+                height=42,
+                corner_radius=10,
+                fg_color=color,
+                hover_color=hover,
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            )
+            button.pack(fill="x", pady=3)
+
+        self.btn_telegram_notifications.configure(
+            width=0,
+            height=40,
+            corner_radius=10,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+        )
+        self.btn_telegram_notifications.pack(fill="x", pady=(12, 4))
+        self.sidebar_footer.pack(side="bottom", fill="x", pady=(14, 0))
+
+        # New command header for the main work area.
+        self.main_header = ctk.CTkFrame(
+            self,
+            fg_color=card,
+            corner_radius=16,
+            border_width=1,
+            border_color=border,
+        )
+        self.main_header.grid(
+            row=0,
+            column=1,
+            columnspan=2,
+            sticky="ew",
+            padx=18,
+            pady=(16, 10),
+        )
+        self.main_header.columnconfigure(0, weight=1)
+        header_copy = ctk.CTkFrame(self.main_header, fg_color="transparent")
+        header_copy.grid(row=0, column=0, sticky="w", padx=18, pady=13)
+        ctk.CTkLabel(
+            header_copy,
+            text="Trung tâm vận hành",
+            anchor="w",
+            text_color=text,
+            font=ctk.CTkFont(family="Segoe UI", size=21, weight="bold"),
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            header_copy,
+            text="Thiết lập chiến dịch, điều phối thiết bị và theo dõi tiến trình tại một nơi",
+            anchor="w",
+            text_color=muted,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+        ).pack(anchor="w", pady=(2, 0))
+
+        header_meta = ctk.CTkFrame(self.main_header, fg_color="transparent")
+        header_meta.grid(row=0, column=1, sticky="e", padx=(8, 10), pady=10)
+        for label, fg, color in (
+            ("2 MODULE", soft_blue, blue),
+            ("ADB READY", "#ECFDF5", green),
+            ("LOCAL SECURE", "#F1F5F9", "#475569"),
+        ):
+            ctk.CTkLabel(
+                header_meta,
+                text=label,
+                height=30,
+                corner_radius=9,
+                fg_color=fg,
+                text_color=color,
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            ).pack(side="left", padx=3)
+        self.btn_header_stop = ctk.CTkButton(
+            header_meta,
+            text="Dừng khẩn cấp",
+            width=130,
+            height=38,
+            corner_radius=10,
+            fg_color="#FFF1F2",
+            hover_color="#FFE4E6",
+            text_color=red,
+            border_width=1,
+            border_color="#FECDD3",
+            cursor="hand2",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            command=self.stop_all,
+        )
+        self.btn_header_stop.pack(side="left", padx=(8, 0))
+
+        # Main workspace on the left, realtime operations stream on the right.
+        self.ops_frame.configure(fg_color="transparent")
+        self.ops_frame.grid(
+            row=1,
+            column=1,
+            sticky="nsew",
+            padx=(18, 10),
+            pady=0,
+        )
+        self.log_card.configure(
+            fg_color=card,
+            corner_radius=16,
+            border_width=1,
+            border_color=border,
+        )
+        self.log_card.grid(
+            row=1,
+            column=2,
+            sticky="nsew",
+            padx=(0, 18),
+            pady=0,
+        )
+        self.log_box.configure(height=420, corner_radius=11)
+        self.log_box.pack_configure(fill="both", expand=True, padx=14, pady=(0, 14))
+        self.lbl_log.configure(text="Nhật ký trực tiếp")
+        self.lbl_log_hint.configure(
+            text="",
+            width=0,
+        )
+        self.live_badge.configure(text="LIVE")
+        self.btn_toggle_log.configure(text="Toàn màn hình")
+
+        self.workspace_header.configure(fg_color="transparent")
+        self.social_combined_panel.configure(
+            fg_color="#F4F0FF",
+            border_color="#DDD2FF",
+            corner_radius=15,
+        )
+        self.social_combined_mark.configure(
+            text="FT",
+            fg_color="#FFFFFF",
+            text_color="#6D42C7",
+        )
+        self.module_tabs.configure(
+            segmented_button_fg_color="#E9EEF5",
+            segmented_button_selected_color=blue,
+            segmented_button_selected_hover_color=blue_hover,
+            segmented_button_unselected_color="#E9EEF5",
+            segmented_button_unselected_hover_color="#DCE4EE",
+            text_color=text,
+        )
+        self.tiktok_scroll.configure(
+            fg_color=card,
+            border_color=border,
+            corner_radius=16,
+        )
+        self.facebook_scroll.configure(
+            fg_color=card,
+            border_color=border,
+            corner_radius=16,
+        )
+        # The commercial shell exposes one persistent emergency stop in the
+        # command header. Remove duplicate module-level stop buttons so every
+        # primary field and execution mode remains visible without scrolling.
+        self.btn_tt_stop.pack_forget()
+        self.btn_fb_stop.pack_forget()
+
+        self.bottom_panel.configure(
+            fg_color=card,
+            corner_radius=16,
+            border_width=1,
+            border_color=border,
+        )
+        self.bottom_panel.grid(
+            row=2,
+            column=1,
+            columnspan=2,
+            sticky="ew",
+            padx=18,
+            pady=(10, 16),
+        )
+        self.lbl_settings.configure(text="Cấu hình hệ thống")
+        self.lbl_settings_hint.configure(
+            text="Thông tin kết nối được mã hóa khi hiển thị và lưu cục bộ"
+        )
+        self._sync_navigation_state("overview")
+
+    def _sync_navigation_state(self, active=None):
+        """Update sidebar selection without changing any automation state."""
+        if "btn_nav_overview" not in self.__dict__:
+            return
+        if active is None:
+            active = self.module_tabs.get().casefold()
+        mapping = {
+            "overview": self.btn_nav_overview,
+            "tiktok": self.btn_nav_tiktok,
+            "facebook": self.btn_nav_facebook,
+            "activity": self.btn_nav_activity,
+        }
+        for key, button in mapping.items():
+            selected = key == active
+            button.configure(
+                fg_color="#1D4F91" if selected else "transparent",
+                text_color="#FFFFFF" if selected else "#C8D4E6",
+            )
+
+    def _navigate_module(self, module_name):
+        self.module_tabs.set(module_name)
+        self._sync_navigation_state(module_name.casefold())
+        scroll = {
+            "TikTok": self.tiktok_scroll,
+            "Facebook": self.facebook_scroll,
+        }.get(module_name)
+        if scroll is not None:
+            self.after_idle(lambda: scroll._parent_canvas.yview_moveto(0))
+
+    def _show_operations_overview(self):
+        if self.__dict__.get("_log_expanded", False):
+            self.toggle_system_log()
+        self._sync_navigation_state("overview")
+        self.after_idle(self._reset_operation_scrolls)
+
+    def _open_activity_workspace(self):
+        if not self.__dict__.get("_log_expanded", False):
+            self.toggle_system_log()
+        else:
+            self._sync_navigation_state("activity")
 
     def _bind_glass_hover(self, widget, base_border, hover_border):
         """Tạo phản hồi viền nhẹ cho card kính, không ảnh hưởng callback nghiệp vụ."""
@@ -1195,11 +1607,12 @@ class GUIApp(ctk.CTk):
     def _reset_operation_scrolls(self):
         """Luôn hiển thị tiêu đề hai card khi app vừa mở."""
         try:
+            # Move focus outside the scroll containers first. Some Tk builds
+            # auto-scroll a canvas to reveal the focused Entry after layout.
+            self.btn_refresh.focus_set()
+            self.update_idletasks()
             self.tiktok_scroll._parent_canvas.yview_moveto(0)
             self.facebook_scroll._parent_canvas.yview_moveto(0)
-            # Giữ focus khởi động ở nút header để Textbox không tự yêu cầu
-            # cuộn card module xuống khi cửa sổ được kích hoạt lại.
-            self.btn_refresh.focus_set()
         except Exception:
             pass
 
@@ -1223,37 +1636,18 @@ class GUIApp(ctk.CTk):
             self.after_idle(lambda widget=scroll: widget._parent_canvas.yview_moveto(0))
 
     def _set_module_focus(self, enabled):
+        # V2 keeps the activity stream and combined launcher visible while a
+        # module is selected. Focus is communicated through the sidebar and
+        # tab state instead of hiding surrounding context.
         self._module_focus_active = bool(enabled)
-        if enabled:
-            self.log_card.grid_remove()
-            self.social_combined_panel.grid_remove()
-            if self.__dict__.get("_settings_expanded", False):
-                self.settings_card.pack_forget()
-                self._settings_expanded = False
-                self.btn_toggle_settings.configure(
-                    text="Mở cấu hình",
-                    fg_color="#eff6ff",
-                    border_color="#bfdbfe",
-                )
-            if not self.btn_restore_overview.winfo_manager():
-                self.btn_restore_overview.pack(side="right", padx=(0, 10))
-        else:
-            self.log_card.grid(
-                row=1, column=0, sticky="ew", padx=18, pady=(0, 10)
-            )
-            self.social_combined_panel.grid(
-                row=1,
-                column=0,
-                columnspan=3,
-                sticky="ew",
-                pady=(0, 9),
-            )
-            self.btn_restore_overview.pack_forget()
+        active = self.module_tabs.get().casefold() if enabled else "overview"
+        self._sync_navigation_state(active)
+        self.btn_restore_overview.pack_forget()
         self.after_idle(self._reset_operation_scrolls)
 
     def restore_dashboard_overview(self):
-        """Hiện lại log và bảng chạy kết hợp sau khi xem module toàn màn hình."""
-        self._set_module_focus(False)
+        """Return the commercial shell to its full operational overview."""
+        self._show_operations_overview()
 
     def run_in_thread(self, func, *args):
         threading.Thread(target=func, args=args, daemon=True).start()
@@ -1673,7 +2067,7 @@ class GUIApp(ctk.CTk):
         )
         messagebox.showinfo(
             "Import .env thành công",
-            "Đã nạp cấu hình vào BoxPhoneControl và lưu cạnh ứng dụng.\n"
+            "Đã nạp cấu hình vào BoxPhoneControl và lưu trong hồ sơ Windows.\n"
             "Các giá trị nhạy cảm không được hiển thị trong log.\n\n"
             f"Vị trí lưu: {target}",
         )
@@ -1929,26 +2323,52 @@ class GUIApp(ctk.CTk):
         self.after(30000, self._portrait_guard_tick)
 
     def toggle_system_log(self):
-        """Mở rộng vùng log để xem chi tiết, bấm lại để trở về bố cục gọn."""
+        """Expand the activity panel across the workspace and restore it."""
         self._log_expanded = not self._log_expanded
         if self._log_expanded:
+            self.ops_frame.grid_remove()
+            self.log_card.grid(
+                row=1,
+                column=1,
+                columnspan=2,
+                sticky="nsew",
+                padx=18,
+                pady=0,
+            )
             expanded_height = max(
                 320,
-                min(520, int(self.winfo_height() * 0.48)),
+                min(680, int(self.winfo_height() * 0.66)),
             )
             self.log_box.configure(height=expanded_height)
             self.btn_toggle_log.configure(
-                text="Thu nhỏ",
+                text="Trở về workspace",
                 fg_color="#dbeafe",
                 border_color="#93c5fd",
             )
+            self._sync_navigation_state("activity")
         else:
-            self.log_box.configure(height=78)
+            self.ops_frame.grid(
+                row=1,
+                column=1,
+                sticky="nsew",
+                padx=(18, 10),
+                pady=0,
+            )
+            self.log_card.grid(
+                row=1,
+                column=2,
+                columnspan=1,
+                sticky="nsew",
+                padx=(0, 18),
+                pady=0,
+            )
+            self.log_box.configure(height=420)
             self.btn_toggle_log.configure(
-                text="Mở rộng",
+                text="Toàn màn hình",
                 fg_color="#eff6ff",
                 border_color="#bfdbfe",
             )
+            self._sync_navigation_state(self.module_tabs.get().casefold())
         self.after_idle(lambda: self.log_box.see("end"))
 
     def toggle_settings_panel(self):
@@ -2052,6 +2472,7 @@ class GUIApp(ctk.CTk):
         is_cancelled = main.make_session_cancel_checker(workflow_session)
 
         def run_device(device_id):
+            device_started_at = time.monotonic()
             device_name = main.get_device_name(device_id)
             order = self._random_social_order()
             order_text = " → ".join(
@@ -2168,11 +2589,38 @@ class GUIApp(ctk.CTk):
                 for platform, ok, detail in results
                 if not ok
             )
+            elapsed_seconds = max(0, time.monotonic() - device_started_at)
+            elapsed_minutes = int(elapsed_seconds // 60)
+            elapsed_remainder = int(elapsed_seconds % 60)
+            duration_text = (
+                f"{elapsed_minutes} phút {elapsed_remainder} giây"
+                if elapsed_minutes
+                else f"{elapsed_remainder} giây"
+            )
+            recents_cleared = False
+            if success:
+                def cleanup_status(dev, cleanup_message):
+                    self.log_message(
+                        f"[Máy {device_name}] {cleanup_message}"
+                    )
+                    if tracker:
+                        tracker.status_callback(dev, cleanup_message)
+
+                recents_cleared = main.clear_device_recents_after_success(
+                    device_id, status_callback=cleanup_status
+                )
             if tracker:
+                cleanup_text = (
+                    "\n🧹 Đa nhiệm: **Đã xóa**"
+                    if recents_cleared
+                    else "\n⚠️ Đa nhiệm: **Chưa xóa được**"
+                )
                 tracker.finish_dashboard(
                     f"{'✅' if success else '❌'} **MÁY {device_name} "
                     f"KẾT HỢP {'HOÀN THÀNH' if success else 'THẤT BẠI'}**\n"
                     f"Thứ tự: `{order_text}`\n`{message}`"
+                    f"\n⏱️ Thời gian hoàn thành: **{duration_text}**"
+                    f"{cleanup_text}"
                 )
             return device_name, success, message
 
@@ -2286,6 +2734,9 @@ class GUIApp(ctk.CTk):
                 )
                 dev_duration = time.time() - dev_start
                 if success:
+                    main.clear_device_recents_after_success(
+                        dev, status_callback=tt_status_cb
+                    )
                     success_count += 1
                 else:
                     print(f"[GUI] ❌ TikTok máy {dev_name} THẤT BẠI: {message}")
@@ -2376,6 +2827,10 @@ class GUIApp(ctk.CTk):
                 is_cancelled=session_is_cancelled
             )
             duration = time.time() - dev_start
+            if success:
+                main.clear_device_recents_after_success(
+                    device_id, status_callback=tt_status_cb
+                )
             if tracker:
                 tracker.finish_dashboard(
                     (
@@ -2533,6 +2988,9 @@ class GUIApp(ctk.CTk):
                 )
                 duration = time.time() - started_at
                 if success:
+                    main.clear_device_recents_after_success(
+                        device_id, status_callback=fb_status_callback
+                    )
                     success_count += 1
                 if tracker:
                     duration_text = (
@@ -2637,6 +3095,10 @@ class GUIApp(ctk.CTk):
                 status_callback=fb_status_callback,
                 is_cancelled=session_is_cancelled,
             )
+            if success:
+                main.clear_device_recents_after_success(
+                    device_id, status_callback=fb_status_callback
+                )
             if tracker:
                 tracker.finish_dashboard(
                     (
@@ -2743,39 +3205,63 @@ class GUIApp(ctk.CTk):
 
 
 class ConsoleRedirector:
-    def __init__(self, text_widget):
+    """Gom log nền thành từng lô để không làm nghẽn Tk event loop."""
+
+    def __init__(self, text_widget, flush_interval_ms=75, max_lines=6000):
         self.text_widget = text_widget
+        self.flush_interval_ms = max(20, int(flush_interval_ms))
+        self.max_lines = max(500, int(max_lines))
         self.buffer = ""
+        self._pending_lines = deque()
+        self._lock = threading.Lock()
+        self._rendered_lines = 0
+        self._schedule_drain()
 
     def write(self, string):
-        self.buffer += string
-        while "\n" in self.buffer:
-            line, self.buffer = self.buffer.split("\n", 1)
-            self._append_line(line)
+        if not string:
+            return 0
+        text = str(string)
+        with self._lock:
+            self.buffer += text
+            complete = self.buffer.split("\n")
+            self.buffer = complete.pop()
+            self._pending_lines.extend(line for line in complete if line)
+        return len(text)
 
-    def _append_line(self, line):
-        if not line:
-            return
-        def append():
+    def _schedule_drain(self):
+        try:
+            self.text_widget.after(self.flush_interval_ms, self._drain_pending)
+        except Exception:
+            pass
+
+    def _drain_pending(self):
+        with self._lock:
+            if self._pending_lines:
+                lines = list(self._pending_lines)
+                self._pending_lines.clear()
+            else:
+                lines = []
+
+        if lines:
             try:
                 self.text_widget.configure(state="normal")
-                self.text_widget.insert("end", line + "\n")
+                self.text_widget.insert("end", "\n".join(lines) + "\n")
+                self._rendered_lines += len(lines)
+                overflow = self._rendered_lines - self.max_lines
+                if overflow > 0:
+                    self.text_widget.delete("1.0", f"{overflow + 1}.0")
+                    self._rendered_lines -= overflow
                 self.text_widget.see("end")
                 self.text_widget.configure(state="disabled")
             except Exception:
                 pass
-        if threading.current_thread() is threading.main_thread():
-            append()
-        else:
-            try:
-                self.text_widget.after(0, append)
-            except Exception:
-                pass
+        self._schedule_drain()
 
     def flush(self):
-        if self.buffer:
-            self._append_line(self.buffer)
-            self.buffer = ""
+        with self._lock:
+            if self.buffer:
+                self._pending_lines.append(self.buffer)
+                self.buffer = ""
 
 if __name__ == "__main__":
     app = GUIApp()

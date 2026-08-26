@@ -1,19 +1,37 @@
 import os
+import shutil
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+APP_NAME = "BoxPhoneControl"
+
+
 def resolve_runtime_base_dir(module_file=None):
-    """Trả về thư mục cấu hình bền vững cho source và PyInstaller onefile."""
+    """Trả về thư mục cấu hình ghi được cho source và bản Windows đã cài."""
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / APP_NAME
+        return Path.home() / "AppData" / "Local" / APP_NAME
     return Path(module_file or __file__).resolve().parent
 
 
-# Trong bản onefile, __file__ nằm ở thư mục _MEI tạm và bị xóa khi đóng app.
-# Luôn đọc/ghi .env cạnh EXE để cấu hình được giữ lại giữa các lần mở.
+# Bản cài nằm trong Program Files (chỉ đọc), nên cấu hình người dùng phải nằm
+# trong LocalAppData. Source vẫn dùng .env tại thư mục dự án như trước.
 BASE_DIR = resolve_runtime_base_dir()
+BASE_DIR.mkdir(parents=True, exist_ok=True)
 ENV_PATH = BASE_DIR / ".env"
+
+# Tự động tiếp nhận cấu hình của bản portable cũ nếu nó nằm cạnh EXE.
+if getattr(sys, "frozen", False) and not ENV_PATH.exists():
+    legacy_env_path = Path(sys.executable).resolve().parent / ".env"
+    if legacy_env_path.is_file():
+        try:
+            shutil.copy2(legacy_env_path, ENV_PATH)
+        except OSError:
+            pass
+
 load_dotenv(dotenv_path=ENV_PATH)
 
 # Token Bot Telegram

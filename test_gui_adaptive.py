@@ -102,6 +102,118 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
 
         self.assertEqual(["facebook", "tiktok"], events)
 
+    def test_combined_social_final_report_includes_per_device_duration(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_tt_seed = _Entry("tt seed")
+        app.ent_tt_channel = _Entry("tt target")
+        app.ent_fb_seed = _Entry("fb seed")
+        app.ent_fb_target = _Entry("fb target")
+        app.parse_targets = lambda entry_widget=None: ["d1"]
+        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.run_in_thread = lambda action: action()
+        app.log_message = lambda _message: None
+        finished_reports = []
+
+        class FakeTracker:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def set_active_device(self, *_args, **_kwargs):
+                return None
+
+            def render_progress_text(self):
+                return "Social realtime"
+
+            def start_dashboard(self, _text):
+                return None
+
+            def status_callback(self, *_args, **_kwargs):
+                return None
+
+            def finish_dashboard(self, text):
+                finished_reports.append(text)
+
+        fake_adb = SimpleNamespace(
+            tiktok_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
+            facebook_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
+        )
+
+        with (
+            patch("gui_app.config.ALLOWED_USER_IDS", [123]),
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", return_value="S2"),
+            patch("gui_app.main.TelegramRealtimeTracker", FakeTracker),
+            patch.object(
+                GUIApp,
+                "_random_social_order",
+                return_value=["facebook", "tiktok"],
+            ),
+            patch("gui_app.time.monotonic", side_effect=[100.0, 225.0]),
+            patch("builtins.print"),
+        ):
+            app.run_combined_social(_Entry("1"))
+
+        self.assertEqual(1, len(finished_reports))
+        self.assertIn(
+            "Thời gian hoàn thành: **2 phút 5 giây**",
+            finished_reports[0],
+        )
+
+    def test_combined_social_clears_recents_before_success_report(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_tt_seed = _Entry("tt seed")
+        app.ent_tt_channel = _Entry("tt target")
+        app.ent_fb_seed = _Entry("fb seed")
+        app.ent_fb_target = _Entry("fb target")
+        app.parse_targets = lambda entry_widget=None: ["d1"]
+        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.run_in_thread = lambda action: action()
+        app.log_message = lambda _message: None
+        events = []
+
+        class FakeTracker:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def set_active_device(self, *_args, **_kwargs):
+                return None
+
+            def render_progress_text(self):
+                return "Social realtime"
+
+            def start_dashboard(self, _text):
+                return None
+
+            def status_callback(self, *_args, **_kwargs):
+                return None
+
+            def finish_dashboard(self, _text):
+                events.append("report")
+
+        fake_adb = SimpleNamespace(
+            tiktok_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
+            facebook_automation_workflow=lambda *_args, **_kwargs: (True, "ok"),
+            clear_recent_apps=lambda device_id: events.append(
+                ("clear", device_id)
+            ) or True,
+        )
+
+        with (
+            patch("gui_app.config.ALLOWED_USER_IDS", [123]),
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", return_value="S1"),
+            patch("gui_app.main.TelegramRealtimeTracker", FakeTracker),
+            patch.object(
+                GUIApp,
+                "_random_social_order",
+                return_value=["tiktok", "facebook"],
+            ),
+            patch("builtins.print"),
+        ):
+            app.run_combined_social(_Entry("1"))
+
+        self.assertEqual([("clear", "d1"), "report"], events)
+
     def test_combined_social_still_runs_second_platform_after_first_fails(self):
         app = GUIApp.__new__(GUIApp)
         app.ent_tt_seed = _Entry("tt seed")

@@ -24,6 +24,7 @@ class FacebookGuiStatusTests(unittest.TestCase):
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         calls = []
+        cleared = []
 
         def workflow(device_id, **kwargs):
             calls.append((device_id, kwargs))
@@ -32,7 +33,10 @@ class FacebookGuiStatusTests(unittest.TestCase):
             )
             return True, "Thành công"
 
-        fake_adb = SimpleNamespace(facebook_automation_workflow=workflow)
+        fake_adb = SimpleNamespace(
+            facebook_automation_workflow=workflow,
+            clear_recent_apps=lambda device_id: cleared.append(device_id) or True,
+        )
 
         with (
             patch("gui_app.config.ALLOWED_USER_IDS", []),
@@ -48,6 +52,7 @@ class FacebookGuiStatusTests(unittest.TestCase):
         self.assertEqual(
             "Thương Hiệu Mẫu", calls[0][1]["target_pages"]
         )
+        self.assertEqual(["device-1"], cleared)
 
     def test_parallel_facebook_has_one_realtime_tracker_per_device(self):
         app = GUIApp.__new__(GUIApp)
