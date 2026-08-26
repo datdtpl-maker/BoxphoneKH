@@ -9,7 +9,7 @@ from adb_controller import ADBController
 
 class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
-    def test_home_refresh_uses_back_and_reopen_without_any_swipe(self, _sleep):
+    def test_home_header_reveal_never_backs_out_of_ready_feed(self, _sleep):
         controller = ADBController(adb_path="adb")
         events = []
         home_states = iter([True, True])
@@ -20,14 +20,16 @@ class FacebookAutomationTests(unittest.TestCase):
             lambda _device_id, package: events.append(("launch", package))
         )
         controller.lock_portrait = lambda *_args, **_kwargs: True
-        controller.swipe = lambda *_args, **_kwargs: events.append(("swipe",))
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.swipe = lambda *_args, **_kwargs: (
+            events.append(("swipe", _args[2], _args[4])) or (0, "", "")
+        )
 
         self.assertTrue(controller.reveal_facebook_header("device-s5"))
 
-        self.assertEqual(
-            [("back", 4), ("launch", "com.facebook.katana")],
-            events,
-        )
+        self.assertEqual(1, len(events))
+        self.assertEqual("swipe", events[0][0])
+        self.assertLess(events[0][1], events[0][2])
 
     def test_home_refresh_is_ignored_outside_facebook_home(self):
         controller = ADBController(adb_path="adb")
@@ -79,7 +81,7 @@ class FacebookAutomationTests(unittest.TestCase):
         self.assertEqual(["swipe"], events)
 
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
-    def test_facebook_main_feed_reopens_and_swipes_again_when_stalled(
+    def test_facebook_main_feed_never_backs_when_adb_swipe_was_accepted(
         self, _randint
     ):
         controller = ADBController(adb_path="adb")
@@ -116,7 +118,28 @@ class FacebookAutomationTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(["swipe", "reopen", "swipe"], events)
+        self.assertEqual(["swipe"], events)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_ensure_home_retries_transient_unknown_without_back(self, _sleep):
+        controller = ADBController(adb_path="adb")
+        home_states = iter([None, True])
+        events = []
+        controller.is_facebook_home = lambda _device_id: next(home_states)
+        controller.keyevent = (
+            lambda _device_id, key: events.append(("back", key))
+        )
+        controller.execute_adb = (
+            lambda _device_id, args, timeout=15:
+            events.append(("adb", tuple(args))) or (0, "", "")
+        )
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+
+        self.assertTrue(controller.ensure_facebook_home("device-busy-dump"))
+        self.assertFalse(any(event[0] == "back" for event in events))
+        self.assertFalse(
+            any("fb://feed" in event[1] for event in events if event[0] == "adb")
+        )
 
     @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
     def test_cross_warmup_recovers_facebook_foreground_before_swipe(
@@ -397,7 +420,7 @@ class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
-    def test_search_never_taps_fallback_before_header_is_revealed(
+    def test_search_backs_once_when_header_reveal_has_no_search(
         self, _exists, _remove, _sleep
     ):
         root = ET.fromstring(
@@ -432,8 +455,8 @@ class FacebookAutomationTests(unittest.TestCase):
         controller.reveal_facebook_header = (
             lambda _device_id: events.append("reveal") or True
         )
-        controller.restart_facebook_home = (
-            lambda _device_id: events.append("restart") or True
+        controller.keyevent = (
+            lambda _device_id, key: events.append(("back", key))
         )
         controller.tap = (
             lambda _device_id, _x, _y: events.append("tap")
@@ -447,7 +470,85 @@ class FacebookAutomationTests(unittest.TestCase):
                 controller.find_and_click_facebook_search("device-story")
             )
 
-        self.assertEqual(["reveal", "restart", "tap"], events)
+        self.assertEqual(["reveal", ("back", 4), "tap"], events)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_search_waits_for_transient_foreground_then_backs_once(self, _sleep):
+        """Một nhịp dumpsys trống không được làm Facebook dừng trước khi Back."""
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        foreground = iter([False, True])
+        controller.is_facebook_in_foreground = (
+            lambda _device_id: next(foreground, True)
+        )
+        states = iter(
+            [
+                None,
+                None,
+                {"text": "", "focused": True, "coords": (430, 90)},
+            ]
+        )
+        controller._get_facebook_search_input_state = (
+            lambda _device_id: next(states, None)
+        )
+        header_coords = iter([None, (900, 100)])
+        controller._get_facebook_header_search_coords = (
+            lambda _device_id: next(header_coords, None)
+        )
+        controller.is_facebook_home = lambda _device_id: False
+        controller.get_effective_screen_size = (
+            lambda _device_id: (1080, 1920)
+        )
+        keys = []
+        taps = []
+        controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search("device-focus-gap")
+        )
+        self.assertEqual([4], keys)
+        self.assertEqual([(900, 100)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_search_recovery_stops_after_one_back_when_header_stays_hidden(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            '<hierarchy><node content-desc="Story card" '
+            'bounds="[670,70][1010,700]" /></hierarchy>'
+        )
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.is_facebook_home = lambda _device_id: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller.reveal_facebook_header = lambda _device_id: True
+        keys = []
+        taps = []
+        controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            self.assertFalse(
+                controller.find_and_click_facebook_search("device-hidden-header")
+            )
+
+        self.assertEqual([4], keys)
+        self.assertEqual([(896, 105)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
@@ -514,6 +615,18 @@ class FacebookAutomationTests(unittest.TestCase):
         ):
             self.assertTrue(controller.is_facebook_home("device-1"))
 
+    def test_home_detection_is_unknown_when_xml_pull_is_busy(self):
+        controller = ADBController(adb_path="adb")
+
+        def execute(_device_id, args, timeout=15):
+            if args and args[0] == "pull":
+                return -1, "", "ADB server busy"
+            return 0, "", ""
+
+        controller.execute_adb = execute
+
+        self.assertIsNone(controller.is_facebook_home("device-pull-busy"))
+
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
     def test_home_detection_accepts_english_facebook_header_controls(
@@ -579,7 +692,7 @@ class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
-    def test_search_recovers_to_home_when_first_tap_does_not_open_input(
+    def test_search_backs_once_when_first_tap_does_not_open_input(
         self, _exists, _remove, _sleep
     ):
         root = ET.fromstring(
@@ -593,21 +706,27 @@ class FacebookAutomationTests(unittest.TestCase):
         controller = ADBController(adb_path="adb")
         controller.lock_portrait = lambda _device_id, retries=2: True
         controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.is_facebook_home = lambda _device_id: True
         controller.get_screen_size = lambda _device_id: (1080, 1920)
         controller.execute_adb = (
             lambda _device_id, _args, timeout=15: (0, "", "")
         )
         states = iter(
-            [None, {"text": "", "focused": True, "coords": (430, 90)}]
+            [
+                None,
+                None,
+                None,
+                {"text": "", "focused": True, "coords": (430, 90)},
+            ]
         )
         controller._get_facebook_search_input_state = (
             lambda _device_id: next(states)
         )
-        recoveries = []
-        controller.ensure_facebook_home = (
-            lambda device_id: recoveries.append(device_id) or True
-        )
         controller.reveal_facebook_header = lambda _device_id: True
+        keys = []
+        controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
         taps = []
         controller.tap = lambda _device_id, x, y: taps.append((x, y))
 
@@ -619,8 +738,8 @@ class FacebookAutomationTests(unittest.TestCase):
                 controller.find_and_click_facebook_search("device-retry")
             )
 
-        self.assertEqual(["device-retry"], recoveries)
-        self.assertEqual(1, len(taps))
+        self.assertEqual([4], keys)
+        self.assertEqual(2, len(taps))
 
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)

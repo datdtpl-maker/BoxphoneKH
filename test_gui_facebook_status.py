@@ -20,7 +20,7 @@ class FacebookGuiStatusTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("mụn, chăm sóc da")
         app.ent_fb_target = _Entry("Thương Hiệu Mẫu")
         app.parse_targets = lambda entry_widget=None: ["device-1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         calls = []
@@ -62,10 +62,11 @@ class FacebookGuiStatusTests(unittest.TestCase):
         app.parse_targets = (
             lambda entry_widget=None: ["device-1", "device-2"]
         )
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         trackers = []
+        cleared = []
 
         class FakeTracker:
             def __init__(self, *_args, **_kwargs):
@@ -99,7 +100,10 @@ class FacebookGuiStatusTests(unittest.TestCase):
             )
             return True, "Thành công"
 
-        fake_adb = SimpleNamespace(facebook_automation_workflow=workflow)
+        fake_adb = SimpleNamespace(
+            facebook_automation_workflow=workflow,
+            clear_recent_apps=lambda device_id: cleared.append(device_id) or True,
+        )
         names = {"device-1": "1", "device-2": "2"}
 
         with (
@@ -120,6 +124,7 @@ class FacebookGuiStatusTests(unittest.TestCase):
 
         self.assertCountEqual(["1", "2"], [t.device_name for t in trackers])
         self.assertTrue(all(tracker.statuses for tracker in trackers))
+        self.assertCountEqual(["device-1", "device-2"], cleared)
 
 
 if __name__ == "__main__":

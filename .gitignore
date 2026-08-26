@@ -37,6 +37,7 @@ test_search_and_dump.py
 BoxPhoneControl.exe
 BoxPhoneControl-fixed-v*.exe
 release/BoxPhoneControl/
+CHỈ COPY FILE NÀY/
 build-*/
 dist-*/
 build/

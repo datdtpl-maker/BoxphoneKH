@@ -1,3 +1,4 @@
+import base64
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
@@ -87,26 +88,129 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertTrue(
             self.controller.find_and_click_tiktok_search("device-profile")
         )
-        self.assertEqual([(1015, 124)], taps)
+        self.assertEqual([(1015, 124), (486, 105)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
-    def test_search_does_not_use_header_fallback_on_search_activity(self, _sleep):
+    def test_search_activity_focuses_existing_input_without_back(self, _sleep):
         self.controller._get_tiktok_ui_root = lambda *_args: None
         self.controller.get_tiktok_search_input_state = lambda _device_id: None
         self.controller.get_tiktok_foreground_activity = (
-            lambda _device_id: "com.ss.android.ugc.aweme.search.SearchResultActivity"
+            lambda _device_id:
+            "com.ss.android.ugc.aweme.search.SearchResultActivity"
+        )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        focuses = []
+        self.controller.focus_tiktok_search_input = (
+            lambda device_id: focuses.append(device_id) or True
+        )
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        keys = []
+        taps = []
+        self.controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_search("device-search")
+        )
+        self.assertEqual(["device-search"], focuses)
+        self.assertEqual([], keys)
+        self.assertEqual([], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_generic_activity_busy_xml_still_enters_keyword_without_back(
+        self, _sleep
+    ):
+        """Màn Search thật dùng activity chung vẫn phải CLEAR + INPUT + ENTER."""
+        self.controller.dismiss_tiktok_location_popup = lambda _device_id: False
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller._get_tiktok_search_icon_coords = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id: "com.ss.android.ugc.aweme.splash.SplashActivity"
+        )
+        self.controller.get_effective_screen_size = (
+            lambda _device_id: (1080, 1920)
         )
         taps = []
+        keyevents = []
+        commands = []
+        self.controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+        )
+        self.controller.keyevent = (
+            lambda _device_id, keycode: keyevents.append(keycode)
+            or (0, "", "")
+        )
+
+        def execute(_device_id, args, timeout=15):
+            commands.append(args)
+            return 0, "Broadcast completed: result=0", ""
+
+        self.controller.execute_adb = execute
+        keyword = "nặn mụn Phan Thiết"
+
+        self.assertTrue(
+            self.controller.find_and_click_tiktok_search("device-generic-search")
+        )
+        self.assertTrue(
+            self.controller.replace_tiktok_search_text(
+                "device-generic-search", keyword
+            )
+        )
+        self.assertTrue(
+            self.controller.submit_tiktok_search("device-generic-search")
+        )
+        self.controller.is_tiktok_search_results_for = (
+            lambda _device_id, value: value == keyword
+        )
+        self.assertTrue(
+            self.controller.wait_for_tiktok_search_results(
+                "device-generic-search", keyword
+            )
+        )
+
+        self.assertNotIn(4, keyevents)
+        self.assertEqual([66], keyevents)
+        self.assertIn((486, 105), taps)
+        clear_commands = [args for args in commands if "XW_CLEAR_TEXT" in args]
+        input_commands = [args for args in commands if "XW_INPUT_B64" in args]
+        self.assertEqual(1, len(clear_commands))
+        self.assertEqual(1, len(input_commands))
+        encoded = input_commands[0][input_commands[0].index("msg") + 1]
+        self.assertEqual(keyword, base64.b64decode(encoded).decode("utf-8"))
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_search_recovery_stops_after_one_back_if_activity_stays_search(
+        self, _sleep
+    ):
+        self.controller._get_tiktok_ui_root = lambda *_args: None
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id:
+            "com.ss.android.ugc.aweme.search.SearchResultActivity"
+        )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.focus_tiktok_search_input = lambda _device_id: False
+        keys = []
+        taps = []
+        self.controller.keyevent = (
+            lambda _device_id, key: keys.append(key) or (0, "", "")
+        )
         self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
 
         self.assertFalse(
-            self.controller.find_and_click_tiktok_search("device-search")
+            self.controller.find_and_click_tiktok_search("device-search-stuck")
         )
+        self.assertEqual([4], keys)
         self.assertEqual([], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
     def test_focus_search_requires_verified_input_after_fallback(self, _sleep):
         self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = lambda _device_id: None
         self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
         taps = []
         self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
@@ -114,6 +218,29 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertFalse(
             self.controller.focus_tiktok_search_input("device-no-input")
         )
+        self.assertGreaterEqual(len(taps), 1)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_focus_search_accepts_verified_search_activity_when_xml_is_busy(
+        self, _sleep
+    ):
+        state_checks = []
+        self.controller.get_tiktok_search_input_state = lambda device_id: (
+            state_checks.append(device_id) or None
+        )
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id:
+            "com.ss.android.ugc.aweme.search.SearchResultActivity"
+        )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertTrue(
+            self.controller.focus_tiktok_search_input("device-busy-xml")
+        )
+        self.assertEqual(["device-busy-xml"], state_checks)
         self.assertGreaterEqual(len(taps), 1)
 
     def test_seed_results_require_keyword_and_results_tabs(self):
@@ -162,6 +289,29 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertTrue(
             self.controller.is_tiktok_search_results_for(
                 "device-compact", "nặn mụn"
+            )
+        )
+
+    def test_seed_results_accept_query_textview_in_top_search_bar(self):
+        """TikTok mới có thể xuất query thành TextView thay vì EditText."""
+        textview_root = ET.fromstring(
+            '<hierarchy>'
+            '<node class="android.widget.TextView" text="nặn mụn Phan Thiết" '
+            'clickable="true" bounds="[92,48][910,164]" />'
+            '<node text="Top" bounds="[130,170][280,245]" />'
+            '<node text="Videos" bounds="[300,170][470,245]" />'
+            '<node clickable="true" bounds="[20,260][1060,900]">'
+            '<node text="Kết quả chăm sóc da tại Phan Thiết" />'
+            '</node>'
+            '</hierarchy>'
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda _device_id, _prefix: textview_root
+        )
+
+        self.assertTrue(
+            self.controller.is_tiktok_search_results_for(
+                "device-textview", "nặn mụn Phan Thiết"
             )
         )
 
@@ -490,6 +640,31 @@ class TikTokSearchInputTests(unittest.TestCase):
             )
         )
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_replace_search_continues_when_search_activity_is_ready_but_xml_busy(
+        self, _sleep
+    ):
+        events = []
+        self.controller.clear_tiktok_search_input = lambda _device_id: (
+            events.append("clear") or True
+        )
+        self.controller.input_tiktok_search_text = lambda _device_id, text: (
+            events.append(("input", text)) or True
+        )
+        self.controller.get_tiktok_search_input_state = lambda _device_id: None
+        self.controller.get_tiktok_foreground_activity = (
+            lambda _device_id:
+            "com.ss.android.ugc.aweme.search.SearchResultActivity"
+        )
+        self.controller.is_tiktok_in_foreground = lambda _device_id: True
+
+        self.assertTrue(
+            self.controller.replace_tiktok_search_text(
+                "device-busy-xml", "nặn mụn"
+            )
+        )
+        self.assertEqual(["clear", ("input", "nặn mụn")], events)
+
     def test_tiktok_search_submit_sends_only_one_enter_key(self):
         keyevents = []
         self.controller.keyevent = (
@@ -577,6 +752,64 @@ class TikTokSearchInputTests(unittest.TestCase):
             )
         )
         self.assertEqual([(540, 390)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_click_rejects_other_channel_video_caption(self, _sleep):
+        wrong_video_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.RelativeLayout" clickable="true"
+                    bounds="[0,325][1080,920]" resource-id="video_card">
+                <node class="android.widget.TextView" clickable="false"
+                      bounds="[40,700][1020,790]"
+                      resource-id="com.ss.android.ugc.trill:id/caption"
+                      text="Review Kênh TikTok Mẫu hôm nay" />
+                <node class="android.widget.TextView" clickable="false"
+                      bounds="[40,800][500,850]"
+                      resource-id="com.ss.android.ugc.trill:id/tv_username"
+                      text="Kênh Khác" />
+              </node>
+            </hierarchy>
+            """
+        )
+        self.controller._get_tiktok_ui_root = (
+            lambda *_args: wrong_video_root
+        )
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        self.assertFalse(
+            self.controller.find_and_click_tiktok_channel(
+                "device-wrong-card", "Kênh TikTok Mẫu"
+            )
+        )
+        self.assertEqual(
+            [],
+            taps,
+            "Caption nhắc tên target không được coi là card danh tính kênh",
+        )
+
+    def test_profile_verifier_rejects_target_mentioned_only_in_bio(self):
+        wrong_profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Kênh Khác" />
+              <node class="android.widget.TextView"
+                    text="Chuyên review Kênh TikTok Mẫu" />
+              <node class="android.widget.Button" text="Follow" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+              <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+            </hierarchy>
+            """
+        )
+
+        self.assertFalse(
+            self.controller.is_on_tiktok_target_profile(
+                "device-wrong-profile",
+                "Kênh TikTok Mẫu",
+                root=wrong_profile_root,
+            )
+        )
 
     def test_profile_verifier_supports_vietnamese_actions_and_erf_video_items(self):
         profile_root = ET.fromstring(
@@ -730,6 +963,8 @@ class TikTokSearchInputTests(unittest.TestCase):
         statuses = []
         taps_after_search = []
         startup_order = []
+        workflow_events = []
+        current_keyword = {"value": ""}
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
         self.controller.warmup_facebook_before_tiktok = (
             lambda _device_id, **_kwargs:
@@ -743,14 +978,29 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.swipe = lambda *_args, **_kwargs: None
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: True
-        self.controller.replace_tiktok_search_text = (
-            lambda _device_id, text: entered_keywords.append(text) or True
+        def replace_text(_device_id, text):
+            current_keyword["value"] = text
+            entered_keywords.append(text)
+            workflow_events.append(f"input:{text}")
+            return True
+
+        self.controller.replace_tiktok_search_text = replace_text
+        self.controller.submit_tiktok_search = (
+            lambda _device_id:
+            workflow_events.append(
+                f"submit:{current_keyword['value']}"
+            ) or True
         )
-        self.controller.submit_tiktok_search = lambda _device_id: True
         self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.tap = lambda _device_id, x, y: taps_after_search.append((x, y))
-        self.controller.find_and_click_tiktok_channel = lambda *_args: True
-        self.controller.click_random_tiktok_profile_video = lambda *_args: True
+        self.controller.find_and_click_tiktok_channel = (
+            lambda _device_id, channel:
+            workflow_events.append(f"channel:{channel}") or True
+        )
+        self.controller.click_random_tiktok_profile_video = (
+            lambda _device_id, channel:
+            workflow_events.append(f"clip:{channel}") or True
+        )
 
         success, _message = self.controller.tiktok_automation_workflow(
             "device-1",
@@ -767,6 +1017,18 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertEqual(
             ["nặn mụn", "Kênh TikTok Mẫu"],
             entered_keywords,
+        )
+        self.assertEqual(
+            [
+                "input:nặn mụn",
+                "submit:nặn mụn",
+                "input:Kênh TikTok Mẫu",
+                "submit:Kênh TikTok Mẫu",
+                "channel:Kênh TikTok Mẫu",
+                "clip:Kênh TikTok Mẫu",
+            ],
+            workflow_events,
+            "B2 chỉ lướt kết quả; chỉ B3 mới được mở clip sau khi vào đúng kênh",
         )
         self.assertEqual(
             [],
@@ -893,11 +1155,20 @@ class TikTokSearchInputTests(unittest.TestCase):
         self, _print, _sleep, _randint
     ):
         entered = []
+        foreground_normalizations_after_result_check = []
+        result_check_started = {"value": False}
         checks = iter([False, True])
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
         self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
         self.controller.launch_tiktok = lambda _device_id: None
-        self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
+        self.controller.ensure_tiktok_foreground_ready = (
+            lambda *_args, **_kwargs:
+            (
+                foreground_normalizations_after_result_check.append("normalize")
+                if result_check_started["value"]
+                else None
+            ) or True
+        )
         self.controller.wait_for_tiktok_foreground = lambda _device_id: True
         self.controller.advance_tiktok_feed = lambda _device_id: True
         self.controller.find_and_click_tiktok_search = lambda _device_id: True
@@ -905,9 +1176,11 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, text: entered.append(text) or True
         )
         self.controller.submit_tiktok_search = lambda _device_id: True
-        self.controller.wait_for_tiktok_search_results = (
-            lambda *_args: next(checks)
-        )
+        def wait_for_results(*_args):
+            result_check_started["value"] = True
+            return next(checks)
+
+        self.controller.wait_for_tiktok_search_results = wait_for_results
         self.controller.find_and_click_tiktok_channel = lambda *_args: True
         self.controller.click_random_tiktok_profile_video = lambda *_args: True
         self.controller.swipe = lambda *_args, **_kwargs: None
@@ -922,6 +1195,11 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.assertEqual(
             ["từ khóa mồi", "từ khóa mồi", "Kênh mục tiêu"],
             entered,
+        )
+        self.assertEqual(
+            [],
+            foreground_normalizations_after_result_check,
+            "Retry B2 phải giữ nguyên trang Search, không được đưa TikTok về Home",
         )
 
     @patch("adb_controller.random.choice", side_effect=lambda values: values[-1])
@@ -973,6 +1251,7 @@ class TikTokSearchInputTests(unittest.TestCase):
     def test_workflow_fails_when_target_profile_was_not_opened(
         self, _sleep, _randint, _uniform
     ):
+        opened_clips = []
         self.controller.get_screen_size = lambda _device_id: (1080, 1920)
         self.controller.warmup_facebook_before_tiktok = (
             lambda _device_id, **_kwargs: True
@@ -988,6 +1267,9 @@ class TikTokSearchInputTests(unittest.TestCase):
         self.controller.wait_for_tiktok_search_results = lambda *_args: True
         self.controller.tap = lambda *_args: None
         self.controller.find_and_click_tiktok_channel = lambda *_args: False
+        self.controller.click_random_tiktok_profile_video = (
+            lambda *_args: opened_clips.append("clip") or True
+        )
 
         success, message = self.controller.tiktok_automation_workflow(
             "device-1",
@@ -997,6 +1279,11 @@ class TikTokSearchInputTests(unittest.TestCase):
 
         self.assertFalse(success)
         self.assertIn("không mở được kênh", message.lower())
+        self.assertEqual(
+            [],
+            opened_clips,
+            "Không được mở clip khi chưa xác minh đã vào đúng kênh target",
+        )
 
 
 if __name__ == "__main__":

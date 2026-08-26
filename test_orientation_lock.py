@@ -38,12 +38,12 @@ class OrientationLockTests(unittest.TestCase):
         controller.execute_adb = execute
 
         self.assertTrue(controller.lock_portrait("device-1"))
-        self.assertIn(
-            [
-                "shell", "settings", "put", "secure",
-                "show_rotation_suggestions", "0",
-            ],
-            commands,
+        self.assertTrue(
+            any(
+                "settings put secure show_rotation_suggestions 0"
+                in " ".join(command)
+                for command in commands
+            )
         )
 
     def test_gui_locks_every_connected_device_in_portrait(self):

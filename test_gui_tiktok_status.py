@@ -14,13 +14,43 @@ class _Entry:
 
 
 class TikTokGuiStatusTests(unittest.TestCase):
+    def test_sequential_success_clears_recents_before_finishing(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_tt_selection = _Entry("1")
+        app.ent_tt_seed = _Entry("chăm sóc da")
+        app.ent_tt_channel = _Entry("Kênh TikTok Mẫu")
+        app.parse_targets = lambda entry_widget=None: ["device-1"]
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
+        app.run_in_thread = lambda action: action()
+        app.log_message = lambda _message: None
+        events = []
+
+        fake_adb = SimpleNamespace(
+            tiktok_automation_workflow=lambda *_args, **_kwargs: (
+                events.append("workflow") or (True, "Thành công")
+            ),
+            clear_recent_apps=lambda device_id: events.append(
+                ("clear", device_id)
+            ) or True,
+        )
+
+        with (
+            patch("gui_app.config.ALLOWED_USER_IDS", []),
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", return_value="1"),
+            patch("builtins.print"),
+        ):
+            app.run_seq_tiktok()
+
+        self.assertEqual(["workflow", ("clear", "device-1")], events)
+
     def test_sequential_run_reports_failure_instead_of_completed(self):
         app = GUIApp.__new__(GUIApp)
         app.ent_tt_selection = _Entry("1")
         app.ent_tt_seed = _Entry("chăm sóc da phan thiết")
         app.ent_tt_channel = _Entry("Kênh TikTok Mẫu")
         app.parse_targets = lambda entry_widget=None: ["device-1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
 

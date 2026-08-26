@@ -74,7 +74,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         events = []
@@ -109,7 +109,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         finished_reports = []
@@ -166,7 +166,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         events = []
@@ -221,7 +221,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         events = []
@@ -256,7 +256,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         logs = []
         app.log_message = logs.append
@@ -301,7 +301,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("fb seed")
         app.ent_fb_target = _Entry("fb target")
         app.parse_targets = lambda entry_widget=None: ["d1", "d2", "d3"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         captured = []
@@ -370,12 +370,14 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_tt_seed = _Entry("seed")
         app.ent_tt_channel = _Entry("target")
         app.parse_targets = lambda entry_widget=None: ["d1", "d2"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         captured = []
+        cleared = []
         fake_adb = SimpleNamespace(
-            tiktok_automation_workflow=lambda *_args, **_kwargs: (True, "")
+            tiktok_automation_workflow=lambda *_args, **_kwargs: (True, ""),
+            clear_recent_apps=lambda device_id: cleared.append(device_id) or True,
         )
 
         with (
@@ -392,6 +394,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
         self.assertTrue(callable(captured[0][2]["on_wave"]))
+        self.assertCountEqual(["d1", "d2"], cleared)
 
     def test_facebook_adaptive_uses_random_social_policy(self):
         app = GUIApp.__new__(GUIApp)
@@ -399,12 +402,14 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_seed = _Entry("seed")
         app.ent_fb_target = _Entry("target")
         app.parse_targets = lambda entry_widget=None: ["d1", "d2"]
-        app.bulk_disable_rotation = lambda target_devices=None: None
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
         app.log_message = lambda _message: None
         captured = []
+        cleared = []
         fake_adb = SimpleNamespace(
-            facebook_automation_workflow=lambda *_args, **_kwargs: (True, "")
+            facebook_automation_workflow=lambda *_args, **_kwargs: (True, ""),
+            clear_recent_apps=lambda device_id: cleared.append(device_id) or True,
         )
 
         with (
@@ -421,6 +426,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
         self.assertTrue(callable(captured[0][2]["on_wave"]))
+        self.assertCountEqual(["d1", "d2"], cleared)
 
 
 if __name__ == "__main__":

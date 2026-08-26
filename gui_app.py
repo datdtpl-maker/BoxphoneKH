@@ -86,6 +86,7 @@ class GUIApp(ctk.CTk):
         
         # Lưu trữ các biến Checkbox điều khiển hàng loạt
         self.device_checkboxes = {}
+        self._bulk_rotation_lock = threading.Lock()
         self._active_notion_schedule = None
         self._active_notion_token = ""
         # Hai công tắc thuộc hai module độc lập. Không dùng chung BooleanVar,
@@ -2247,19 +2248,48 @@ class GUIApp(ctk.CTk):
             
         return result
 
-    def bulk_disable_rotation(self, target_devices=None, sync=False):
+    def bulk_disable_rotation(
+        self,
+        target_devices=None,
+        sync=False,
+        skip_busy=False,
+        skip_if_running=False,
+    ):
         if target_devices is None:
             target_devices = main.get_ordered_devices()
+        target_devices = list(target_devices)
         def action():
+            bulk_lock = self.__dict__.get("_bulk_rotation_lock")
+            if bulk_lock is None:
+                bulk_lock = threading.Lock()
+                self._bulk_rotation_lock = bulk_lock
+            acquired = bulk_lock.acquire(blocking=not skip_if_running)
+            if not acquired:
+                return
             def disable_rot(d):
                 try:
-                    return main.adb.lock_portrait(d)
+                    if (
+                        skip_busy
+                        and main.adb.is_device_workflow_active(d)
+                    ):
+                        return True
+                    with main.adb.device_workflow_scope(d):
+                        return main.adb.lock_portrait(d)
                 except Exception:
                     return False
-            from concurrent.futures import ThreadPoolExecutor
-            if target_devices:
-                with ThreadPoolExecutor(max_workers=max(1, len(target_devices))) as executor:
-                    list(executor.map(disable_rot, target_devices))
+            try:
+                from concurrent.futures import ThreadPoolExecutor
+                if target_devices:
+                    worker_count = min(
+                        len(target_devices),
+                        getattr(main.adb, "max_parallel_commands", 8),
+                    )
+                    with ThreadPoolExecutor(
+                        max_workers=max(1, worker_count)
+                    ) as executor:
+                        list(executor.map(disable_rot, target_devices))
+            finally:
+                bulk_lock.release()
         if sync:
             action()
         else:
@@ -2318,9 +2348,11 @@ class GUIApp(ctk.CTk):
         return results
 
     def _portrait_guard_tick(self):
-        """Khóa lại hướng dọc cho mọi máy kết nối mà không chặn giao diện."""
-        self.bulk_disable_rotation()
-        self.after(30000, self._portrait_guard_tick)
+        """Kiểm tra dọc nhẹ, bỏ qua máy đang chạy workflow."""
+        self.bulk_disable_rotation(
+            skip_busy=True, skip_if_running=True
+        )
+        self.after(60000, self._portrait_guard_tick)
 
     def toggle_system_log(self):
         """Expand the activity panel across the workspace and restore it."""
@@ -2467,7 +2499,6 @@ class GUIApp(ctk.CTk):
         target_devices = self.parse_targets(entry_widget=entry_widget)
         if not target_devices:
             return
-        self.bulk_disable_rotation(target_devices=target_devices)
         workflow_session = main.start_workflow_session()
         is_cancelled = main.make_session_cancel_checker(workflow_session)
 
@@ -2625,6 +2656,9 @@ class GUIApp(ctk.CTk):
             return device_name, success, message
 
         def action():
+            self.bulk_disable_rotation(
+                target_devices=target_devices, sync=True
+            )
             if adaptive:
                 results = run_adaptive(
                     target_devices,
@@ -2673,7 +2707,6 @@ class GUIApp(ctk.CTk):
         seed_raw = self.ent_tt_seed.get().strip()
         channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
 
-        self.bulk_disable_rotation(target_devices=target_devices)
         workflow_session = main.start_workflow_session()
         session_is_cancelled = main.make_session_cancel_checker(
             workflow_session
@@ -2682,6 +2715,9 @@ class GUIApp(ctk.CTk):
         print(f"[GUI] Bắt đầu chạy TikTok Tuần Tự trên {len(target_devices)} máy...")
 
         def action():
+            self.bulk_disable_rotation(
+                target_devices=target_devices, sync=True
+            )
             self.prepare_social_targets(
                 target_devices,
                 "facebook",
@@ -2783,7 +2819,6 @@ class GUIApp(ctk.CTk):
         seed_raw = self.ent_tt_seed.get().strip()
         channel = self.ent_tt_channel.get().strip() or config.TIKTOK_TARGET_CHANNEL_DEFAULT
 
-        self.bulk_disable_rotation(target_devices=target_devices)
         workflow_session = main.start_workflow_session()
         session_is_cancelled = main.make_session_cancel_checker(
             workflow_session
@@ -2855,6 +2890,9 @@ class GUIApp(ctk.CTk):
             return dev_name, success, message
 
         def action():
+            self.bulk_disable_rotation(
+                target_devices=target_devices, sync=True
+            )
             self.prepare_social_targets(
                 target_devices,
                 "facebook",
@@ -2927,13 +2965,15 @@ class GUIApp(ctk.CTk):
         if not target_devices:
             return
 
-        self.bulk_disable_rotation(target_devices=target_devices)
         workflow_session = main.start_workflow_session()
         session_is_cancelled = main.make_session_cancel_checker(
             workflow_session
         )
 
         def action():
+            self.bulk_disable_rotation(
+                target_devices=target_devices, sync=True
+            )
             self.prepare_social_targets(
                 target_devices,
                 "tiktok",
@@ -3054,7 +3094,6 @@ class GUIApp(ctk.CTk):
         if not target_devices:
             return
 
-        self.bulk_disable_rotation(target_devices=target_devices)
         workflow_session = main.start_workflow_session()
         session_is_cancelled = main.make_session_cancel_checker(
             workflow_session
@@ -3112,6 +3151,9 @@ class GUIApp(ctk.CTk):
             return device_name, success, message
 
         def action():
+            self.bulk_disable_rotation(
+                target_devices=target_devices, sync=True
+            )
             self.prepare_social_targets(
                 target_devices,
                 "tiktok",
