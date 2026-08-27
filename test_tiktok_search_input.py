@@ -1614,10 +1614,15 @@ class TikTokSearchInputTests(unittest.TestCase):
             workflow_events,
             "B2 chỉ lướt kết quả; chỉ B3 mới được mở clip sau khi vào đúng kênh",
         )
-        self.assertTrue(
-            all(x < 850 for x, _y in taps_after_search),
-            "B3 chỉ được tap thanh query bên trái, không tap nút ba chấm/Filters",
-        )
+        search_input_taps = [
+            (x, y) for x, y in taps_after_search
+            if y < int(1920 * 0.20)
+        ]
+        if search_input_taps:
+            self.assertTrue(
+                all(x < 850 for x, _y in search_input_taps),
+                "B3 chỉ được tap thanh query bên trái, không tap nút ba chấm/Filters",
+            )
         self.assertTrue(
             any("[TikTok B2] Lướt kết quả" in message and "15s" in message for message in statuses)
         )

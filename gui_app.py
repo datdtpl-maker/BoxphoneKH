@@ -569,7 +569,6 @@ class GUIApp(ctk.CTk):
             placeholder_text="11:45, 19:30, 22:30",
             width=145,
             height=34,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
             **field_style,
         )
         self.ent_schedule_hours.insert(0, config.AUTO_SCHEDULE_HOURS_DEFAULT)
