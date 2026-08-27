@@ -580,7 +580,22 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=muted,
         )
-        self.lbl_schedule_countdown.pack(side="left", padx=(0, 4))
+        self.lbl_schedule_countdown.pack(side="left", padx=(0, 8))
+
+        self.btn_lock_rotation = ctk.CTkButton(
+            self.social_combined_right,
+            text="🔒 Khóa xoay dọc",
+            width=120,
+            height=34,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#334155",
+            hover_color="#1e293b",
+            text_color="#ffffff",
+            corner_radius=10,
+            cursor="hand2",
+            command=self._on_click_lock_all_rotation,
+        )
+        self.btn_lock_rotation.pack(side="left", padx=(0, 4))
 
         # Commercial workspace: one focused module at a time. This replaces
         # the previous three cramped columns while preserving every widget and
@@ -2377,6 +2392,17 @@ class GUIApp(ctk.CTk):
             action()
         else:
             self.run_in_thread(action)
+
+    def _on_click_lock_all_rotation(self):
+        devices = main.get_ordered_devices()
+        if not devices:
+            self.log_message("[Hệ thống] ⚠️ Không tìm thấy thiết bị nào đang kết nối.")
+            return
+        self.log_message(
+            f"[Hệ thống] 🔒 Đang gửi lệnh khóa cứng màn hình dọc (Portrait) cho {len(devices)} máy..."
+        )
+        self.bulk_disable_rotation(devices, sync=False)
+        self.log_message("[Hệ thống] ✅ Đã hoàn tất khóa xoay dọc toàn bộ thiết bị.")
 
     def prepare_social_targets(
         self, target_devices, opening_platform, is_cancelled=None

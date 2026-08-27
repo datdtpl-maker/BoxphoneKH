@@ -6016,25 +6016,26 @@ class ADBController:
                 )
             time.sleep(0.5)
 
-        # 4. Đọc bình luận (Tăng Dwell Time)
+        # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ mở xem 2-3s rồi đóng hoàn toàn
         if random.random() < config.INTERACTION_COMMENT_RATE:
-            cm_x = int(width * 0.91) + random.randint(-10, 10)
-            cm_y = int(height * 0.65) + random.randint(-15, 15)
+            cm_x = int(width * 0.91) + random.randint(-5, 5)
+            cm_y = int(height * 0.65) + random.randint(-10, 10)
             self.tap(device_id, cm_x, cm_y)
-            time.sleep(1.5)
-            self.swipe(
-                device_id,
-                cx,
-                int(height * 0.80),
-                cx,
-                int(height * 0.55),
-                duration=400,
-            )
-            time.sleep(random.uniform(2.5, 4.5))
+            time.sleep(random.uniform(2.0, 3.5))
+            
+            # Đóng comment sheet an toàn:
+            # 1. Bấm nút [X] ở góc phải tiêu đề popup bình luận (y ~ 41%)
+            self.tap(device_id, int(width * 0.89), int(height * 0.41))
+            time.sleep(0.3)
+            # 2. Tap vào vùng video phía trên để dismiss modal nếu [X] lệch
+            self.tap(device_id, width // 2, int(height * 0.18))
+            time.sleep(0.3)
+            # 3. Phím Back dự phòng để đóng bàn phím/popup nếu còn mở
             self.keyevent(device_id, 4)
+            time.sleep(0.3)
             if status_callback:
                 status_callback(
-                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 3-5s rồi đóng..."
+                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 2-3s rồi đóng..."
                 )
             time.sleep(0.5)
 
@@ -6370,6 +6371,9 @@ class ADBController:
                         raise RuntimeError(
                             "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
                         )
+                    # Đảm bảo đóng popup/comment nếu còn mở trước khi vuốt video tiếp theo
+                    self.tap(device_id, width // 2, int(height * 0.18))
+                    time.sleep(0.2)
                     self.swipe(
                         device_id,
                         cx,

@@ -3,7 +3,7 @@
   "baseline": "BoxPhoneControl 1.0.16 - TikTok frozen",
   "files": {
     "adb_controller.py": {
-      "sha256": "791C5B36F70E044011E23E5F4C3EBF7392C9A68EAD049B99577A83C8576EC6A7",
+      "sha256": "73A82BA7E9C13F07EAB743B3D86893838722F7F468E6A8BF0CD4CFFA7EC819D9",
       "items": 45
     },
     "gui_app.py": {
