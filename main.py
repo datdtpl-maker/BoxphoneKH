@@ -807,10 +807,9 @@ def handle_all_messages(message):
                         is_cancelled=session_is_cancelled
                     )
                     dev_dur = time.time() - dev_start
-                    if success:
-                        clear_device_recents_after_success(
-                            dev, status_callback=tracker.status_callback
-                        )
+                    clear_device_recents_after_success(
+                        dev, status_callback=tracker.status_callback
+                    )
                     send_device_finished_card(message.chat.id, dev_name, dev, f"TikTok: {target_ch}", success, err, dev_dur)
                     if success:
                         success_count += 1
@@ -850,10 +849,10 @@ def handle_all_messages(message):
                     is_cancelled=session_is_cancelled
                 )
                 dev_dur = time.time() - dev_start
+                clear_device_recents_after_success(
+                    device_id, status_callback=tracker.status_callback
+                )
                 if success:
-                    clear_device_recents_after_success(
-                        device_id, status_callback=tracker.status_callback
-                    )
                     tracker.finish_dashboard(
                         f"✅ **MÁY {dev_name} HOÀN THÀNH TIKTOK**\n"
                         f"Kênh: `{target_ch}`"

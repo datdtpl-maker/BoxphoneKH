@@ -2815,18 +2815,16 @@ class GUIApp(ctk.CTk):
                 if elapsed_minutes
                 else f"{elapsed_remainder} giây"
             )
-            recents_cleared = False
-            if success:
-                def cleanup_status(dev, cleanup_message):
-                    self.log_message(
-                        f"[Máy {device_name}] {cleanup_message}"
-                    )
-                    if tracker:
-                        tracker.status_callback(dev, cleanup_message)
-
-                recents_cleared = main.clear_device_recents_after_success(
-                    device_id, status_callback=cleanup_status
+            def cleanup_status(dev, cleanup_message):
+                self.log_message(
+                    f"[Máy {device_name}] {cleanup_message}"
                 )
+                if tracker:
+                    tracker.status_callback(dev, cleanup_message)
+
+            recents_cleared = main.clear_device_recents_after_success(
+                device_id, status_callback=cleanup_status
+            )
             if tracker:
                 cleanup_text = (
                     "\n🧹 Đa nhiệm: **Đã xóa**"
@@ -2956,10 +2954,10 @@ class GUIApp(ctk.CTk):
                     is_cancelled=session_is_cancelled
                 )
                 dev_duration = time.time() - dev_start
+                main.clear_device_recents_after_success(
+                    dev, status_callback=tt_status_cb
+                )
                 if success:
-                    main.clear_device_recents_after_success(
-                        dev, status_callback=tt_status_cb
-                    )
                     success_count += 1
                 else:
                     print(f"[GUI] ❌ TikTok máy {dev_name} THẤT BẠI: {message}")
@@ -3049,10 +3047,9 @@ class GUIApp(ctk.CTk):
                 is_cancelled=session_is_cancelled
             )
             duration = time.time() - dev_start
-            if success:
-                main.clear_device_recents_after_success(
-                    device_id, status_callback=tt_status_cb
-                )
+            main.clear_device_recents_after_success(
+                device_id, status_callback=tt_status_cb
+            )
             if tracker:
                 tracker.finish_dashboard(
                     (

@@ -4793,10 +4793,7 @@ class ADBController:
         """Đọc tọa độ Search TikTok ở header; trả None nếu XML đang bận."""
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_tiktok_search_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_dump_tt_search_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_dump_tt_search_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -4918,10 +4915,7 @@ class ADBController:
         width, _height = self.get_effective_screen_size(device_id)
         safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
         xml_file = f"/sdcard/dump_tt_input_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_dump_tt_input_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_dump_tt_input_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", xml_file]
@@ -5399,10 +5393,7 @@ class ADBController:
         """Dump UI TikTok và trả về XML root đã parse."""
         safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
         remote_xml = f"/sdcard/{prefix}_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_{prefix}_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_{prefix}_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -5537,8 +5528,11 @@ class ADBController:
             # Tên target phải xuất hiện như một trường danh tính hoàn chỉnh.
             # Không dùng phép "contains" vì caption/bio của kênh khác có thể
             # nhắc tên target và khiến tool xác minh nhầm profile.
+            target_clean = target.replace(" ", "")
             if target and any(
-                value == target or value.startswith(f"{target} ")
+                value == target
+                or value.startswith(f"{target} ")
+                or (target_clean and value.replace(" ", "").lstrip("@") == target_clean)
                 for value in identity_values
             ):
                 has_target = True
@@ -5557,9 +5551,18 @@ class ADBController:
                     "following",
                     "follow",
                     "nhắn tin",
+                    "tin nhắn",
                     "đang follow",
                     "đã follow",
                     "theo dõi",
+                    "đang theo dõi",
+                    "chỉnh sửa hồ sơ",
+                    "edit profile",
+                    "chia sẻ hồ sơ",
+                    "share profile",
+                    "bài viết",
+                    "video",
+                    "repost",
                 )
                 for value in text_values
             ):

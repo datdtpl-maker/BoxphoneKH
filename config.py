@@ -96,16 +96,16 @@ FACEBOOK_CANONICAL_PAGE_NAME = os.getenv(
 NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN", "")
 NOTION_DATA_SOURCE_ID = os.getenv("NOTION_DATA_SOURCE_ID", "")
 
-# Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix)
-INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.25"))
-INTERACTION_BOOKMARK_RATE = float(os.getenv("INTERACTION_BOOKMARK_RATE", "0.15"))
-INTERACTION_SHARE_RATE = float(os.getenv("INTERACTION_SHARE_RATE", "0.08"))
-INTERACTION_COMMENT_RATE = float(os.getenv("INTERACTION_COMMENT_RATE", "0.20"))
-INTERACTION_LOOP_RATE = float(os.getenv("INTERACTION_LOOP_RATE", "0.20"))
+# Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix) - Hạn chế like theo yêu cầu
+INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.03"))
+INTERACTION_BOOKMARK_RATE = float(os.getenv("INTERACTION_BOOKMARK_RATE", "0.05"))
+INTERACTION_SHARE_RATE = float(os.getenv("INTERACTION_SHARE_RATE", "0.02"))
+INTERACTION_COMMENT_RATE = float(os.getenv("INTERACTION_COMMENT_RATE", "0.10"))
+INTERACTION_LOOP_RATE = float(os.getenv("INTERACTION_LOOP_RATE", "0.15"))
 
-# Tùy chọn Tăng Traffic Đột Phá
+# Tùy chọn Tăng Traffic Đột Phá - Mặc định tắt click video từ Search để tránh video ngoài kênh
 TIKTOK_SEARCH_CLICK_VIDEO_ENABLED = os.getenv(
-    "TIKTOK_SEARCH_CLICK_VIDEO_ENABLED", "1"
+    "TIKTOK_SEARCH_CLICK_VIDEO_ENABLED", "0"
 ).strip().lower() not in {"0", "false", "no", "off"}
 
 FACEBOOK_REELS_BOOST_ENABLED = os.getenv(
