@@ -2001,6 +2001,90 @@ class ADBController:
             return False
         return self.advance_facebook_feed(device_id)
 
+    def _get_facebook_ui_root(self, device_id, prefix="fb_ui"):
+        """Dump UI Facebook và trả về XML root để parse."""
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/{prefix}_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            tempfile.gettempdir(), f"temp_{prefix}_{safe_device_id}.xml"
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        dump_code, _, _ = self.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", remote_xml]
+        )
+        if dump_code != 0:
+            return None
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return None
+            return ET.parse(local_xml).getroot()
+        except Exception:
+            return None
+
+    def perform_facebook_micro_interactions(
+        self, device_id, width, height, status_callback=None
+    ):
+        """Thực hiện vi tương tác Facebook (Like, Click 'Xem thêm' bài viết)."""
+        # 1. Bấm 'Xem thêm' (See more) để mở rộng bài viết dài (tăng Dwell Time)
+        if random.random() < 0.35:
+            root = self._get_facebook_ui_root(device_id, "fb_seemore")
+            if root is not None:
+                for elem in root.iter():
+                    desc = self._normalize_facebook_text(
+                        elem.get("content-desc", "")
+                    )
+                    text = self._normalize_facebook_text(elem.get("text", ""))
+                    if "xem them" in text or "see more" in text or "xem them" in desc:
+                        bounds = elem.get("bounds", "")
+                        m = re.findall(r"\d+", bounds)
+                        if len(m) >= 4:
+                            x1, y1, x2, y2 = map(int, m[:4])
+                            if y1 > int(height * 0.15) and y2 < int(height * 0.88):
+                                self.tap(
+                                    device_id,
+                                    (x1 + x2) // 2,
+                                    (y1 + y2) // 2,
+                                )
+                                if status_callback:
+                                    status_callback(
+                                        device_id,
+                                        "[FB Vi tương tác] 📖 Bấm 'Xem thêm' bài viết dài...",
+                                    )
+                                time.sleep(0.8)
+                                return True
+
+        # 2. Thả Like ngẫu nhiên (tỷ lệ cấu hình)
+        if random.random() < config.INTERACTION_LIKE_RATE:
+            root = self._get_facebook_ui_root(device_id, "fb_like")
+            if root is not None:
+                for elem in root.iter():
+                    desc = self._normalize_facebook_text(
+                        elem.get("content-desc", "")
+                    )
+                    text = self._normalize_facebook_text(elem.get("text", ""))
+                    if "thich" in desc or "like" in desc or "thich" in text:
+                        bounds = elem.get("bounds", "")
+                        m = re.findall(r"\d+", bounds)
+                        if len(m) >= 4:
+                            x1, y1, x2, y2 = map(int, m[:4])
+                            if y1 > int(height * 0.15) and y2 < int(height * 0.88):
+                                self.tap(
+                                    device_id,
+                                    (x1 + x2) // 2,
+                                    (y1 + y2) // 2,
+                                )
+                                if status_callback:
+                                    status_callback(
+                                        device_id,
+                                        "[FB Vi tương tác] 👍 Thả Like bài viết trên Page...",
+                                    )
+                                time.sleep(0.8)
+                                return True
+        return False
+
     def browse_facebook_surface(
         self,
         device_id,
@@ -2073,6 +2157,15 @@ class ADBController:
                     f"Xem {label_name} lượt {item_index} ({int(dwell)}s) • "
                     f"còn {int(remaining)}s...",
                 )
+            # Kích hoạt vi tương tác khi đang ở Page mục tiêu
+            if label == "target_page":
+                try:
+                    self.perform_facebook_micro_interactions(
+                        device_id, width, height, status_callback=status_callback
+                    )
+                except Exception:
+                    pass
+
             dwell_remaining = dwell
             while dwell_remaining > 0 and time.monotonic() < deadline:
                 sleep_step = min(
@@ -5868,6 +5961,118 @@ class ADBController:
                     action_hits.add(marker)
         return not has_profile_grid and len(action_hits) >= 2
 
+    def perform_tiktok_micro_interactions(
+        self, device_id, width, height, status_callback=None, is_cancelled=None
+    ):
+        """Thực hiện ma trận vi tương tác ngẫu nhiên (Thả tim, Bookmark, Share, Comment) trên clip TikTok."""
+        cx = width // 2
+
+        # 1. Thả Tim / Like (Double-Tap vào giữa màn hình)
+        if random.random() < config.INTERACTION_LIKE_RATE:
+            like_x = cx + random.randint(-40, 40)
+            like_y = int(height * 0.48) + random.randint(-40, 40)
+            self.tap(device_id, like_x, like_y)
+            time.sleep(0.08)
+            self.tap(device_id, like_x, like_y)
+            if status_callback:
+                status_callback(
+                    device_id, "[TikTok Vi tương tác] ❤️ Thả tim ngẫu nhiên vào clip..."
+                )
+            time.sleep(0.5)
+
+        # 2. Lưu Bookmark / Yêu thích (Tín hiệu thuật toán SEO mạnh nhất)
+        if random.random() < config.INTERACTION_BOOKMARK_RATE:
+            bm_x = int(width * 0.91) + random.randint(-10, 10)
+            bm_y = int(height * 0.74) + random.randint(-15, 15)
+            self.tap(device_id, bm_x, bm_y)
+            if status_callback:
+                status_callback(
+                    device_id,
+                    "[TikTok Vi tương tác] ⭐ Bấm Lưu Bookmark / Yêu thích clip...",
+                )
+            time.sleep(0.6)
+
+        # 3. Chia sẻ ➔ Copy Link (Kích hoạt đề xuất Viral)
+        if random.random() < config.INTERACTION_SHARE_RATE:
+            share_x = int(width * 0.91) + random.randint(-10, 10)
+            share_y = int(height * 0.84) + random.randint(-15, 15)
+            self.tap(device_id, share_x, share_y)
+            time.sleep(1.2)
+            # Bấm icon Copy Link
+            self.tap(
+                device_id,
+                int(width * 0.20) + random.randint(-15, 15),
+                int(height * 0.78) + random.randint(-15, 15),
+            )
+            time.sleep(0.5)
+            self.keyevent(device_id, 4)
+            if status_callback:
+                status_callback(
+                    device_id,
+                    "[TikTok Vi tương tác] 🔗 Bấm Chia sẻ ➔ Sao chép liên kết video...",
+                )
+            time.sleep(0.5)
+
+        # 4. Đọc bình luận (Tăng Dwell Time)
+        if random.random() < config.INTERACTION_COMMENT_RATE:
+            cm_x = int(width * 0.91) + random.randint(-10, 10)
+            cm_y = int(height * 0.65) + random.randint(-15, 15)
+            self.tap(device_id, cm_x, cm_y)
+            time.sleep(1.5)
+            self.swipe(
+                device_id,
+                cx,
+                int(height * 0.80),
+                cx,
+                int(height * 0.55),
+                duration=400,
+            )
+            time.sleep(random.uniform(2.5, 4.5))
+            self.keyevent(device_id, 4)
+            if status_callback:
+                status_callback(
+                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 3-5s rồi đóng..."
+                )
+            time.sleep(0.5)
+
+    def try_tiktok_search_click_channel_video(
+        self, device_id, target_channel, status_callback=None
+    ):
+        """Tìm và click video của kênh mục tiêu ngay trong danh sách kết quả tìm kiếm để kích hoạt CTR Search."""
+        if not config.TIKTOK_SEARCH_CLICK_VIDEO_ENABLED:
+            return False
+        root = self._get_tiktok_ui_root(device_id, "tt_search_ctr")
+        if root is None:
+            return False
+        norm_target = self._normalize_tiktok_text(target_channel)
+        target_tokens = [t for t in norm_target.split() if len(t) >= 2]
+        if not target_tokens:
+            return False
+
+        width, height = self.get_effective_screen_size(device_id)
+        for node in root.iter():
+            text = self._normalize_tiktok_text(
+                f"{node.get('text', '')} {node.get('content-desc', '')}"
+            )
+            if any(token in text for token in target_tokens):
+                bounds = node.get("bounds", "")
+                m = re.findall(r"\d+", bounds)
+                if len(m) >= 4:
+                    x1, y1, x2, y2 = map(int, m[:4])
+                    if y1 > int(height * 0.15) and y2 < int(height * 0.90):
+                        tap_x = (x1 + x2) // 2
+                        tap_y = (y1 + y2) // 2
+                        self.tap(device_id, tap_x, tap_y)
+                        time.sleep(2.5)
+                        if self.is_tiktok_video_player(device_id):
+                            if status_callback:
+                                status_callback(
+                                    device_id,
+                                    f"[TikTok CTR Boost] Đã click video từ kết quả Search của '{target_channel}'!",
+                                )
+                            return True
+        return False
+
     @serialized_device_workflow
     def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
         """
@@ -5999,18 +6204,12 @@ class ADBController:
                     "TikTok B2 chưa nhập chính xác từ khóa mồi"
                 )
             time.sleep(1.0)
-            # TikTok hiện dùng Enter để gửi tìm kiếm. Không tap góc phải vì
-            # vị trí đó là nút ba chấm và sẽ mở bảng Filters.
             if not self.submit_tiktok_search(device_id):
                 raise RuntimeError(
                     "TikTok B2 chưa gửi được tìm kiếm từ khóa mồi"
                 )
             time.sleep(3.5)
             check_cancelled()
-            # Enter thành công là cổng hoàn tất B2. Không dump/chờ UI XML ở
-            # đây: khi chạy nhiều máy, UIAutomator thường chậm dù kết quả đã
-            # hiển thị, khiến code cũ nhập lại từ khóa mồi và dừng sai. Chỉ
-            # kiểm tra đúng TikTok còn foreground trước khi bắt đầu swipe.
             if not self.wait_for_tiktok_foreground(device_id):
                 raise RuntimeError(
                     "TikTok B2 mất foreground sau khi Enter từ khóa mồi"
@@ -6019,6 +6218,11 @@ class ADBController:
             update_status(
                 "[TikTok B2] Đã Enter từ khóa mồi • tiếp tục lướt kết quả, "
                 "không nhập lại lần hai..."
+            )
+
+            # Thử click video của Kênh ngay từ kết quả Search (CTR Boost)
+            self.try_tiktok_search_click_channel_video(
+                device_id, target_channel, status_callback=update_status
             )
 
             step2_total = random.randint(
@@ -6066,8 +6270,6 @@ class ADBController:
                     "TikTok B2 chưa hoàn tất; đã chặn chuyển sang B3"
                 )
             update_status(f"[TikTok B3] Bắt buộc XÓA SẠCH từ khóa mồi '{seed_kw}' & Tìm Kênh mục tiêu '{target_channel}'...")
-            # Giữ nguyên trang kết quả B2. Hàm ensure_tiktok_foreground_ready
-            # chủ động đưa TikTok về Home nên không dùng ở ranh giới B2 -> B3.
             if not self.wait_for_tiktok_foreground(device_id):
                 raise RuntimeError(
                     "TikTok B3 không ở foreground; không thao tác tìm kiếm"
@@ -6086,7 +6288,6 @@ class ADBController:
                     "TikTok B3 chưa xóa sạch từ khóa mồi hoặc chưa nhập đúng tên Kênh"
                 )
             time.sleep(1.0)
-            # Áp dụng cùng cơ chế cho bước 3: chỉ Enter, không chạm nút ba chấm.
             if not self.submit_tiktok_search(device_id):
                 raise RuntimeError(
                     "TikTok B3 chưa gửi được tìm kiếm Kênh mục tiêu"
@@ -6134,9 +6335,28 @@ class ADBController:
                     f"[TikTok B3] Xem clip {channel_video} ({watch_duration}s) • "
                     f"đã ở Kênh {step3_elapsed}/{step3_total}s..."
                 )
+                
+                # Thực hiện vi tương tác (Thả tim, Bookmark, Share, Comment)
+                try:
+                    self.perform_tiktok_micro_interactions(
+                        device_id, width, height, status_callback=update_status, is_cancelled=check_cancelled
+                    )
+                except Exception:
+                    pass
+
                 for _ in range(watch_duration):
                     time.sleep(1.0)
                     check_cancelled()
+
+                # Tăng Loop Rate ngẫu nhiên (xem lặp lại video 1 lần)
+                if random.random() < config.INTERACTION_LOOP_RATE:
+                    loop_delay = random.randint(6, 12)
+                    update_status(f"[TikTok B3] 🔁 Xem lặp lại clip {channel_video} (+{loop_delay}s Loop Rate)...")
+                    for _ in range(loop_delay):
+                        time.sleep(1.0)
+                        check_cancelled()
+                    step3_elapsed += loop_delay
+
                 step3_elapsed += watch_duration
                 if step3_elapsed < step3_total:
                     update_status(

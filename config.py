@@ -95,3 +95,31 @@ FACEBOOK_CANONICAL_PAGE_NAME = os.getenv(
 # Notion chỉ cung cấp dữ liệu đầu vào; token luôn được lưu cục bộ trong .env.
 NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN", "")
 NOTION_DATA_SOURCE_ID = os.getenv("NOTION_DATA_SOURCE_ID", "")
+
+# Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix)
+INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.25"))
+INTERACTION_BOOKMARK_RATE = float(os.getenv("INTERACTION_BOOKMARK_RATE", "0.15"))
+INTERACTION_SHARE_RATE = float(os.getenv("INTERACTION_SHARE_RATE", "0.08"))
+INTERACTION_COMMENT_RATE = float(os.getenv("INTERACTION_COMMENT_RATE", "0.20"))
+INTERACTION_LOOP_RATE = float(os.getenv("INTERACTION_LOOP_RATE", "0.20"))
+
+# Tùy chọn Tăng Traffic Đột Phá
+TIKTOK_SEARCH_CLICK_VIDEO_ENABLED = os.getenv(
+    "TIKTOK_SEARCH_CLICK_VIDEO_ENABLED", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+
+FACEBOOK_REELS_BOOST_ENABLED = os.getenv(
+    "FACEBOOK_REELS_BOOST_ENABLED", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+
+# Cấu hình Bộ Lên Lịch Tự Động (Auto-Scheduler)
+AUTO_SCHEDULE_ENABLED = os.getenv(
+    "AUTO_SCHEDULE_ENABLED", "0"
+).strip().lower() not in {"0", "false", "no", "off"}
+AUTO_SCHEDULE_HOURS_DEFAULT = os.getenv(
+    "AUTO_SCHEDULE_HOURS", "11:45, 19:30, 22:30"
+)
+AUTO_SCHEDULE_MODE_DEFAULT = os.getenv(
+    "AUTO_SCHEDULE_MODE", "adaptive"
+)
+

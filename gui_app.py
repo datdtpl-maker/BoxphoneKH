@@ -94,6 +94,7 @@ class GUIApp(ctk.CTk):
         self.tiktok_combined_var = ctk.BooleanVar(value=False)
         self.facebook_combined_var = ctk.BooleanVar(value=False)
         self.social_combined_var = ctk.BooleanVar(value=False)
+        self.auto_schedule_var = ctk.BooleanVar(value=config.AUTO_SCHEDULE_ENABLED)
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -513,16 +514,28 @@ class GUIApp(ctk.CTk):
         # nút chạy trong bất kỳ module nào cũng thực hiện đủ hai quy trình.
         self.ent_social_selection.grid_remove()
         self.social_combined_actions.grid_remove()
+        self.social_combined_right = ctk.CTkFrame(
+            self.social_combined_panel, fg_color="transparent"
+        )
+        self.social_combined_right.grid(
+            row=0,
+            column=2,
+            columnspan=2,
+            sticky="e",
+            padx=(12, 16),
+            pady=6,
+        )
+
         self.switch_social_combined = ctk.CTkSwitch(
-            self.social_combined_panel,
+            self.social_combined_right,
             text="Chạy hỗn hợp chung",
             variable=self.social_combined_var,
             onvalue=True,
             offvalue=False,
-            width=220,
-            height=44,
-            switch_width=52,
-            switch_height=28,
+            width=180,
+            height=36,
+            switch_width=46,
+            switch_height=24,
             font=button_font,
             text_color=text,
             fg_color=violet,
@@ -530,14 +543,45 @@ class GUIApp(ctk.CTk):
             button_color="#ffffff",
             button_hover_color="#f8fafc",
         )
-        self.switch_social_combined.grid(
-            row=0,
-            column=2,
-            columnspan=2,
-            sticky="e",
-            padx=(12, 16),
-            pady=10,
+        self.switch_social_combined.pack(side="left", padx=(0, 14))
+
+        self.switch_auto_schedule = ctk.CTkSwitch(
+            self.social_combined_right,
+            text="Hẹn giờ chạy",
+            variable=self.auto_schedule_var,
+            onvalue=True,
+            offvalue=False,
+            width=135,
+            height=36,
+            switch_width=46,
+            switch_height=24,
+            font=button_font,
+            text_color=text,
+            fg_color="#0f766e",
+            progress_color=green,
+            button_color="#ffffff",
+            button_hover_color="#f8fafc",
         )
+        self.switch_auto_schedule.pack(side="left", padx=(0, 8))
+
+        self.ent_schedule_hours = ctk.CTkEntry(
+            self.social_combined_right,
+            placeholder_text="11:45, 19:30, 22:30",
+            width=145,
+            height=34,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            **field_style,
+        )
+        self.ent_schedule_hours.insert(0, config.AUTO_SCHEDULE_HOURS_DEFAULT)
+        self.ent_schedule_hours.pack(side="left", padx=(0, 8))
+
+        self.lbl_schedule_countdown = ctk.CTkLabel(
+            self.social_combined_right,
+            text="⏰ Lên lịch: TẮT",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=muted,
+        )
+        self.lbl_schedule_countdown.pack(side="left", padx=(0, 4))
 
         # Commercial workspace: one focused module at a time. This replaces
         # the previous three cramped columns while preserving every widget and
@@ -1223,6 +1267,8 @@ class GUIApp(ctk.CTk):
         self.after(15000, self._portrait_guard_tick)
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
+        # Khởi chạy luồng đếm giờ tự động theo khung giờ vàng
+        self._start_auto_scheduler()
 
     def _apply_commercial_layout(self):
         """Compose the commercial operations shell without touching workflows."""
@@ -2459,6 +2505,107 @@ class GUIApp(ctk.CTk):
                 border_color="#bfdbfe",
             )
         self.after_idle(self._reset_operation_scrolls)
+
+    def _start_auto_scheduler(self):
+        """Khởi chạy luồng đếm giờ tự động theo khung giờ vàng."""
+        threading.Thread(target=self._auto_scheduler_loop, daemon=True).start()
+
+    def _auto_scheduler_loop(self):
+        """Vòng lặp kiểm tra mốc giờ và tự động kích hoạt chiến dịch."""
+        last_triggered_date_hour = None
+        while True:
+            try:
+                time.sleep(10.0)
+                if (
+                    not hasattr(self, "auto_schedule_var")
+                    or not self.auto_schedule_var.get()
+                ):
+                    if hasattr(self, "lbl_schedule_countdown"):
+                        self.after_idle(
+                            lambda: self.lbl_schedule_countdown.configure(
+                                text="⏰ Lịch: TẮT"
+                            )
+                        )
+                    continue
+
+                hours_raw = (
+                    self.ent_schedule_hours.get().strip()
+                    if hasattr(self, "ent_schedule_hours")
+                    else config.AUTO_SCHEDULE_HOURS_DEFAULT
+                )
+                scheduled_times = [
+                    h.strip() for h in hours_raw.split(",") if ":" in h
+                ]
+                if not scheduled_times:
+                    if hasattr(self, "lbl_schedule_countdown"):
+                        self.after_idle(
+                            lambda: self.lbl_schedule_countdown.configure(
+                                text="⏰ Chưa đặt giờ"
+                            )
+                        )
+                    continue
+
+                now = time.localtime()
+                now_str = time.strftime("%H:%M", now)
+                today_str = time.strftime("%Y-%m-%d", now)
+
+                # Tính mốc giờ tiếp theo để hiển thị đếm ngược
+                current_minutes = now.tm_hour * 60 + now.tm_min
+                best_diff = 24 * 60
+                next_target = None
+                for st in scheduled_times:
+                    try:
+                        sh, sm = map(int, st.split(":"))
+                        target_mins = sh * 60 + sm
+                        diff = target_mins - current_minutes
+                        if diff <= 0:
+                            diff += 24 * 60
+                        if diff < best_diff:
+                            best_diff = diff
+                            next_target = st
+                    except Exception:
+                        pass
+
+                if next_target and hasattr(self, "lbl_schedule_countdown"):
+                    hours_left = best_diff // 60
+                    mins_left = best_diff % 60
+                    countdown_text = (
+                        f"⏰ Đợt tới: {next_target} (còn {hours_left}h {mins_left:02d}m)"
+                    )
+                    self.after_idle(
+                        lambda t=countdown_text: self.lbl_schedule_countdown.configure(
+                            text=t
+                        )
+                    )
+
+                # Kiểm tra kích hoạt đúng phút
+                for st in scheduled_times:
+                    if st == now_str:
+                        trigger_key = f"{today_str}_{st}"
+                        if last_triggered_date_hour != trigger_key:
+                            last_triggered_date_hour = trigger_key
+                            self.log_message(
+                                f"⏰ [LÊN LỊCH TỰ ĐỘNG] ĐÃ ĐẾN KHUNG GIỜ VÀNG {st}! "
+                                "Hệ thống đang tự động kích hoạt toàn bộ 40 máy..."
+                            )
+                            chat_id = (
+                                config.ALLOWED_USER_IDS[0]
+                                if config.ALLOWED_USER_IDS
+                                else None
+                            )
+                            if chat_id:
+                                try:
+                                    main.bot.send_message(
+                                        chat_id,
+                                        f"⏰ [BoxPhoneControl] ĐÃ ĐẾN KHUNG GIỜ VÀNG {st}!\n"
+                                        "Tự động kích hoạt toàn bộ máy chạy chiến dịch Social...",
+                                    )
+                                except Exception:
+                                    pass
+
+                            self.after_idle(self.run_combined_social_adaptive)
+            except Exception:
+                time.sleep(5.0)
 
     @staticmethod
     def _random_social_order():
