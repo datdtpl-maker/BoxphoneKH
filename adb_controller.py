@@ -1,3 +1,4 @@
+import tempfile
 import subprocess
 import base64
 import time
@@ -50,6 +51,7 @@ class ADBController:
         self._screen_size_cache = {}
         self._screen_size_cache_seconds = 300.0
         self._screen_size_cache_guard = threading.Lock()
+        self._recent_tiktok_target_taps = {}
 
     @contextmanager
     def device_workflow_scope(self, device_id):
@@ -271,10 +273,7 @@ class ADBController:
         width, height = self.get_effective_screen_size(device_id)
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_recents_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_recents_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_recents_{safe_device_id}.xml")
         clear_markers = (
             "clear all",
             "close all",
@@ -284,6 +283,16 @@ class ADBController:
             "dong tat ca",
             "don dep",
             "don sach",
+        )
+        clear_resource_markers = (
+            "clear_all",
+            "clearall",
+            "close_all",
+            "closeall",
+            "remove_all",
+            "dismiss_all",
+            "recents_clear",
+            "recent_clear",
         )
         empty_markers = (
             "no recent items",
@@ -333,30 +342,64 @@ class ADBController:
                             )
                             if part
                         ).strip()
-                        normalized = self._normalize_facebook_text(raw_label)
+                        # NFKD không chuyển chữ đ/Đ thành d/D. Chuẩn hóa riêng
+                        # nhãn hệ thống để nhận đúng "Đóng tất cả" trên máy
+                        # dùng tiếng Việt mà không thay đổi logic Facebook.
+                        normalized = self._normalize_facebook_text(
+                            raw_label.replace("Đ", "D").replace("đ", "d")
+                        )
+                        resource_id = node.get("resource-id", "").casefold()
+                        is_clear_resource = any(
+                            marker in resource_id
+                            for marker in clear_resource_markers
+                        )
                         if normalized:
                             screen_text.append(normalized)
-                        is_clear = any(
+                        is_clear = is_clear_resource or any(
                             marker in normalized for marker in clear_markers
                         ) or any(
                             marker in raw_label for marker in chinese_clear_markers
                         )
                         if not is_clear:
                             continue
-                        clickable = node
-                        while (
-                            clickable is not None
-                            and clickable.get("clickable", "false") != "true"
-                        ):
-                            clickable = parent_map.get(clickable)
-                        click_node = clickable if clickable is not None else node
-                        coords = self._element_center(click_node)
+                        # Bấm đúng tâm node mang chữ thay vì tâm container cha.
+                        # Container của launcher có thể phủ gần hết màn hình,
+                        # trong khi vị trí nút khác nhau trên từng thiết bị.
+                        coords = self._element_center(node)
+                        if coords is None:
+                            clickable = node
+                            while (
+                                clickable is not None
+                                and clickable.get("clickable", "false") != "true"
+                            ):
+                                clickable = parent_map.get(clickable)
+                            if clickable is not None:
+                                coords = self._element_center(clickable)
                         if coords:
-                            clear_candidates.append(coords)
+                            exact_vietnamese = normalized == "dong tat ca"
+                            exact_supported = (
+                                normalized in clear_markers
+                                or raw_label in chinese_clear_markers
+                            )
+                            priority = (
+                                0 if exact_vietnamese
+                                else 1 if is_clear_resource
+                                else 2 if exact_supported
+                                else 3
+                            )
+                            clear_candidates.append((priority, coords))
 
                     if clear_candidates:
-                        x, y = clear_candidates[0]
-                        self.tap(device_id, x, y)
+                        clear_candidates.sort(key=lambda item: item[0])
+                        x, y = clear_candidates[0][1]
+                        tap_result = self.tap(device_id, x, y)
+                        tap_code = (
+                            tap_result[0]
+                            if isinstance(tap_result, tuple) and tap_result
+                            else None
+                        )
+                        if tap_code not in (None, 0):
+                            continue
                         time.sleep(0.8)
                         self.keyevent(device_id, 3)
                         self.lock_portrait(device_id, retries=2)
@@ -536,10 +579,7 @@ class ADBController:
 
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_home_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_home_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_home_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -606,10 +646,7 @@ class ADBController:
         """Return visible Feed content used to detect a white/stalled surface."""
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_feed_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_feed_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_feed_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -732,9 +769,35 @@ class ADBController:
         without_marks = "".join(
             char for char in normalized if not unicodedata.combining(char)
         )
+        without_marks = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        )
         return " ".join(
             re.sub(r"[^a-z0-9]+", " ", without_marks.casefold()).split()
         )
+
+    def _resolve_facebook_exact_page_name(self, target_phrase):
+        """Chọn tên Page đầy đủ tương ứng với cụm target đang tìm."""
+        target_tokens = self._normalize_facebook_text(target_phrase).split()
+        if not target_tokens:
+            return None
+
+        configured_names = (
+            config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT,
+            config.FACEBOOK_CANONICAL_PAGE_NAME,
+        )
+        matching_names = []
+        for candidate in configured_names:
+            candidate = (candidate or "").strip()
+            candidate_tokens = self._normalize_facebook_text(candidate).split()
+            if candidate_tokens and all(
+                token in candidate_tokens for token in target_tokens
+            ):
+                matching_names.append((len(candidate_tokens), candidate))
+
+        if not matching_names:
+            return None
+        return max(matching_names)[1]
 
     def prepare_facebook_target_results(self, device_id):
         """Đưa kết quả target về đầu và ưu tiên bộ lọc Page/Trang."""
@@ -744,26 +807,23 @@ class ADBController:
 
         width, height = self.get_effective_screen_size(device_id)
         # B2 có lướt kết quả mồi nên Facebook đôi lúc giữ nguyên offset khi
-        # tìm target. Vuốt ngón tay xuống trong vùng nội dung để trở về đầu;
-        # tuyệt đối không bắt đầu sát status bar để tránh kéo notification.
-        for swipe_duration in (620, 700, 660):
+        # tìm target. Vuốt nhẹ 2 lần trong vùng nội dung để đưa về đầu;
+        # tuyệt đối không kéo từ status bar để tránh notification shade.
+        for swipe_duration in (500, 520):
             self.swipe(
                 device_id,
                 width // 2,
-                int(height * 0.32),
+                int(height * 0.38),
                 width // 2,
-                int(height * 0.82),
+                int(height * 0.72),
                 duration=swipe_duration,
             )
-            time.sleep(0.45)
+            time.sleep(0.35)
         self.lock_portrait(device_id, retries=3)
 
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_target_tabs_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_target_tabs_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_target_tabs_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -773,8 +833,6 @@ class ADBController:
         )
         try:
             if pull_code != 0 or not os.path.exists(local_xml):
-                # Đã hoàn tất phần bắt buộc là đưa danh sách về đầu; Facebook
-                # có phiên bản không xuất tab Trang vào cây accessibility.
                 return True
             root = ET.parse(local_xml).getroot()
             parent_map = {
@@ -848,12 +906,199 @@ class ADBController:
             return False
 
         width, height = self.get_effective_screen_size(device_id)
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_facebook_page_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            tempfile.gettempdir(),
+            f"temp_facebook_page_{safe_device_id}.xml",
+        )
+
         for attempt in range(max(1, max_swipes)):
-            remote_xml = f"/sdcard/dump_facebook_page_{device_id}.xml"
-            local_xml = os.path.join(
-                os.path.dirname(__file__),
-                f"temp_facebook_page_{device_id}.xml",
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+            self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", remote_xml]
             )
+            pull_code, _, _ = self.execute_adb(
+                device_id, ["pull", remote_xml, local_xml]
+            )
+
+            try:
+                if pull_code == 0 and os.path.exists(local_xml):
+                    root = ET.parse(local_xml).getroot()
+                    parent_map = {
+                        child: parent
+                        for parent in root.iter()
+                        for child in parent
+                    }
+                    candidates = []
+                    for node in root.iter():
+                        if node.get("class", "").endswith("EditText"):
+                            continue
+                        
+                        # Gom nhãn từ chính node và các con trực tiếp nếu là ViewGroup nhỏ
+                        node_text_parts = [
+                            node.get("text", ""),
+                            node.get("content-desc", ""),
+                        ]
+                        for sub in node.iter():
+                            if sub is not node:
+                                node_text_parts.extend([
+                                    sub.get("text", ""),
+                                    sub.get("content-desc", ""),
+                                ])
+                        
+                        label = " ".join(p for p in node_text_parts if p).strip()
+                        label_normalized = self._normalize_facebook_text(label)
+                        if not label_normalized:
+                            continue
+
+                        label_token_set = set(label_normalized.split())
+                        # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand hoặc khớp địa điểm canonical
+                        has_all_target = all(
+                            token in label_token_set for token in target_tokens
+                        )
+                        target_overlap = sum(
+                            1 for token in target_tokens if token in label_token_set
+                        )
+                        has_core_brand = (
+                            "khai" in label_token_set and "hoan" in label_token_set
+                        )
+                        has_desired_loc = (
+                            bool(desired_tokens)
+                            and ("phan" in label_token_set or "thiet" in label_token_set)
+                            and has_core_brand
+                        )
+
+                        if not (has_all_target or has_desired_loc or (has_core_brand and target_overlap >= min(2, len(target_tokens)))):
+                            continue
+
+                        node_bounds = node.get("bounds", "")
+                        node_match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node_bounds
+                        )
+                        if not node_match:
+                            continue
+                        nx1, ny1, nx2, ny2 = map(int, node_match.groups())
+                        if ny2 <= int(height * 0.08) or ny1 >= int(height * 0.95):
+                            continue
+                        # Bỏ qua nếu node bao toàn bộ màn hình
+                        if (ny2 - ny1) > int(height * 0.35):
+                            continue
+
+                        # Tìm clickable container hợp lệ: CHỈ nhận container có chiều cao hợp lý (thẻ card <= 28% màn hình).
+                        # Tuyệt đối không duyệt lên RecyclerView/ViewGroup toàn màn hình để tránh lệch tọa độ giữa màn hình.
+                        click_node = node
+                        curr = node
+                        while curr is not None:
+                            if curr.get("clickable", "false") == "true":
+                                cbounds = curr.get("bounds", "")
+                                cmatch = re.match(
+                                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", cbounds
+                                )
+                                if cmatch:
+                                    cx1, cy1, cx2, cy2 = map(int, cmatch.groups())
+                                    c_height = cy2 - cy1
+                                    if c_height <= int(height * 0.28) and cy1 <= ny1 and cy2 >= ny2:
+                                        click_node = curr
+                                        break
+                            curr = parent_map.get(curr)
+
+                        bounds = click_node.get("bounds", "")
+                        match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
+                        )
+                        if not match:
+                            continue
+                        x1, y1, x2, y2 = map(int, match.groups())
+                        if y2 <= int(height * 0.08) or y1 >= int(height * 0.95):
+                            continue
+
+                        desired_overlap = sum(
+                            1 for token in desired_tokens if token in label_token_set
+                        ) if desired_tokens else 0
+                        exact_canonical = (
+                            bool(desired_tokens)
+                            and (
+                                all(token in label_token_set for token in desired_tokens)
+                                or (has_desired_loc and desired_overlap >= len(desired_tokens) * 0.6)
+                            )
+                        )
+                        contiguous_desired = (
+                            bool(desired_normalized)
+                            and desired_normalized in label_normalized
+                        )
+                        contiguous_target = (
+                            bool(target_normalized)
+                            and target_normalized in label_normalized
+                        )
+
+                        # Phân cấp ưu tiên:
+                        # Tier 0: Khớp canonical page name (Phan Thiết)
+                        # Tier 1: Khớp target_phrase
+                        # Tier 2: Khớp core brand
+                        if exact_canonical or contiguous_desired or has_desired_loc:
+                            tier = 0
+                        elif has_all_target or contiguous_target:
+                            tier = 1
+                        else:
+                            tier = 2
+
+                        tap_x = (x1 + x2) // 2
+                        tap_y = (y1 + y2) // 2
+                        candidates.append(
+                            (
+                                tier,
+                                -desired_overlap,
+                                -target_overlap,
+                                -len(label_normalized),
+                                tap_x,
+                                tap_y,
+                            )
+                        )
+
+                    if candidates:
+                        candidates.sort()
+                        _, _, _, _, x, y = candidates[0]
+                        self.tap(device_id, x, y)
+                        time.sleep(3.0)
+                        return True
+            except Exception as exc:
+                print(
+                    f"[Device {device_id[:6]}] Lỗi đọc kết quả Page "
+                    f"Facebook: {exc}"
+                )
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                self.execute_adb(
+                    device_id, ["shell", "rm", "-f", remote_xml]
+                )
+
+            if attempt < max(1, max_swipes) - 1:
+                if attempt == 0:
+                    time.sleep(0.6)
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.78),
+                    width // 2,
+                    int(height * 0.30),
+                    duration=random.randint(650, 950),
+                )
+                time.sleep(1.5)
+        return False
+
+        width, height = self.get_effective_screen_size(device_id)
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_facebook_page_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_facebook_page_{safe_device_id}.xml",
+        )
+
+        for attempt in range(max(1, max_swipes)):
             self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
             self.execute_adb(
                 device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -883,19 +1128,52 @@ class ADBController:
                             if part
                         ).strip()
                         label_normalized = self._normalize_facebook_text(label)
-                        if not label_normalized or not all(
-                            token in label_normalized.split()
-                            for token in target_tokens
-                        ):
+                        if not label_normalized:
                             continue
 
-                        clickable = node
-                        while (
-                            clickable is not None
-                            and clickable.get("clickable", "false") != "true"
-                        ):
-                            clickable = parent_map.get(clickable)
-                        click_node = clickable if clickable is not None else node
+                        label_token_set = set(label_normalized.split())
+                        # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand
+                        has_all_target = all(
+                            token in label_token_set for token in target_tokens
+                        )
+                        target_overlap = sum(
+                            1 for token in target_tokens if token in label_token_set
+                        )
+                        has_core_brand = (
+                            "khai" in label_token_set and "hoan" in label_token_set
+                        )
+
+                        if not (has_all_target or (has_core_brand and target_overlap >= min(2, len(target_tokens)))):
+                            continue
+
+                        node_bounds = node.get("bounds", "")
+                        node_match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node_bounds
+                        )
+                        if not node_match:
+                            continue
+                        nx1, ny1, nx2, ny2 = map(int, node_match.groups())
+                        if ny2 <= int(height * 0.08) or ny1 >= int(height * 0.95):
+                            continue
+
+                        # Tìm clickable container hợp lệ: CHỈ nhận container có chiều cao hợp lý (thẻ card <= 28% màn hình).
+                        # Tuyệt đối không duyệt lên RecyclerView/ViewGroup toàn màn hình để tránh lệch tọa độ giữa màn hình.
+                        click_node = node
+                        curr = node
+                        while curr is not None:
+                            if curr.get("clickable", "false") == "true":
+                                cbounds = curr.get("bounds", "")
+                                cmatch = re.match(
+                                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", cbounds
+                                )
+                                if cmatch:
+                                    cx1, cy1, cx2, cy2 = map(int, cmatch.groups())
+                                    c_height = cy2 - cy1
+                                    if c_height <= int(height * 0.28) and cy1 <= ny1 and cy2 >= ny2:
+                                        click_node = curr
+                                        break
+                            curr = parent_map.get(curr)
+
                         bounds = click_node.get("bounds", "")
                         match = re.match(
                             r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
@@ -903,16 +1181,211 @@ class ADBController:
                         if not match:
                             continue
                         x1, y1, x2, y2 = map(int, match.groups())
-                        if y2 <= int(height * 0.08):
+                        if y2 <= int(height * 0.08) or y1 >= int(height * 0.95):
                             continue
-                        exact_match = bool(desired_tokens) and all(
-                            token in label_normalized.split()
-                            for token in desired_tokens
+
+                        desired_overlap = sum(
+                            1 for token in desired_tokens if token in label_token_set
+                        ) if desired_tokens else 0
+                        exact_canonical = (
+                            bool(desired_tokens)
+                            and all(token in label_token_set for token in desired_tokens)
                         )
-                        contiguous = desired_normalized in label_normalized
+                        contiguous_desired = (
+                            bool(desired_normalized)
+                            and desired_normalized in label_normalized
+                        )
+                        contiguous_target = (
+                            bool(target_normalized)
+                            and target_normalized in label_normalized
+                        )
+
+                        # Phân cấp ưu tiên (tier càng thấp càng ưu tiên cao):
+                        # Tier 0: Khớp hoàn toàn canonical page name
+                        # Tier 1: Khớp hoàn toàn target_phrase
+                        # Tier 2: Khớp nhiều token của desired_tokens
+                        # Tier 3: Khớp các trường hợp còn lại
+                        if exact_canonical or contiguous_desired:
+                            tier = 0
+                        elif has_all_target or contiguous_target:
+                            tier = 1
+                        else:
+                            tier = 2
+
+                        tap_x = (x1 + x2) // 2
+                        tap_y = (y1 + y2) // 2
                         candidates.append(
                             (
-                                0 if exact_match or contiguous else 1,
+                                tier,
+                                -desired_overlap,
+                                -target_overlap,
+                                -len(label_normalized),
+                                tap_x,
+                                tap_y,
+                            )
+                        )
+
+                    if candidates:
+                        candidates.sort()
+                        _, _, _, _, x, y = candidates[0]
+                        self.tap(device_id, x, y)
+                        time.sleep(3.0)
+                        return True
+            except Exception as exc:
+                print(
+                    f"[Device {device_id[:6]}] Lỗi đọc kết quả Page "
+                    f"Facebook: {exc}"
+                )
+            finally:
+                try:
+                    os.remove(local_xml)
+                except Exception:
+                    pass
+                self.execute_adb(
+                    device_id, ["shell", "rm", "-f", remote_xml]
+                )
+
+            if attempt < max(1, max_swipes) - 1:
+                # Nếu attempt == 0 mà chưa thấy, chờ 0.6s quét lại tại chỗ trước khi cuộn
+                if attempt == 0:
+                    time.sleep(0.6)
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.78),
+                    width // 2,
+                    int(height * 0.30),
+                    duration=random.randint(650, 950),
+                )
+                time.sleep(1.5)
+        return False
+
+        width, height = self.get_effective_screen_size(device_id)
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_facebook_page_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            os.path.dirname(__file__),
+            f"temp_facebook_page_{safe_device_id}.xml",
+        )
+
+        for attempt in range(max(1, max_swipes)):
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+            self.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", remote_xml]
+            )
+            pull_code, _, _ = self.execute_adb(
+                device_id, ["pull", remote_xml, local_xml]
+            )
+
+            try:
+                if pull_code == 0 and os.path.exists(local_xml):
+                    root = ET.parse(local_xml).getroot()
+                    parent_map = {
+                        child: parent
+                        for parent in root.iter()
+                        for child in parent
+                    }
+                    candidates = []
+                    for node in root.iter():
+                        if node.get("class", "").endswith("EditText"):
+                            continue
+                        label = " ".join(
+                            part
+                            for part in (
+                                node.get("text", ""),
+                                node.get("content-desc", ""),
+                            )
+                            if part
+                        ).strip()
+                        label_normalized = self._normalize_facebook_text(label)
+                        if not label_normalized:
+                            continue
+
+                        label_token_set = set(label_normalized.split())
+                        # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand
+                        has_all_target = all(
+                            token in label_token_set for token in target_tokens
+                        )
+                        target_overlap = sum(
+                            1 for token in target_tokens if token in label_token_set
+                        )
+                        has_core_brand = (
+                            "khai" in label_token_set and "hoan" in label_token_set
+                        )
+
+                        if not (has_all_target or (has_core_brand and target_overlap >= min(2, len(target_tokens)))):
+                            continue
+
+                        node_bounds = node.get("bounds", "")
+                        node_match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node_bounds
+                        )
+                        if not node_match:
+                            continue
+                        nx1, ny1, nx2, ny2 = map(int, node_match.groups())
+                        if ny2 <= int(height * 0.08) or ny1 >= int(height * 0.95):
+                            continue
+
+                        # Tìm clickable container hợp lệ: CHỈ nhận container có chiều cao hợp lý (thẻ card <= 28% màn hình).
+                        # Tuyệt đối không duyệt lên RecyclerView/ViewGroup toàn màn hình để tránh lệch tọa độ giữa màn hình.
+                        click_node = node
+                        curr = node
+                        while curr is not None:
+                            if curr.get("clickable", "false") == "true":
+                                cbounds = curr.get("bounds", "")
+                                cmatch = re.match(
+                                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", cbounds
+                                )
+                                if cmatch:
+                                    cx1, cy1, cx2, cy2 = map(int, cmatch.groups())
+                                    c_height = cy2 - cy1
+                                    if c_height <= int(height * 0.28) and cy1 <= ny1 and cy2 >= ny2:
+                                        click_node = curr
+                                        break
+                            curr = parent_map.get(curr)
+
+                        bounds = click_node.get("bounds", "")
+                        match = re.match(
+                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
+                        )
+                        if not match:
+                            continue
+                        x1, y1, x2, y2 = map(int, match.groups())
+                        if y2 <= int(height * 0.08) or y1 >= int(height * 0.95):
+                            continue
+
+                        desired_overlap = sum(
+                            1 for token in desired_tokens if token in label_token_set
+                        ) if desired_tokens else 0
+                        exact_canonical = (
+                            bool(desired_tokens)
+                            and all(token in label_token_set for token in desired_tokens)
+                        )
+                        contiguous_desired = (
+                            bool(desired_normalized)
+                            and desired_normalized in label_normalized
+                        )
+                        contiguous_target = (
+                            bool(target_normalized)
+                            and target_normalized in label_normalized
+                        )
+
+                        # Phân cấp ưu tiên (tier càng thấp càng ưu tiên cao):
+                        # Tier 0: Khớp hoàn toàn canonical page name
+                        # Tier 1: Khớp hoàn toàn target_phrase
+                        # Tier 2: Khớp nhiều token của desired_tokens
+                        # Tier 3: Khớp các trường hợp còn lại
+                        if exact_canonical or contiguous_desired:
+                            tier = 0
+                        elif has_all_target or contiguous_target:
+                            tier = 1
+                        else:
+                            tier = 2
+
+                        tap_x = (x1 + x2) // 2
+                        tap_y = (y1 + y2) // 2
+                        candidates.append(
+                            (
                                 -len(label_normalized),
                                 (x1 + x2) // 2,
                                 (y1 + y2) // 2,
@@ -952,12 +1425,10 @@ class ADBController:
 
     def _get_facebook_search_input_state(self, device_id):
         """Đọc ô Search Facebook ở vùng header."""
+        width, height = self.get_effective_screen_size(device_id)
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_input_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_input_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_input_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -978,9 +1449,6 @@ class ADBController:
                 resource_id = node.get("resource-id", "").casefold()
                 description = node.get("content-desc", "").casefold()
                 editable = node.get("editable", "false") == "true"
-                searchable = "search" in f"{resource_id} {description}"
-                if not (editable or "edittext" in class_name or searchable):
-                    continue
                 match = re.match(
                     r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
                     node.get("bounds", ""),
@@ -989,7 +1457,23 @@ class ADBController:
                     continue
                 x1, y1, x2, y2 = map(int, match.groups())
                 cy = (y1 + y2) // 2
-                if cy > 360:
+                normalized_identity = self._normalize_facebook_text(
+                    f"{resource_id} {description} {node.get('text', '')}"
+                )
+                searchable = any(
+                    marker in normalized_identity
+                    for marker in ("search", "tim kiem")
+                )
+                wide_search_field = (
+                    searchable and (x2 - x1) >= int(width * 0.25)
+                )
+                if not (
+                    editable
+                    or "edittext" in class_name
+                    or wide_search_field
+                ):
+                    continue
+                if cy > int(height * 0.20):
                     continue
                 focused = node.get("focused", "false") == "true"
                 candidates.append(
@@ -999,6 +1483,7 @@ class ADBController:
                             + int(editable) * 4
                             + int("edittext" in class_name) * 2
                             + int(searchable)
+                            + int(wide_search_field) * 2
                         ),
                         "text": node.get("text", ""),
                         "focused": focused,
@@ -1036,10 +1521,7 @@ class ADBController:
         width, height = self.get_effective_screen_size(device_id)
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_search_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_search_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_search_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -1054,6 +1536,12 @@ class ADBController:
             if pull_code != 0 or not os.path.exists(local_xml):
                 return None
             root = ET.parse(local_xml).getroot()
+            parent_map = {
+                child: parent
+                for parent in root.iter()
+                for child in parent
+            }
+            candidates = []
             for node in root.iter():
                 haystack = " ".join(
                     (
@@ -1069,18 +1557,48 @@ class ADBController:
                     )
                 ):
                     continue
-                match = re.match(
-                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
-                    node.get("bounds", ""),
-                )
-                if not match:
-                    continue
-                x1, y1, x2, y2 = map(int, match.groups())
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                if cy <= int(height * 0.18) and cx >= int(width * 0.65):
-                    return cx, cy
-            return None
+
+                # Trên màn “Mới đây”, Facebook đặt chữ “Tìm kiếm” trong một
+                # TextView hẹp nhưng vùng nhận tap thật là container cha rộng.
+                # Đi ngược cây để lấy đúng vùng bấm, không dùng tâm node chữ.
+                ancestors = []
+                current = node
+                while current is not None:
+                    ancestors.append(current)
+                    current = parent_map.get(current)
+
+                for depth, candidate in enumerate(ancestors):
+                    match = re.match(
+                        r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                        candidate.get("bounds", ""),
+                    )
+                    if not match:
+                        continue
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
+                    candidate_width = x2 - x1
+                    if cy > int(height * 0.18):
+                        continue
+
+                    wide_field = (
+                        int(width * 0.25)
+                        <= candidate_width
+                        <= int(width * 0.95)
+                    )
+                    right_header_icon = (
+                        cx >= int(width * 0.65)
+                        and candidate_width < int(width * 0.25)
+                    )
+                    if wide_field:
+                        candidates.append((0, depth, cx, cy))
+                    elif right_header_icon:
+                        candidates.append((1, depth, cx, cy))
+
+            if not candidates:
+                return None
+            _priority, _depth, x, y = min(candidates)
+            return x, y
         except (OSError, ET.ParseError):
             return None
         finally:
@@ -1094,7 +1612,14 @@ class ADBController:
         """Back đúng một lần; nếu Facebook rơi nền thì mở lại, không lặp Back."""
         if not self.wait_for_facebook_foreground(device_id):
             return False
-        self.keyevent(device_id, 4)
+        back_result = self.keyevent(device_id, 4)
+        back_code = (
+            back_result[0]
+            if isinstance(back_result, tuple) and back_result
+            else None
+        )
+        if back_code not in (None, 0):
+            return False
         time.sleep(0.8)
         self.lock_portrait(device_id, retries=3)
         if self.wait_for_facebook_foreground(device_id):
@@ -1104,10 +1629,34 @@ class ADBController:
         self.lock_portrait(device_id, retries=3)
         return self.wait_for_facebook_foreground(device_id)
 
-    def find_and_click_facebook_search(self, device_id):
-        """Mở Search; nếu header ẩn thì Back đúng một lần rồi thử lại."""
-        self.lock_portrait(device_id)
+    def return_facebook_home_before_search(self, device_id):
+        """Back một lần sau khi nuôi Feed và xác minh lại đúng Facebook Home."""
+        self.lock_portrait(device_id, retries=3)
         if not self.wait_for_facebook_foreground(device_id):
+            return False
+
+        self.keyevent(device_id, 4)
+        time.sleep(0.8)
+        self.lock_portrait(device_id, retries=3)
+
+        if not self.wait_for_facebook_foreground(device_id):
+            return self.ensure_facebook_ready(device_id)
+        if self.is_facebook_home(device_id) is True:
+            return True
+
+        # Một số phiên bản Facebook giữ lại viewer hoặc tab con sau Back.
+        # Phục hồi bằng luồng Home có kiểm chứng, không tap mù lên bài viết.
+        return self.ensure_facebook_ready(device_id)
+
+    def find_and_click_facebook_search(
+        self, device_id, allow_recent_fallback=False
+    ):
+        """Mở Search; B3 được phép đi tiếp khi probe ADB tạm nghẽn."""
+        self.lock_portrait(device_id)
+        if (
+            not self.wait_for_facebook_foreground(device_id)
+            and not allow_recent_fallback
+        ):
             return False
 
         # Ở bước 3, ô Search có thể đã hiện sẵn trên trang kết quả. Dùng đúng
@@ -1120,31 +1669,67 @@ class ADBController:
             return True
 
         width, height = self.get_effective_screen_size(device_id)
-        if self.is_facebook_home(device_id) is True:
-            # Đây chỉ là nỗ lực nhẹ. Nếu header vẫn ẩn, vòng dưới sẽ dùng Back
-            # đúng một lần theo yêu cầu rồi xác minh lại đúng ứng dụng.
-            self.reveal_facebook_header(device_id)
 
-        recovered_with_back = False
         for attempt in range(2):
-            if not self.wait_for_facebook_foreground(device_id):
+            if (
+                not self.wait_for_facebook_foreground(device_id)
+                and not allow_recent_fallback
+            ):
                 return False
             coords = self._get_facebook_header_search_coords(device_id)
+            xml_verified_coords = coords is not None
+            used_home_fallback = False
+            used_recent_fallback = False
 
             if coords is None:
                 input_state = self._get_facebook_search_input_state(device_id)
                 if input_state:
                     coords = input_state["coords"]
-                elif (
-                    recovered_with_back
-                    and self.is_facebook_home(device_id) is True
-                ):
-                    # Sau Back và xác minh Home, đây là đúng vùng Search header.
-                    # Tọa độ này giúp nhóm máy UIAutomator đang bận vẫn tiếp tục.
-                    coords = (int(width * 0.83), int(height * 0.055))
+                    xml_verified_coords = True
+                else:
+                    home_state = self.is_facebook_home(device_id)
+                    if home_state is False:
+                        # Một dump XML rỗng/thiếu node dưới tải cao không đủ
+                        # để kết luận đã rời Home. Đọc thêm một nhịp trước khi
+                        # cho phép nhánh Back phục hồi.
+                        time.sleep(0.25)
+                        retry_home_state = self.is_facebook_home(device_id)
+                        if retry_home_state is not False:
+                            home_state = retry_home_state
+                    if home_state is not False:
+                        # Khi Home trả về True hoặc tạm thời chưa xác định
+                        # (XML đang bận), foreground vẫn là Facebook và ảnh
+                        # thực tế cho thấy kính lúp ở vùng header này.
+                        # Không được Back/thoát app chỉ vì dump chậm.
+                        # Tọa độ an toàn giúp nhóm máy UIAutomator đang bận
+                        # vẫn chạy; bước nhập sẽ xác minh lại nội dung.
+                        coords = (int(width * 0.83), int(height * 0.055))
+                        used_home_fallback = True
+
+            if coords is None and allow_recent_fallback:
+                # B3 vừa lướt kết quả từ khóa mồi và caller đã xác nhận
+                # Facebook. Ở màn “Mới đây”, ô Search là dải xám rộng bên trái.
+                # Khi 40 máy dump đồng thời, XML/dumpsys có thể cùng trống dù
+                # ô này vẫn hiện; tap tâm dải nhập thay vì báo lỗi giả.
+                coords = (int(width * 0.45), int(height * 0.055))
+                used_recent_fallback = True
 
             if coords is not None:
-                self.tap(device_id, coords[0], coords[1])
+                verified_wide_search_field = bool(
+                    xml_verified_coords
+                    and coords[0] < int(width * 0.65)
+                )
+                tap_result = self.tap(device_id, coords[0], coords[1])
+                tap_code = (
+                    tap_result[0]
+                    if isinstance(tap_result, tuple) and tap_result
+                    else None
+                )
+                if tap_code not in (None, 0):
+                    if attempt == 0:
+                        time.sleep(0.35)
+                        continue
+                    return False
                 time.sleep(1.0)
                 self.lock_portrait(device_id)
                 for verify_attempt in range(2):
@@ -1158,11 +1743,32 @@ class ADBController:
                     if verify_attempt == 0:
                         time.sleep(0.35)
 
-                # Khi 40 máy dump đồng thời, XML có thể bận dù tap Search đã
-                # được Android nhận. Nếu vẫn xác minh đang ở Home thì tap chưa
-                # mở Search: phải đi qua nhánh Back một lần ở dưới. Trạng thái
-                # False/None cho thấy đã rời Home hoặc XML bận, lúc đó để bước
-                # nhập XwIME tiếp tục xác minh chính xác nội dung.
+                # Ô Search xám rộng ở màn “Mới đây” đã là vùng nhập thật. Khi
+                # tọa độ này được XML xác minh, không Back/báo lỗi chỉ vì
+                # dumpsys trống một nhịp. Riêng icon kính lúp nhỏ bên phải Home
+                # vẫn phải đi qua nhánh phục hồi nếu tap chưa mở được input.
+                if verified_wide_search_field:
+                    return True
+
+                if allow_recent_fallback and (
+                    used_recent_fallback or xml_verified_coords
+                ):
+                    # Bước thay thế từ khóa kế tiếp sẽ xóa, nhập và xác minh
+                    # theo broadcast XwIME. Không Back khỏi màn Search chỉ vì
+                    # UIAutomator chưa kịp expose EditText sau lần tap này.
+                    return True
+
+                # Khi 40 máy dump đồng thời, XML có thể bận ngay sau khi ADB đã
+                # chạm đúng kính lúp trên Home. Không Back về Home ở tình huống
+                # này: bước replace_facebook_search_text kế tiếp sẽ focus ô
+                # nhập, bơm từ khóa và xác minh chính xác nội dung. Nếu tap thực
+                # sự không mở Search, bước đó retry rồi báo lỗi nhập cụ thể.
+                if (
+                    used_home_fallback
+                    and self.wait_for_facebook_foreground(device_id)
+                ):
+                    return True
+
                 home_after_tap = self.is_facebook_home(device_id)
                 if (
                     home_after_tap is not True
@@ -1173,22 +1779,30 @@ class ADBController:
             if attempt == 0:
                 if not self._recover_facebook_search_with_one_back(device_id):
                     return False
-                recovered_with_back = True
                 continue
             return False
         return False
 
-    def replace_facebook_search_text(self, device_id, text):
+    def replace_facebook_search_text(
+        self, device_id, text, allow_transient_foreground=False
+    ):
         """Xóa sạch từ khóa Facebook cũ rồi nhập nguyên cụm mới một lần."""
         expected = self._normalize_facebook_text(text)
+        input_broadcast_succeeded = False
         for attempt in range(2):
-            if not self.wait_for_facebook_foreground(device_id):
+            if (
+                not self.wait_for_facebook_foreground(device_id)
+                and not allow_transient_foreground
+            ):
                 raise RuntimeError(
                     "Facebook không còn ở foreground; đã chặn nhập từ khóa"
                 )
             self.ensure_ime(device_id)
             self._focus_facebook_search_input(device_id)
-            if not self.wait_for_facebook_foreground(device_id):
+            if (
+                not self.wait_for_facebook_foreground(device_id)
+                and not allow_transient_foreground
+            ):
                 raise RuntimeError(
                     "Facebook không còn ở foreground; đã chặn xóa từ khóa"
                 )
@@ -1202,7 +1816,10 @@ class ADBController:
             )
             if clear_code != 0:
                 continue
-            if not self.wait_for_facebook_foreground(device_id):
+            if (
+                not self.wait_for_facebook_foreground(device_id)
+                and not allow_transient_foreground
+            ):
                 raise RuntimeError(
                     "Facebook không còn ở foreground; đã chặn nhập từ khóa"
                 )
@@ -1216,23 +1833,88 @@ class ADBController:
                     "--receiver-foreground",
                 ],
             )
-            if input_code != 0:
-                continue
+            # XwIME có một lỗi không ổn định trên một số profile: chữ đã được
+            # Facebook nhận và hiển thị nhưng `am broadcast` vẫn trả mã khác 0.
+            # Vì vậy phải đọc trạng thái ô nhập trước khi coi lệnh là thất bại.
             time.sleep(0.5)
             state = self._get_facebook_search_input_state(device_id)
             if state is not None and (
                 self._normalize_facebook_text(state["text"]) == expected
             ):
                 return True
+            if input_code == 0:
+                input_broadcast_succeeded = True
+                # UIAutomator thường bận trong lúc bảng gợi ý mở. Broadcast đã
+                # được Android nhận thì giữ focus để bước Enter tiếp tục, thay
+                # vì gõ lại lần hai làm nhân đôi từ khóa trên màn hình.
+                if state is None and (
+                    allow_transient_foreground
+                    or self.wait_for_facebook_foreground(device_id)
+                ):
+                    return True
+                if attempt == 0:
+                    time.sleep(0.3)
+                    continue
+
+            # Khi broadcast báo lỗi và trạng thái vẫn chưa đúng, làm sạch lại
+            # rồi dùng `input text` ASCII làm đường lui. Cách này chỉ chạy sau
+            # khi lệnh broadcast thất bại nên không thể nối đuôi vào chữ đã có.
+            if input_code != 0:
+                self.execute_adb(
+                    device_id,
+                    [
+                        "shell", "am", "broadcast",
+                        "-a", "XW_CLEAR_TEXT",
+                        "--receiver-foreground",
+                    ],
+                )
+                fallback_text = self.remove_vietnamese_accents(text)
+                escaped = fallback_text.replace(" ", "%s")
+                fallback_code, _, _ = self.execute_adb(
+                    device_id,
+                    ["shell", "input", "text", escaped],
+                )
+                time.sleep(0.35)
+                fallback_state = self._get_facebook_search_input_state(
+                    device_id
+                )
+                if fallback_state is not None and (
+                    self._normalize_facebook_text(fallback_state["text"])
+                    == self._normalize_facebook_text(fallback_text)
+                ):
+                    return True
+                if (
+                    fallback_code == 0
+                    and (
+                        allow_transient_foreground
+                        or self.wait_for_facebook_foreground(device_id)
+                    )
+                ):
+                    return True
             if attempt == 0:
                 time.sleep(0.3)
+        # Facebook thường hiển thị bảng gợi ý ngay sau khi nhập. Ở một số
+        # thiết bị, UIAutomator lúc đó trả XML thiếu/không đọc được dù chữ đã
+        # hiện đúng trên màn hình. Broadcast XwIME trả mã 0 là tín hiệu ADB đã
+        # nhận toàn bộ từ khóa; giữ focus và để bước submit gửi Enter thay vì
+        # dừng sai trước khi tìm kiếm.
+        if input_broadcast_succeeded and (
+            allow_transient_foreground
+            or self.wait_for_facebook_foreground(device_id)
+        ):
+            return True
         raise RuntimeError(
             f"Không thể nhập chính xác từ khóa Facebook: '{text}'"
         )
 
-    def submit_facebook_search(self, device_id):
+    def submit_facebook_search(
+        self, device_id, allow_transient_foreground=False
+    ):
         """Gửi tìm kiếm Facebook bằng Enter của bàn phím."""
-        if not self.wait_for_facebook_foreground(device_id):
+        if (
+            not self.wait_for_facebook_foreground(device_id)
+            and not allow_transient_foreground
+        ):
             raise RuntimeError(
                 "Facebook không còn ở foreground; đã chặn gửi tìm kiếm"
             )
@@ -1809,10 +2491,7 @@ class ADBController:
         """Xác minh đã vào profile Page, không còn ở danh sách kết quả."""
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_profile_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_fb_profile_{safe_device_id}.xml",
-        )
+        local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_profile_{safe_device_id}.xml")
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -1832,13 +2511,19 @@ class ADBController:
                     for node in root.iter()
                 )
             )
-            # Header Page có thể bị rút gọn khác nhau giữa các phiên bản
-            # Facebook. Tên đầy đủ dùng để ưu tiên lúc chọn kết quả; khi xác
-            # minh chỉ bắt buộc cụm target do người dùng cấu hình.
             target_tokens = self._normalize_facebook_text(
                 target_phrase
             ).split()
-            has_target = all(token in all_text.split() for token in target_tokens)
+            all_tokens_set = set(all_text.split())
+            core_tokens = [t for t in target_tokens if t in ("khai", "hoan", "skincare")]
+            if not core_tokens:
+                core_tokens = target_tokens[:2]
+            has_core = all(token in all_tokens_set for token in core_tokens)
+            target_overlap = sum(1 for token in target_tokens if token in all_tokens_set)
+            has_target = (
+                all(token in all_tokens_set for token in target_tokens)
+                or (len(target_tokens) > 2 and target_overlap >= len(target_tokens) * 0.6)
+            )
             profile_markers = (
                 "theo doi",
                 "nhan tin",
@@ -1851,8 +2536,19 @@ class ADBController:
                 "about",
                 "details",
                 "likes",
+                "thich",
+                "like",
+                "danh gia",
+                "reviews",
+                "gioi thieu",
+                "anh",
+                "photos",
+                "video",
+                "videos",
+                "trang chu",
+                "home",
             )
-            return has_target and any(marker in all_text for marker in profile_markers)
+            return (has_core or has_target) and any(marker in all_text for marker in profile_markers)
         except Exception:
             return False
         finally:
@@ -1916,19 +2612,9 @@ class ADBController:
                 raise RuntimeError("Chưa nhập Page target Facebook")
             seed_keyword = random.choice(seeds)
             target_phrase = random.choice(targets)
-            configured_exact_page = (
-                config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT.strip()
-            )
-            target_tokens = self._normalize_facebook_text(
+            exact_page_name = self._resolve_facebook_exact_page_name(
                 target_phrase
-            ).split()
-            exact_page_name = None
-            if configured_exact_page:
-                configured_tokens = self._normalize_facebook_text(
-                    configured_exact_page
-                ).split()
-                if all(token in configured_tokens for token in target_tokens):
-                    exact_page_name = configured_exact_page
+            )
             self.lock_portrait(device_id)
 
             check_cancelled()
@@ -1958,7 +2644,10 @@ class ADBController:
 
             check_cancelled()
             ensure_facebook_action_context("Facebook B2")
-            self.reveal_facebook_header(device_id)
+            if not self.return_facebook_home_before_search(device_id):
+                raise RuntimeError(
+                    "Không thể Back và xác minh Facebook Home trước tìm kiếm"
+                )
             update_status(
                 f"[Facebook B2] Tìm từ khóa mồi '{seed_keyword}'..."
             )
@@ -1994,10 +2683,18 @@ class ADBController:
                 f"[Facebook B3] Xóa sạch từ khóa mồi và tìm Page "
                 f"'{target_phrase}'..."
             )
-            if not self.find_and_click_facebook_search(device_id):
+            if not self.find_and_click_facebook_search(
+                device_id, allow_recent_fallback=True
+            ):
                 raise RuntimeError("Không mở lại được ô Search Facebook")
-            self.replace_facebook_search_text(device_id, target_phrase)
-            self.submit_facebook_search(device_id)
+            self.replace_facebook_search_text(
+                device_id,
+                target_phrase,
+                allow_transient_foreground=True,
+            )
+            self.submit_facebook_search(
+                device_id, allow_transient_foreground=True
+            )
             self.facebook_loading_delay(
                 device_id,
                 "target_results",
@@ -2027,11 +2724,17 @@ class ADBController:
                         "tải lại kết quả và thử thêm một lần..."
                     )
                     ensure_facebook_action_context("Facebook B3 retry")
-                    if self.find_and_click_facebook_search(device_id):
+                    if self.find_and_click_facebook_search(
+                        device_id, allow_recent_fallback=True
+                    ):
                         self.replace_facebook_search_text(
-                            device_id, target_phrase
+                            device_id,
+                            target_phrase,
+                            allow_transient_foreground=True,
                         )
-                        self.submit_facebook_search(device_id)
+                        self.submit_facebook_search(
+                            device_id, allow_transient_foreground=True
+                        )
                     self.facebook_loading_delay(
                         device_id,
                         "target_results",
@@ -4119,6 +4822,7 @@ class ADBController:
 
     def get_tiktok_search_input_state(self, device_id):
         """Đọc tọa độ, nội dung và trạng thái focus của ô Search TikTok."""
+        width, _height = self.get_effective_screen_size(device_id)
         safe_device_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', device_id)
         xml_file = f"/sdcard/dump_tt_input_{safe_device_id}.xml"
         local_xml = os.path.join(
@@ -4143,9 +4847,18 @@ class ADBController:
                 class_name = elem.get("class", "").lower()
                 resource_id = elem.get("resource-id", "").lower()
                 content_desc = elem.get("content-desc", "").lower()
+                identity = f"{resource_id} {content_desc}"
+                if any(
+                    marker in identity
+                    for marker in (
+                        "search_more", "more_options", "more options",
+                        "filter", "feedback", "overflow", "menu_more",
+                    )
+                ):
+                    continue
                 editable = elem.get("editable", "").lower() == "true"
                 searchable = any(
-                    marker in f"{resource_id} {content_desc}"
+                    marker in identity
                     for marker in ("search", "et_search", "search_input")
                 )
                 if not (editable or "edittext" in class_name or searchable):
@@ -4159,6 +4872,17 @@ class ADBController:
                 x1, y1, x2, y2 = map(int, match.groups())
                 cy = (y1 + y2) // 2
                 if cy > 350:
+                    continue
+                # Nút ba chấm nằm sát mép phải và cũng có thể chứa chữ
+                # "search" trong resource-id. Ô nhập thật luôn bắt đầu ở nửa
+                # trái và đủ rộng để chứa query.
+                if x1 >= int(width * 0.78):
+                    continue
+                if (
+                    not editable
+                    and "edittext" not in class_name
+                    and (x2 - x1) < int(width * 0.30)
+                ):
                     continue
 
                 focused = elem.get("focused", "").lower() == "true"
@@ -4190,6 +4914,54 @@ class ADBController:
         best = max(candidates, key=lambda item: item["score"])
         best.pop("score", None)
         return best
+
+    def dismiss_tiktok_search_filter_panel(self, device_id):
+        """Đóng bảng Filters nếu còn sót từ phiên lỗi, không tap mù."""
+        root = self._get_tiktok_ui_root(device_id, "tt_filter_panel")
+        if root is None:
+            return False
+        labels = {
+            self._normalize_tiktok_text(
+                f"{node.get('text', '')} {node.get('content-desc', '')}"
+            )
+            for node in root.iter()
+        }
+        labels.discard("")
+        has_filters = any(
+            label in ("filters", "filter", "bộ lọc", "bo loc")
+            for label in labels
+        )
+        has_feedback = any(
+            "share feedback" in label or "phản hồi" in label
+            for label in labels
+        )
+        if not (has_filters and has_feedback):
+            return False
+        self.keyevent(device_id, 4)
+        time.sleep(0.6)
+        return True
+
+    def focus_tiktok_existing_search_bar(self, device_id):
+        """Focus query B2 để nhập target; tuyệt đối tránh nút ba chấm phải."""
+        if not self.wait_for_tiktok_foreground(device_id):
+            return False
+        self.dismiss_tiktok_search_filter_panel(device_id)
+        width, height = self.get_effective_screen_size(device_id)
+        state = self.get_tiktok_search_input_state(device_id)
+        coords = state["coords"] if state else (
+            int(width * 0.45), int(height * 0.055)
+        )
+        # Cổng an toàn cuối: mọi tọa độ phía nút ba chấm đều bị loại bỏ.
+        if coords[0] >= int(width * 0.78):
+            coords = (int(width * 0.45), int(height * 0.055))
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(0.4)
+        verified = self.get_tiktok_search_input_state(device_id)
+        if verified and verified.get("focused"):
+            return True
+        # UIAutomator thường bận khi 40 máy chạy đồng thời; tap an toàn vào
+        # vùng query cộng với TikTok foreground là đủ để XwIME CLEAR + INPUT.
+        return self.wait_for_tiktok_foreground(device_id)
 
     def focus_tiktok_search_input(self, device_id):
         """Focus EditText; dùng SearchActivity khi XML tạm bận dưới tải lớn."""
@@ -4354,6 +5126,95 @@ class ADBController:
         value = unicodedata.normalize("NFKC", value or "")
         value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
         return re.sub(r"\s+", " ", value).strip().casefold()
+
+    def _normalize_tiktok_identity(self, value):
+        """Chuẩn hóa tên kênh để đối chiếu cả bản có/không dấu."""
+        value = unicodedata.normalize(
+            "NFKD", self._normalize_tiktok_text(value)
+        )
+        return "".join(
+            ch for ch in value if unicodedata.category(ch) != "Mn"
+        )
+
+    def _remember_tiktok_target_tap(self, device_id, channel_name):
+        self._recent_tiktok_target_taps[device_id] = (
+            self._normalize_tiktok_identity(channel_name),
+            time.monotonic(),
+        )
+
+    def _has_recent_tiktok_target_tap(self, device_id, channel_name):
+        remembered = self._recent_tiktok_target_taps.get(device_id)
+        if not remembered:
+            return False
+        remembered_target, tapped_at = remembered
+        target = self._normalize_tiktok_identity(channel_name)
+        same_target = bool(
+            target
+            and remembered_target
+            and (
+                target == remembered_target
+                or target.startswith(f"{remembered_target} ")
+                or remembered_target.startswith(f"{target} ")
+            )
+        )
+        return same_target and time.monotonic() - tapped_at <= 60.0
+
+    def _tap_tiktok_target_name_fallback(
+        self, device_id, channel_name, coords=None
+    ):
+        """Tap thẳng vùng tên kênh khi TikTok không expose card qua XML."""
+        if not self.wait_for_tiktok_foreground(device_id):
+            return False
+        width, height = self.get_effective_screen_size(device_id)
+        if coords is None:
+            coords = (int(width * 0.38), int(height * 0.26))
+        print(
+            f"[Device {device_id[:6]}] UI TikTok không expose card Kênh • "
+            f"tap trực tiếp vùng tên tại {coords}."
+        )
+        self.tap(device_id, coords[0], coords[1])
+        time.sleep(3.0)
+        if not self.wait_for_tiktok_foreground(device_id):
+            return False
+        self._remember_tiktok_target_tap(device_id, channel_name)
+        return True
+
+    def _tap_tiktok_profile_clip_fallback(self, device_id):
+        """Mở clip ở vùng lưới thấp và bắt buộc xác minh player."""
+        if not self.wait_for_tiktok_foreground(device_id):
+            return False
+        width, height = self.get_effective_screen_size(device_id)
+        columns = (
+            int(width * 0.18), int(width * 0.50), int(width * 0.82)
+        )
+        # 48% có thể trúng thanh sort Latest/Popular ở profile có header dài.
+        # Các mức dưới đây nằm sâu trong lưới clip ở những layout đã quan sát.
+        for attempt, y_ratio in enumerate((0.68, 0.76, 0.62), start=1):
+            coords = (random.choice(columns), int(height * y_ratio))
+            print(
+                f"[Device {device_id[:6]}] Mở clip profile target tại "
+                f"{coords} (lần {attempt}/3)."
+            )
+            self.tap(device_id, coords[0], coords[1])
+            time.sleep(2.5)
+            if self.is_tiktok_video_player(device_id):
+                return True
+
+            if attempt < 3:
+                # Chưa phải player: vuốt phần profile lên để lưới clip hiện
+                # sâu hơn, rồi thử một ô khác. Không coi foreground là đủ.
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.82),
+                    width // 2,
+                    int(height * 0.42),
+                    duration=550,
+                )
+                time.sleep(1.0)
+                if not self.wait_for_tiktok_foreground(device_id):
+                    return False
+        return False
 
     def is_tiktok_search_results_for(self, device_id, keyword):
         """Xác minh TikTok đã mở kết quả đúng từ khóa trước khi sang B3."""
@@ -4560,7 +5421,7 @@ class ADBController:
         if root is None:
             return False
 
-        target = self._normalize_tiktok_text(channel_name)
+        target = self._normalize_tiktok_identity(channel_name)
         has_target = False
         has_search_input = False
         has_search_results_marker = False
@@ -4574,18 +5435,25 @@ class ADBController:
                 self._normalize_tiktok_text(elem.get("content-desc", "")),
             }
             text_values.discard("")
+            identity_values = {
+                self._normalize_tiktok_identity(elem.get("text", "")),
+                self._normalize_tiktok_identity(elem.get("content-desc", "")),
+            }
+            identity_values.discard("")
             resource_id = elem.get("resource-id", "").lower()
             # Tên target phải xuất hiện như một trường danh tính hoàn chỉnh.
             # Không dùng phép "contains" vì caption/bio của kênh khác có thể
             # nhắc tên target và khiến tool xác minh nhầm profile.
-            if target and target in text_values:
+            if target and any(
+                value == target or value.startswith(f"{target} ")
+                for value in identity_values
+            ):
                 has_target = True
             if "edittext" in class_name.lower():
                 has_search_input = True
             if any(
                 value in (
-                    "top", "người dùng", "users", "cửa hàng", "shop",
-                    "xem tất cả", "see all",
+                    "người dùng", "users", "people", "xem tất cả", "see all",
                 )
                 for value in text_values
             ):
@@ -4618,7 +5486,7 @@ class ADBController:
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
-        target = self._normalize_tiktok_text(channel_name)
+        target = self._normalize_tiktok_identity(channel_name)
         screen_width, screen_height = self.get_effective_screen_size(device_id)
         search_bar_bottom = int(screen_height * 0.12)
         max_scan_attempts = 5
@@ -4626,6 +5494,10 @@ class ADBController:
         for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_channel_{attempt}")
             if root is None:
+                if attempt == 0:
+                    return self._tap_tiktok_target_name_fallback(
+                        device_id, channel_name
+                    )
                 time.sleep(1.0)
                 continue
 
@@ -4639,6 +5511,22 @@ class ADBController:
 
             parent_map = {child: parent for parent in root.iter() for child in parent}
             matches = []
+            profile_row_cues = (
+                "follow", "following", "theo dõi", "đang follow",
+                "đã follow", "account", "tài khoản", "user",
+            )
+            cue_centers = []
+            for cue_elem in root.iter():
+                cue_text = self._normalize_tiktok_text(
+                    f"{cue_elem.get('text', '')} "
+                    f"{cue_elem.get('content-desc', '')}"
+                )
+                if not any(cue in cue_text for cue in profile_row_cues):
+                    continue
+                cue_coords = self._element_center(cue_elem)
+                if cue_coords:
+                    cue_centers.append(cue_coords)
+
             for elem in root.iter():
                 class_name = elem.get("class", "").lower()
                 resource_id = elem.get("resource-id", "").lower()
@@ -4651,8 +5539,8 @@ class ADBController:
                     continue
 
                 text_values = {
-                    self._normalize_tiktok_text(elem.get("text", "")),
-                    self._normalize_tiktok_text(
+                    self._normalize_tiktok_identity(elem.get("text", "")),
+                    self._normalize_tiktok_identity(
                         elem.get("content-desc", "")
                     ),
                 }
@@ -4674,6 +5562,54 @@ class ADBController:
                 target_class = target_elem.get("class", "").lower()
                 target_resource_id = target_elem.get("resource-id", "").lower()
                 coords = self._element_center(target_elem)
+                identity_coords = self._element_center(elem)
+                inferred_identity_coords = False
+                if identity_coords is None:
+                    viable_cues = [
+                        (cue_x, cue_y)
+                        for cue_x, cue_y in cue_centers
+                        if search_bar_bottom < cue_y < int(screen_height * 0.72)
+                    ]
+                    if viable_cues:
+                        _, cue_y = min(viable_cues, key=lambda point: point[1])
+                        identity_coords = (int(screen_width * 0.38), cue_y)
+                        inferred_identity_coords = True
+                nearby_profile_row_cue = bool(
+                    identity_coords and (
+                        inferred_identity_coords
+                        or any(
+                            abs(cue_y - identity_coords[1])
+                            <= max(120, int(screen_height * 0.09))
+                            for _, cue_y in cue_centers
+                        )
+                    )
+                )
+
+                # Một số bản TikTok gắn clickable cho toàn bộ khối kết quả
+                # (Users + Shopping), làm vùng cha cao gần cả màn hình. Tap
+                # giữa vùng cha sẽ rơi vào sản phẩm. Khi tên target và nút
+                # Follow nằm cùng hàng, chạm trực tiếp vào text tên kênh.
+                clickable_bounds = re.match(
+                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                    target_elem.get("bounds", ""),
+                )
+                clickable_is_too_broad = bool(
+                    clickable_bounds
+                    and int(clickable_bounds.group(4))
+                    - int(clickable_bounds.group(2)) > 360
+                )
+                if (
+                    identity_coords
+                    and nearby_profile_row_cue
+                    and (
+                        clickable_is_too_broad
+                        or "search" in target_resource_id
+                    )
+                ):
+                    target_elem = elem
+                    target_class = elem.get("class", "").lower()
+                    target_resource_id = elem.get("resource-id", "").lower()
+                    coords = identity_coords
                 identity_markers = (
                     "username", "user_name", "nickname", "profile",
                     "account", "author", "title",
@@ -4689,10 +5625,6 @@ class ADBController:
                     )
                     for node in target_elem.iter()
                 }
-                profile_row_cues = (
-                    "follow", "following", "theo dõi", "đang follow",
-                    "đã follow", "account", "tài khoản", "user",
-                )
                 has_profile_row_cue = any(
                     any(cue in value for cue in profile_row_cues)
                     for value in subtree_texts
@@ -4702,9 +5634,12 @@ class ADBController:
                     target_elem.get("bounds", ""),
                 )
                 compact_identity_card = bool(
-                    bounds_match
-                    and int(bounds_match.group(4))
-                    - int(bounds_match.group(2)) <= 360
+                    inferred_identity_coords
+                    or (
+                        bounds_match
+                        and int(bounds_match.group(4))
+                        - int(bounds_match.group(2)) <= 360
+                    )
                 )
                 if (
                     coords
@@ -4722,11 +5657,28 @@ class ADBController:
                     )
                 ):
                     score = 14 if has_identity_resource else 10
-                    if has_profile_row_cue:
+                    if has_profile_row_cue or nearby_profile_row_cue:
                         score += 3
                     matches.append((score, coords, target))
 
             if not matches:
+                # Trên UI thật, tên kênh có thể bị render ngoài accessibility
+                # tree nhưng nút Follow cùng hàng vẫn có bounds. Với kết quả
+                # đầu tiên sau truy vấn target, tap trực tiếp vùng tên bên trái.
+                top_row_cues = [
+                    (cue_x, cue_y)
+                    for cue_x, cue_y in cue_centers
+                    if int(screen_height * 0.18)
+                    < cue_y
+                    < int(screen_height * 0.42)
+                ]
+                if attempt == 0 and top_row_cues:
+                    _, cue_y = min(top_row_cues, key=lambda point: point[1])
+                    return self._tap_tiktok_target_name_fallback(
+                        device_id,
+                        channel_name,
+                        coords=(int(screen_width * 0.38), cue_y),
+                    )
                 if attempt >= max_scan_attempts - 1:
                     break
                 if not self.wait_for_tiktok_foreground(device_id):
@@ -4759,6 +5711,7 @@ class ADBController:
             time.sleep(3.0)
 
             if self.is_on_tiktok_target_profile(device_id, channel_name):
+                self._remember_tiktok_target_tap(device_id, channel_name)
                 return True
 
         return False
@@ -4767,10 +5720,15 @@ class ADBController:
         """Tìm một clip trên profile, kể cả khi phải cuộn mới thấy lưới."""
         width, height = self.get_effective_screen_size(device_id)
         max_scan_attempts = 5
-        profile_confirmed = False
+        trusted_target_tap = self._has_recent_tiktok_target_tap(
+            device_id, channel_name
+        )
+        profile_confirmed = trusted_target_tap
         for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_profile_videos_{attempt}")
             if root is None:
+                if trusted_target_tap and attempt == 0:
+                    return self._tap_tiktok_profile_clip_fallback(device_id)
                 time.sleep(0.8)
                 continue
             if not profile_confirmed:
@@ -4832,6 +5790,8 @@ class ADBController:
                     candidate_set.add(coords)
 
             if not candidates:
+                if trusted_target_tap and attempt == 0:
+                    return self._tap_tiktok_profile_clip_fallback(device_id)
                 if attempt >= max_scan_attempts - 1:
                     break
                 if not self.wait_for_tiktok_foreground(device_id):
@@ -4865,21 +5825,48 @@ class ADBController:
         return False
 
     def is_tiktok_video_player(self, device_id):
-        """Xác minh TikTok đã mở màn hình DetailActivity của một clip."""
+        """Xác minh đã mở player bằng Activity hoặc cụm điều khiển video."""
         code, stdout, _ = self.execute_adb(
             device_id, ["shell", "dumpsys", "window", "windows"]
         )
-        if code != 0:
-            return False
-        output = stdout.lower()
-        return (
-            "com.ss.android.ugc.trill" in output
-            and (
-                "detailactivity" in output
-                or "aweme.detail" in output
-                or "detail.ui" in output
-            )
+        output = stdout.lower() if code == 0 else ""
+        tiktok_packages = (
+            config.TIKTOK_PACKAGE.casefold(),
+            config.TIKTOK_PACKAGE_ALT.casefold(),
         )
+        if (
+            any(package in output for package in tiktok_packages)
+            and any(
+                marker in output
+                for marker in (
+                    "detailactivity", "aweme.detail", "detail.ui",
+                )
+            )
+        ):
+            return True
+
+        # Một số phiên bản dùng chung Main/SplashActivity cho profile và
+        # player. Khi đó cần nhìn cụm nút hành động dọc; chỉ TikTok foreground
+        # là chưa đủ vì menu Latest/Popular cũng giữ nguyên foreground.
+        root = self._get_tiktok_ui_root(device_id, "tt_player_check")
+        if root is None:
+            return False
+        action_hits = set()
+        has_profile_grid = False
+        action_markers = {
+            "like", "likes", "thích", "comment", "comments", "bình luận",
+            "share", "chia sẻ", "favorite", "favourite", "save", "lưu",
+        }
+        for elem in root.iter():
+            if elem.get("class", "").casefold().endswith("gridview"):
+                has_profile_grid = True
+            value = self._normalize_tiktok_text(
+                f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            )
+            for marker in action_markers:
+                if value == marker or value.startswith(f"{marker} "):
+                    action_hits.add(marker)
+        return not has_profile_grid and len(action_hits) >= 2
 
     @serialized_device_workflow
     def tiktok_automation_workflow(self, device_id, seed_keywords=None, target_channel=None, min_delay=5, max_delay=10, status_callback=None, is_cancelled=None):
@@ -5087,7 +6074,7 @@ class ADBController:
                 )
             
             # 1. Bấm vào Kính lúp / Ô tìm kiếm ở đầu trang
-            if not self.find_and_click_tiktok_search(device_id):
+            if not self.focus_tiktok_existing_search_bar(device_id):
                 raise RuntimeError(
                     "TikTok B3 không mở/focus được ô tìm kiếm trên kết quả B2"
                 )

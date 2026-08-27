@@ -48,6 +48,12 @@ def build_installer():
     subprocess.run(command, cwd=ROOT, check=True)
     if not INSTALLER_PATH.is_file():
         raise FileNotFoundError(f"Inno Setup khong tao ra {INSTALLER_PATH}")
+
+    copy_dir = ROOT / "CHỈ COPY FILE NÀY"
+    if copy_dir.exists():
+        shutil.copy2(INSTALLER_PATH, copy_dir / "BoxPhoneControl-Setup.exe")
+        print("[Build] Da sao chep bo cai vao thu muc: CHI COPY FILE NAY/BoxPhoneControl-Setup.exe")
+
     return INSTALLER_PATH
 
 

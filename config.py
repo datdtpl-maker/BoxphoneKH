@@ -84,6 +84,13 @@ FACEBOOK_STEP3_PAGE_MAX = 300
 FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = os.getenv(
     "FACEBOOK_TARGET_PAGE_EXACT", ""
 )
+FACEBOOK_CANONICAL_PAGE_NAME = os.getenv(
+    "FACEBOOK_CANONICAL_PAGE_NAME",
+    (
+        "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa "
+        "Phan Thiết"
+    ),
+)
 
 # Notion chỉ cung cấp dữ liệu đầu vào; token luôn được lưu cục bộ trong .env.
 NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN", "")

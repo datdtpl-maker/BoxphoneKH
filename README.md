@@ -21,8 +21,13 @@ python gui_app.py
 ## Kiểm tra
 
 ```powershell
+python verify_tiktok_freeze.py
 python -m unittest discover -p "test_*.py"
 ```
+
+Module TikTok được đóng băng tại baseline `BoxPhoneControl 1.0.16`. Khi phát
+triển Facebook, không chỉnh sửa code/config/UI entry point/test TikTok. Xem
+quy tắc chi tiết trong `TIKTOK_FROZEN.md`.
 
 ## Đóng gói
 

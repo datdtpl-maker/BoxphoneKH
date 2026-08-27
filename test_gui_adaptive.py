@@ -31,6 +31,20 @@ def _run_immediately(captured):
 
 
 class AdaptiveGuiIntegrationTests(unittest.TestCase):
+    def test_common_mixed_switch_controls_both_module_run_buttons(self):
+        app = GUIApp.__new__(GUIApp)
+        app.social_combined_var = _BooleanVar(True)
+        app.tiktok_combined_var = _BooleanVar(False)
+        app.facebook_combined_var = _BooleanVar(False)
+
+        self.assertTrue(app._social_combined_enabled("tiktok"))
+        self.assertTrue(app._social_combined_enabled("facebook"))
+
+        app.social_combined_var.value = False
+
+        self.assertFalse(app._social_combined_enabled("tiktok"))
+        self.assertFalse(app._social_combined_enabled("facebook"))
+
     def test_combined_switches_are_independent_by_source_module(self):
         app = GUIApp.__new__(GUIApp)
         app.tiktok_combined_var = _BooleanVar(True)

@@ -75,7 +75,7 @@ def clear_device_recents_after_success(device_id, status_callback=None):
     if cleared:
         notify("[Hoàn tất] Đã xóa toàn bộ đa nhiệm và trở về màn hình chính.")
     else:
-        notify("[Cảnh báo] Launcher không hiển thị nút Xóa tất cả đa nhiệm.")
+        notify("[Cảnh báo] Launcher không hiển thị nút Đóng tất cả đa nhiệm.")
     return cleared
 
 # Các biến toàn cục điều khiển chạy tuần tự và hủy bỏ tác vụ

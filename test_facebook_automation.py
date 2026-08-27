@@ -1,6 +1,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,6 +9,279 @@ from adb_controller import ADBController
 
 
 class FacebookAutomationTests(unittest.TestCase):
+    def test_target_phrase_resolves_to_full_canonical_page_name(self):
+        controller = ADBController(adb_path="adb")
+        canonical_name = (
+            "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa "
+            "Phan Thiết"
+        )
+
+        with (
+            patch(
+                "adb_controller.config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT",
+                "Khải Hoàn Skincare",
+            ),
+            patch(
+                "adb_controller.config.FACEBOOK_CANONICAL_PAGE_NAME",
+                canonical_name,
+            ),
+        ):
+            resolved = controller._resolve_facebook_exact_page_name(
+                "Khải Hoàn Skincare"
+            )
+
+        self.assertEqual(canonical_name, resolved)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_partial_home_dump_is_retried_before_search_fallback(self, _sleep):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: True
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = lambda _device_id: None
+        home_states = iter([False, None])
+        controller.is_facebook_home = lambda _device_id: next(home_states)
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+            or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search("device-partial-dump")
+        )
+        self.assertEqual([(896, 105)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_foreground_home_unknown_still_uses_safe_search_icon_fallback(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: True
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = lambda _device_id: None
+        controller.is_facebook_home = lambda _device_id: None
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+            or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search("device-home-unknown")
+        )
+        self.assertEqual([(896, 105)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_forty_devices_accept_visible_search_during_parallel_xml_busy(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: True
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = lambda _device_id: None
+        controller.is_facebook_home = lambda _device_id: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        controller.tap = (
+            lambda device_id, x, y: taps.append((device_id, x, y))
+            or (0, "", "")
+        )
+        devices = [f"device-{index}" for index in range(1, 41)]
+
+        with ThreadPoolExecutor(max_workers=40) as executor:
+            results = list(
+                executor.map(controller.find_and_click_facebook_search, devices)
+            )
+
+        self.assertTrue(all(results))
+        self.assertEqual(40, len(taps))
+        self.assertTrue(all((x, y) == (896, 105) for _, x, y in taps))
+
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_vietnamese_wide_search_field_is_detected_but_header_icon_is_not(
+        self, _exists, _remove
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.view.View"
+                    content-desc="Tìm kiếm"
+                    bounds="[890,55][980,145]" />
+              <node class="android.view.View"
+                    content-desc="Tìm kiếm trên Facebook"
+                    clickable="true"
+                    bounds="[110,55][850,145]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = (
+            lambda _device_id, _args, timeout=15: (0, "", "")
+        )
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            state = controller._get_facebook_search_input_state(
+                "device-vietnamese-search"
+            )
+
+        self.assertIsNotNone(state)
+        self.assertEqual((480, 100), state["coords"])
+
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_recent_search_uses_wide_clickable_ancestor_of_placeholder(
+        self, _exists, _remove
+    ):
+        """Màn Mới đây đặt chữ Tìm kiếm trong một container rộng riêng."""
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node package="com.facebook.katana"
+                    class="android.view.ViewGroup"
+                    clickable="true"
+                    bounds="[105,55][990,170]">
+                <node package="com.facebook.katana"
+                      class="android.widget.TextView"
+                      text="Tìm kiếm"
+                      bounds="[420,80][585,145]" />
+              </node>
+              <node package="com.facebook.katana"
+                    text="Mới đây"
+                    bounds="[25,205][300,275]" />
+              <node package="com.facebook.katana"
+                    text="Xem tất cả"
+                    bounds="[820,205][1040,275]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            coords = controller._get_facebook_header_search_coords(
+                "device-recent"
+            )
+
+        self.assertEqual((547, 112), coords)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_search_accepts_xml_verified_recent_field_during_focus_gap(
+        self, _sleep
+    ):
+        """Tap đúng ô Mới đây không được báo lỗi vì dumpsys trống một nhịp."""
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        foreground_states = iter([True, True, False, False])
+        controller.wait_for_facebook_foreground = (
+            lambda *_args, **_kwargs: next(foreground_states, False)
+        )
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = (
+            lambda _device_id: (547, 112)
+        )
+        controller.is_facebook_home = lambda _device_id: False
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        backs = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y)) or (0, "", "")
+        )
+        controller.keyevent = (
+            lambda _device_id, key: backs.append(key) or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search("device-focus-gap")
+        )
+        self.assertEqual([(547, 112)], taps)
+        self.assertEqual([], backs)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_target_search_uses_recent_field_when_all_foreground_probes_are_busy(
+        self, _sleep
+    ):
+        """B3 đã xác nhận Facebook nên dumpsys nghẽn không được chặn ô Search."""
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: False
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = lambda _device_id: None
+        controller.is_facebook_home = lambda _device_id: False
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+            or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search(
+                "device-b3-busy", allow_recent_fallback=True
+            )
+        )
+        self.assertEqual([(486, 105)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_visible_home_search_tap_is_accepted_when_ui_dump_stays_busy(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: True
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._get_facebook_header_search_coords = lambda _device_id: None
+        controller.is_facebook_home = lambda _device_id: True
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        events = []
+        controller.tap = (
+            lambda _device_id, x, y: events.append(("tap", x, y))
+            or (0, "", "")
+        )
+        controller.keyevent = (
+            lambda _device_id, key: events.append(("back", key))
+            or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.find_and_click_facebook_search("device-ui-busy")
+        )
+        self.assertEqual([("tap", 896, 105)], events)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_return_home_before_seed_search_backs_once_and_verifies_home(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        events = []
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: True
+        controller.keyevent = (
+            lambda _device_id, key: events.append(("back", key))
+            or (0, "", "")
+        )
+        controller.is_facebook_home = (
+            lambda _device_id: events.append(("verify_home",)) or True
+        )
+
+        self.assertTrue(
+            controller.return_facebook_home_before_search("device-home")
+        )
+        self.assertEqual([("back", 4), ("verify_home",)], events)
+
     @patch("adb_controller.time.sleep", return_value=None)
     def test_home_header_reveal_never_backs_out_of_ready_feed(self, _sleep):
         controller = ADBController(adb_path="adb")
@@ -420,7 +694,7 @@ class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
-    def test_search_backs_once_when_header_reveal_has_no_search(
+    def test_search_uses_verified_home_header_without_extra_back(
         self, _exists, _remove, _sleep
     ):
         root = ET.fromstring(
@@ -470,7 +744,7 @@ class FacebookAutomationTests(unittest.TestCase):
                 controller.find_and_click_facebook_search("device-story")
             )
 
-        self.assertEqual(["reveal", ("back", 4), "tap"], events)
+        self.assertEqual(["tap"], events)
 
     @patch("adb_controller.time.sleep", return_value=None)
     def test_search_waits_for_transient_foreground_then_backs_once(self, _sleep):
@@ -515,7 +789,7 @@ class FacebookAutomationTests(unittest.TestCase):
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
     @patch("adb_controller.os.path.exists", return_value=True)
-    def test_search_recovery_stops_after_one_back_when_header_stays_hidden(
+    def test_search_fails_when_adb_rejects_verified_home_icon_tap(
         self, _exists, _remove, _sleep
     ):
         root = ET.fromstring(
@@ -537,7 +811,10 @@ class FacebookAutomationTests(unittest.TestCase):
         controller.keyevent = (
             lambda _device_id, key: keys.append(key) or (0, "", "")
         )
-        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        controller.tap = (
+            lambda _device_id, x, y: taps.append((x, y))
+            or (1, "", "tap rejected")
+        )
 
         with patch(
             "adb_controller.ET.parse",
@@ -547,8 +824,8 @@ class FacebookAutomationTests(unittest.TestCase):
                 controller.find_and_click_facebook_search("device-hidden-header")
             )
 
-        self.assertEqual([4], keys)
-        self.assertEqual([(896, 105)], taps)
+        self.assertEqual([], keys)
+        self.assertEqual([(896, 105), (896, 105)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
     @patch("adb_controller.os.remove")
@@ -834,10 +1111,13 @@ class FacebookAutomationTests(unittest.TestCase):
 
         controller.ensure_facebook_ready = ensure_ready
         controller.browse_facebook_surface = browse
+        controller.return_facebook_home_before_search = (
+            lambda _device_id: True
+        )
         controller.reveal_facebook_header = lambda _device_id: True
-        controller.find_and_click_facebook_search = lambda _device_id: True
-        controller.replace_facebook_search_text = lambda *_args: True
-        controller.submit_facebook_search = lambda _device_id: True
+        controller.find_and_click_facebook_search = lambda *_args, **_kwargs: True
+        controller.replace_facebook_search_text = lambda *_args, **_kwargs: True
+        controller.submit_facebook_search = lambda *_args, **_kwargs: True
         controller.facebook_loading_delay = lambda *_args, **_kwargs: None
         controller.find_and_click_facebook_page = lambda *_args, **_kwargs: True
         controller.is_facebook_target_page_open = lambda *_args, **_kwargs: True
@@ -867,9 +1147,9 @@ class FacebookAutomationTests(unittest.TestCase):
         controller.ensure_facebook_ready = lambda _device_id: True
         controller.browse_facebook_surface = lambda *_args, **_kwargs: True
         controller.reveal_facebook_header = lambda _device_id: True
-        controller.find_and_click_facebook_search = lambda _device_id: True
-        controller.replace_facebook_search_text = lambda *_args: True
-        controller.submit_facebook_search = lambda _device_id: True
+        controller.find_and_click_facebook_search = lambda *_args, **_kwargs: True
+        controller.replace_facebook_search_text = lambda *_args, **_kwargs: True
+        controller.submit_facebook_search = lambda *_args, **_kwargs: True
         controller.facebook_loading_delay = lambda *_args, **_kwargs: None
         page_scans = iter([False, True])
         scan_count = []
@@ -904,9 +1184,9 @@ class FacebookAutomationTests(unittest.TestCase):
         controller.ensure_facebook_ready = lambda _device_id: True
         controller.browse_facebook_surface = lambda *_args, **_kwargs: True
         controller.reveal_facebook_header = lambda _device_id: True
-        controller.find_and_click_facebook_search = lambda _device_id: True
-        controller.replace_facebook_search_text = lambda *_args: True
-        controller.submit_facebook_search = lambda _device_id: True
+        controller.find_and_click_facebook_search = lambda *_args, **_kwargs: True
+        controller.replace_facebook_search_text = lambda *_args, **_kwargs: True
+        controller.submit_facebook_search = lambda *_args, **_kwargs: True
         controller.facebook_loading_delay = lambda *_args, **_kwargs: None
         controller.find_and_click_facebook_page = lambda *_args, **_kwargs: True
         profile_checks = iter([False, True])
@@ -940,21 +1220,22 @@ class FacebookAutomationTests(unittest.TestCase):
             events.append(("cross_warmup", "tiktok")) or True
         )
         controller.ensure_facebook_ready = lambda _device_id: True
+        controller.return_facebook_home_before_search = (
+            lambda _device_id: events.append(("back_home",)) or True
+        )
         controller.browse_facebook_surface = (
             lambda _device_id, total, label, **_kwargs:
             events.append(("browse", label, total))
         )
-        controller.reveal_facebook_header = (
-            lambda _device_id: events.append(("reveal",))
-        )
         controller.find_and_click_facebook_search = (
-            lambda _device_id: events.append(("search",)) or True
+            lambda *_args, **_kwargs: events.append(("search",)) or True
         )
         controller.replace_facebook_search_text = (
-            lambda _device_id, text: events.append(("replace", text)) or True
+            lambda _device_id, text, **_kwargs:
+            events.append(("replace", text)) or True
         )
         controller.submit_facebook_search = (
-            lambda _device_id: events.append(("enter",))
+            lambda *_args, **_kwargs: events.append(("enter",))
         )
         controller.facebook_loading_delay = (
             lambda _device_id, context, **_kwargs:
@@ -985,7 +1266,7 @@ class FacebookAutomationTests(unittest.TestCase):
             [
                 ("cross_warmup", "tiktok"),
                 ("browse", "feed", 100),
-                ("reveal",),
+                ("back_home",),
                 ("search",),
                 ("replace", "chăm sóc da"),
                 ("enter",),
@@ -1046,6 +1327,181 @@ class FacebookAutomationTests(unittest.TestCase):
                 "input:Thương Hiệu Mẫu",
             ],
             broadcasts,
+        )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_replace_search_text_allows_enter_when_facebook_xml_is_busy(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        controller.wait_for_facebook_foreground = lambda _device_id: True
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._focus_facebook_search_input = lambda _device_id: True
+        controller.ensure_ime = lambda _device_id: None
+        broadcasts = []
+
+        def execute(_device_id, args, timeout=15):
+            if "XW_CLEAR_TEXT" in args:
+                broadcasts.append("clear")
+            elif "XW_INPUT_B64" in args:
+                encoded = args[args.index("msg") + 1]
+                broadcasts.append(
+                    "input:" + base64.b64decode(encoded).decode("utf-8")
+                )
+            return 0, "", ""
+
+        controller.execute_adb = execute
+
+        self.assertTrue(
+            controller.replace_facebook_search_text(
+                "device-suggestion-panel",
+                "lấy nhân mụn chuẩn y khoa Phan Thiết",
+            )
+        )
+        self.assertEqual(
+            [
+                "clear",
+                "input:lấy nhân mụn chuẩn y khoa Phan Thiết",
+            ],
+            broadcasts,
+        )
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_replace_search_text_accepts_visible_text_when_input_broadcast_reports_error(
+        self, _sleep
+    ):
+        """Một số máy hiển thị chữ dù am broadcast trả mã lỗi; không báo lỗi giả."""
+        controller = ADBController(adb_path="adb")
+        controller.wait_for_facebook_foreground = lambda _device_id: True
+        controller._focus_facebook_search_input = lambda _device_id: True
+        controller.ensure_ime = lambda _device_id: None
+        current_text = {"value": ""}
+        broadcasts = []
+        expected = "lấy nhân mụn chuẩn y khoa Phan Thiết"
+
+        def execute(_device_id, args, timeout=15):
+            if "XW_CLEAR_TEXT" in args:
+                current_text["value"] = ""
+                broadcasts.append("clear")
+                return 0, "", ""
+            if "XW_INPUT_B64" in args:
+                encoded = args[args.index("msg") + 1]
+                current_text["value"] = base64.b64decode(encoded).decode("utf-8")
+                broadcasts.append("input")
+                return 1, "", "receiver reported failure"
+            return 0, "", ""
+
+        controller.execute_adb = execute
+        controller._get_facebook_search_input_state = lambda _device_id: {
+            "text": current_text["value"],
+            "focused": True,
+            "coords": (400, 90),
+        }
+
+        self.assertTrue(controller.replace_facebook_search_text("device-1", expected))
+        self.assertEqual(["clear", "input"], broadcasts)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_target_replace_and_enter_survive_transient_foreground_probe_failure(
+        self, _sleep
+    ):
+        controller = ADBController(adb_path="adb")
+        controller.wait_for_facebook_foreground = lambda *_args, **_kwargs: False
+        controller._get_facebook_search_input_state = lambda _device_id: None
+        controller._focus_facebook_search_input = lambda _device_id: True
+        controller.ensure_ime = lambda _device_id: None
+        broadcasts = []
+        enters = []
+
+        def execute(_device_id, args, timeout=15):
+            if "XW_CLEAR_TEXT" in args:
+                broadcasts.append("clear")
+            elif "XW_INPUT_B64" in args:
+                encoded = args[args.index("msg") + 1]
+                broadcasts.append(
+                    "input:" + base64.b64decode(encoded).decode("utf-8")
+                )
+            return 0, "", ""
+
+        controller.execute_adb = execute
+        controller.press_enter = (
+            lambda _device_id: enters.append("enter") or (0, "", "")
+        )
+
+        self.assertTrue(
+            controller.replace_facebook_search_text(
+                "device-b3-busy",
+                "Khải Hoàn Skincare",
+                allow_transient_foreground=True,
+            )
+        )
+        self.assertEqual(
+            (0, "", ""),
+            controller.submit_facebook_search(
+                "device-b3-busy", allow_transient_foreground=True
+            ),
+        )
+        self.assertEqual(
+            ["clear", "input:Khải Hoàn Skincare"], broadcasts
+        )
+        self.assertEqual(["enter"], enters)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_page_click_selects_exact_phan_thiet_page_inside_oversized_recycler(
+        self, _exists, _remove, _sleep
+    ):
+        """Mô phỏng danh sách 3 Page dưới 'Trang' nằm trong RecyclerView toàn màn hình:
+        Item 1: Nhà Thuốc Khải Hoàn - Khải Hoàn Skincare
+        Item 2: Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Spa Clinic
+        Item 3: Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết
+        Tool phải bấm chính xác Item 3 (y ~ 770), không bị kéo lên tâm RecyclerView (y ~ 1175).
+        """
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="androidx.recyclerview.widget.RecyclerView" clickable="true" bounds="[0,150][1080,2200]">
+                <node class="android.view.ViewGroup" bounds="[0,200][1080,420]">
+                  <node class="android.widget.TextView" text="Nhà Thuốc Khải Hoàn - Khải Hoàn Skincare" bounds="[168,220][900,310]" />
+                </node>
+                <node class="android.view.ViewGroup" bounds="[0,430][1080,650]">
+                  <node class="android.widget.TextView" text="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Spa Clinic" bounds="[168,450][900,540]" />
+                </node>
+                <node class="android.view.ViewGroup" bounds="[0,660][1080,880]">
+                  <node class="android.widget.TextView" text="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết" bounds="[168,680][900,770]" />
+                </node>
+              </node>
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.get_effective_screen_size = lambda _device_id: (1080, 2400)
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        taps = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            clicked = controller.find_and_click_facebook_page(
+                "device-s1",
+                "Khải Hoàn Skincare",
+                exact_page_name=(
+                    "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa "
+                    "Phan Thiết"
+                ),
+            )
+
+        self.assertTrue(clicked)
+        self.assertEqual(1, len(taps))
+        tap_x, tap_y = taps[0]
+        self.assertEqual(534, tap_x)
+        self.assertTrue(
+            660 <= tap_y <= 880,
+            f"Tap Y ({tap_y}) phải nằm trong bounds của Item 3 [660, 880]"
         )
 
 

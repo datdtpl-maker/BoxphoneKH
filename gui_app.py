@@ -93,6 +93,7 @@ class GUIApp(ctk.CTk):
         # nếu không thao tác ở TikTok sẽ làm Facebook tự bật (và ngược lại).
         self.tiktok_combined_var = ctk.BooleanVar(value=False)
         self.facebook_combined_var = ctk.BooleanVar(value=False)
+        self.social_combined_var = ctk.BooleanVar(value=False)
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -508,6 +509,36 @@ class GUIApp(ctk.CTk):
         )
         self.btn_social_combined_adaptive.pack(side="left", padx=(6, 0))
 
+        # Một công tắc chung thay cho các điều khiển kết hợp rời rạc. Khi bật,
+        # nút chạy trong bất kỳ module nào cũng thực hiện đủ hai quy trình.
+        self.ent_social_selection.grid_remove()
+        self.social_combined_actions.grid_remove()
+        self.switch_social_combined = ctk.CTkSwitch(
+            self.social_combined_panel,
+            text="Chạy hỗn hợp chung",
+            variable=self.social_combined_var,
+            onvalue=True,
+            offvalue=False,
+            width=220,
+            height=44,
+            switch_width=52,
+            switch_height=28,
+            font=button_font,
+            text_color=text,
+            fg_color=violet,
+            progress_color=green,
+            button_color="#ffffff",
+            button_hover_color="#f8fafc",
+        )
+        self.switch_social_combined.grid(
+            row=0,
+            column=2,
+            columnspan=2,
+            sticky="e",
+            padx=(12, 16),
+            pady=10,
+        )
+
         # Commercial workspace: one focused module at a time. This replaces
         # the previous three cramped columns while preserving every widget and
         # callback inside each automation module.
@@ -911,6 +942,13 @@ class GUIApp(ctk.CTk):
             text_color=muted,
             anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 9))
+
+        # Các card công tắc cũ vẫn được khởi tạo để giữ tương thích cấu hình,
+        # nhưng được ẩn khỏi UI; người dùng chỉ thao tác công tắc chung phía trên.
+        for name_parts in (("tt", "_combined_card"), ("fb", "_combined_card")):
+            legacy_card = getattr(self, "".join(name_parts), None)
+            if legacy_card is not None:
+                legacy_card.pack_forget()
 
         self.fb_btn_grid = ctk.CTkFrame(
             self.facebook_scroll, fg_color="transparent"
@@ -2430,6 +2468,9 @@ class GUIApp(ctk.CTk):
 
     def _social_combined_enabled(self, source_module=None):
         """Trả trạng thái kết hợp riêng của module đã phát lệnh chạy."""
+        common_variable = self.__dict__.get("social_combined_var")
+        if common_variable is not None:
+            return bool(common_variable.get())
         variable_name = {
             "tiktok": "tiktok_combined_var",
             "facebook": "facebook_combined_var",
