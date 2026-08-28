@@ -2024,6 +2024,68 @@ class ADBController:
         except Exception:
             return None
 
+    def dismiss_facebook_composer_if_present(
+        self, device_id, status_callback=None
+    ):
+        """Phát hiện và tự động thoát màn hình 'Bài viết mới' / 'Bạn đang nghĩ gì?'."""
+        root = self._get_facebook_ui_root(device_id, "fb_composer_chk")
+        if root is None:
+            return False
+        found_composer = False
+        close_coords = None
+        for elem in root.iter():
+            text = self._normalize_facebook_text(elem.get("text", ""))
+            desc = self._normalize_facebook_text(elem.get("content-desc", ""))
+            if (
+                "bai viet moi" in text
+                or "bai viet moi" in desc
+                or "tao bai viet" in text
+                or "tao bai viet" in desc
+                or "ban dang nghi gi" in text
+                or "ban dang nghi gi" in desc
+                or "create post" in text
+                or "create post" in desc
+                or "what's on your mind" in text
+                or "what's on your mind" in desc
+            ):
+                found_composer = True
+            if "dong" in desc or "close" in desc or "tro lai" in desc or "back" in desc:
+                bounds = elem.get("bounds", "")
+                m = re.findall(r"\d+", bounds)
+                if len(m) >= 4:
+                    x1, y1, x2, y2 = map(int, m[:4])
+                    close_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+        if found_composer:
+            if status_callback:
+                status_callback(
+                    device_id,
+                    "[Facebook] Phát hiện ô bài viết mới • Đang tự động thoát ra...",
+                )
+            if close_coords:
+                self.tap(device_id, close_coords[0], close_coords[1])
+            else:
+                width, height = self.get_effective_screen_size(device_id)
+                self.tap(device_id, int(width * 0.08), int(height * 0.06))
+            time.sleep(0.5)
+            self.keyevent(device_id, 4)
+            time.sleep(0.5)
+            root2 = self._get_facebook_ui_root(device_id, "fb_discard_chk")
+            if root2 is not None:
+                for elem in root2.iter():
+                    t = self._normalize_facebook_text(elem.get("text", ""))
+                    d = self._normalize_facebook_text(elem.get("content-desc", ""))
+                    if "bo" in t or "discard" in t or "bo bai viet" in t or "bo" in d:
+                        bounds = elem.get("bounds", "")
+                        m = re.findall(r"\d+", bounds)
+                        if len(m) >= 4:
+                            x1, y1, x2, y2 = map(int, m[:4])
+                            self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
+                            time.sleep(0.5)
+                            break
+            return True
+        return False
+
     def perform_facebook_micro_interactions(
         self, device_id, width, height, status_callback=None
     ):
@@ -2042,7 +2104,8 @@ class ADBController:
                         m = re.findall(r"\d+", bounds)
                         if len(m) >= 4:
                             x1, y1, x2, y2 = map(int, m[:4])
-                            if y1 > int(height * 0.15) and y2 < int(height * 0.88):
+                            # Chỉ bấm Xem thêm ở vùng nội dung (y1 > 25% chiều cao) để tránh bấm nhầm ô Bạn đang nghĩ gì
+                            if y1 > int(height * 0.25) and y2 < int(height * 0.88):
                                 self.tap(
                                     device_id,
                                     (x1 + x2) // 2,
@@ -2070,7 +2133,7 @@ class ADBController:
                         m = re.findall(r"\d+", bounds)
                         if len(m) >= 4:
                             x1, y1, x2, y2 = map(int, m[:4])
-                            if y1 > int(height * 0.15) and y2 < int(height * 0.88):
+                            if y1 > int(height * 0.25) and y2 < int(height * 0.88):
                                 self.tap(
                                     device_id,
                                     (x1 + x2) // 2,
@@ -2140,6 +2203,13 @@ class ADBController:
 
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
+            # Tự động thoát ô Bài viết mới nếu bị mở nhầm
+            try:
+                self.dismiss_facebook_composer_if_present(
+                    device_id, status_callback=status_callback
+                )
+            except Exception:
+                pass
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
             if not ensure_safe_foreground():
@@ -2185,6 +2255,12 @@ class ADBController:
                         f"{label_name}: Facebook không ở foreground; "
                         "không thực hiện swipe"
                     )
+                try:
+                    self.dismiss_facebook_composer_if_present(
+                        device_id, status_callback=status_callback
+                    )
+                except Exception:
+                    pass
                 if feed_surface:
                     if not self.ensure_facebook_feed_motion(
                         device_id,
@@ -5964,6 +6040,54 @@ class ADBController:
                     action_hits.add(marker)
         return not has_profile_grid and len(action_hits) >= 2
 
+    def dismiss_tiktok_comment_sheet_if_present(
+        self, device_id, status_callback=None
+    ):
+        """Phát hiện và tự động đóng bảng bình luận / bàn phím TikTok nếu còn mở."""
+        root = self._get_tiktok_ui_root(device_id, "tt_cm_chk")
+        if root is None:
+            return False
+        found_sheet = False
+        close_coords = None
+        width, height = self.get_effective_screen_size(device_id)
+        for elem in root.iter():
+            text = self._normalize_tiktok_text(elem.get("text", ""))
+            desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
+            if (
+                "comments" in text
+                or "binh luan" in text
+                or "add comment" in text
+                or "them binh luan" in text
+                or "binh luan" in desc
+                or "comments" in desc
+            ):
+                found_sheet = True
+            if "dong" in desc or "close" in desc or "dong binh luan" in desc or "close" in text:
+                bounds = elem.get("bounds", "")
+                m = re.findall(r"\d+", bounds)
+                if len(m) >= 4:
+                    x1, y1, x2, y2 = map(int, m[:4])
+                    if y1 < int(height * 0.55):
+                        close_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+        if found_sheet:
+            if status_callback:
+                status_callback(
+                    device_id,
+                    "[TikTok] Phát hiện bảng bình luận • Đang tự động đóng lại...",
+                )
+            if close_coords:
+                self.tap(device_id, close_coords[0], close_coords[1])
+            else:
+                self.tap(device_id, int(width * 0.90), int(height * 0.44))
+            time.sleep(0.3)
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
+            return True
+        return False
+
     def perform_tiktok_micro_interactions(
         self, device_id, width, height, status_callback=None, is_cancelled=None
     ):
@@ -6019,18 +6143,20 @@ class ADBController:
         # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ bấm mở xem 2-3s rồi Back ra lướt tiếp
         if random.random() < config.INTERACTION_COMMENT_RATE:
             cm_x = int(width * 0.92)
-            cm_y = int(height * 0.64)
+            cm_y = int(height * 0.63)
             self.tap(device_id, cm_x, cm_y)
-            time.sleep(random.uniform(2.0, 3.5))
+            time.sleep(random.uniform(2.0, 3.0))
             
-            # Đóng bảng bình luận sạch sẽ bằng phím Back phần cứng (không tap màn hình để tránh trúng avatar/emoji)
+            # Đóng bảng bình luận dứt điểm: bấm nút [X] ở góc phải tiêu đề popup và gửi Back
+            self.tap(device_id, int(width * 0.90), int(height * 0.44))
+            time.sleep(0.3)
             self.keyevent(device_id, 4)
             time.sleep(0.3)
             self.keyevent(device_id, 4)
             time.sleep(0.3)
             if status_callback:
                 status_callback(
-                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 2-3s rồi Back về video..."
+                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 2-3s rồi đóng về video..."
                 )
             time.sleep(0.5)
 
@@ -6366,6 +6492,12 @@ class ADBController:
                         raise RuntimeError(
                             "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
                         )
+                    try:
+                        self.dismiss_tiktok_comment_sheet_if_present(
+                            device_id, status_callback=update_status
+                        )
+                    except Exception:
+                        pass
                     self.swipe(
                         device_id,
                         cx,
