@@ -2659,9 +2659,8 @@ class GUIApp(ctk.CTk):
             main.get_device_name(device_id) for device_id in devices
         )
         self.log_message(
-            f"[{label} thích ứng] Đợt {wave_number}: chọn ngẫu nhiên "
-            f"{len(devices)} máy tại các vị trí {device_names} "
-            f"(tổng {total_devices} máy; tất cả sẽ lần lượt được chạy)."
+            f"[{label} điều phối] 🌊 Đợt {wave_number}: Mở {len(devices)} máy ({device_names}) "
+            f"• đợt kế tiếp sẽ mở cuốn chiếu sau 1-2 phút (tổng {total_devices} máy)..."
         )
 
     def run_combined_social_sequential(self):

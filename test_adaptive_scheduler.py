@@ -116,11 +116,36 @@ class AdaptiveSchedulerTests(unittest.TestCase):
             lambda device_id: device_id,
             AdaptivePolicy(3, (0, 0)),
             randint_fn=lambda low, _high: low,
+            sleep_fn=lambda _seconds: None,
             randomize_wave_size=True,
             on_wave=lambda devices, *_: waves.append(list(devices)),
         )
 
         self.assertEqual(2, len(waves[0]))
+
+    def test_staggered_rolling_waves_intervals(self):
+        sleeps = []
+        waves = []
+
+        results = run_adaptive(
+            ["S1", "S2", "S3", "S4", "S5", "S6"],
+            lambda device_id: device_id,
+            AdaptivePolicy(
+                40,
+                (0, 0),
+                wave_size_range=(2, 3),
+                wave_interval_seconds=(60, 120),
+            ),
+            randint_fn=lambda low, high: 2 if high in (2, 3) else 75,
+            sleep_fn=lambda seconds: sleeps.append(seconds),
+            randomize_wave_size=True,
+            on_wave=lambda devices, wave, total: waves.append(list(devices)),
+        )
+
+        self.assertEqual(["S1", "S2", "S3", "S4", "S5", "S6"], results)
+        self.assertEqual([["S1", "S2"], ["S3", "S4"], ["S5", "S6"]], waves)
+        # Giữa 3 đợt có 2 khoảng chờ (75s x 2 = 150s)
+        self.assertAlmostEqual(150, sum(sleeps))
 
 
 if __name__ == "__main__":

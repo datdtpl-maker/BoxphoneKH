@@ -10,12 +10,29 @@ import time
 class AdaptivePolicy:
     max_workers: int
     stagger_seconds: tuple[int, int]
+    wave_size_range: tuple[int, int] = (2, 3)
+    wave_interval_seconds: tuple[int, int] = (60, 120)
 
 
 PLATFORM_POLICIES = {
-    "facebook": AdaptivePolicy(max_workers=3, stagger_seconds=(5, 15)),
-    "tiktok": AdaptivePolicy(max_workers=4, stagger_seconds=(5, 15)),
-    "social": AdaptivePolicy(max_workers=3, stagger_seconds=(5, 15)),
+    "facebook": AdaptivePolicy(
+        max_workers=40,
+        stagger_seconds=(5, 15),
+        wave_size_range=(2, 3),
+        wave_interval_seconds=(60, 120),
+    ),
+    "tiktok": AdaptivePolicy(
+        max_workers=40,
+        stagger_seconds=(5, 15),
+        wave_size_range=(2, 3),
+        wave_interval_seconds=(60, 120),
+    ),
+    "social": AdaptivePolicy(
+        max_workers=40,
+        stagger_seconds=(5, 15),
+        wave_size_range=(2, 3),
+        wave_interval_seconds=(60, 120),
+    ),
 }
 
 
@@ -54,76 +71,98 @@ def run_adaptive(
     if randomize_queue:
         shuffle_fn(queued)
 
-    max_workers = max(1, min(policy.max_workers, len(queued)))
+    total_devices = len(queued)
     results = {}
-    has_started = False
+    active_futures = {}
 
+    # Cơ chế Cuốn Chiếu Theo Đợt (Staggered Rolling Waves):
+    # Mỗi đợt mở 2 - 3 profile, sau đó đợi 1 - 2 phút (60 - 120s) rồi tự động mở tiếp đợt sau
+    # Các đợt chạy song song gối đầu nhau, không cần chờ đợt trước kết thúc.
     if randomize_wave_size:
-        total_devices = len(queued)
-        started_position = 0
         wave_number = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        started_position = 0
+        has_started_any = False
+        wave_size_range = getattr(policy, "wave_size_range", (2, 3))
+        wave_interval_range = getattr(
+            policy, "wave_interval_seconds", (60, 120)
+        )
+
+        with ThreadPoolExecutor(max_workers=max(len(queued), 32)) as executor:
             while queued and not is_cancelled():
-                wave_limit = min(max_workers, len(queued))
-                # Khi còn ít nhất hai thiết bị, một đợt thích ứng phải khởi
-                # động tối thiểu hai máy để không tạo cảm giác chỉ chạy 1 profile.
-                wave_min = 2 if wave_limit >= 2 else 1
-                wave_size = max(
-                    wave_min,
-                    min(randint_fn(wave_min, wave_limit), wave_limit),
-                )
-                wave = [queued.pop(0) for _ in range(wave_size)]
+                # 1. Chọn kích thước đợt (2 - 3 máy)
+                wave_min = wave_size_range[0]
+                wave_max = wave_size_range[1]
+                wave_limit = min(wave_max, len(queued))
+                if len(queued) >= wave_min:
+                    wave_size = randint_fn(wave_min, wave_limit)
+                else:
+                    wave_size = len(queued)
+                wave_size = max(1, min(wave_size, len(queued)))
+
+                current_wave = [queued.pop(0) for _ in range(wave_size)]
                 wave_number += 1
                 if on_wave:
                     on_wave(
-                        [device_id for _, device_id in wave],
+                        [device_id for _, device_id in current_wave],
                         wave_number,
                         total_devices,
                     )
 
-                active = {}
-                for index, device_id in wave:
+                # 2. Khởi chạy các máy trong đợt này (với độ trễ nhẹ 5-15s giữa các máy trong cùng đợt)
+                for index, device_id in current_wave:
                     if is_cancelled():
                         break
-                    if has_started:
-                        delay = randint_fn(*policy.stagger_seconds)
-                        if on_wait:
-                            on_wait(
-                                device_id,
-                                delay,
-                                started_position,
-                                total_devices,
-                            )
-                        if not _interruptible_sleep(
-                            delay, is_cancelled, sleep_fn
-                        ):
-                            break
+                    if has_started_any and policy.stagger_seconds[1] > 0:
+                        stagger = randint_fn(*policy.stagger_seconds)
+                        if stagger > 0:
+                            if on_wait:
+                                on_wait(
+                                    device_id,
+                                    stagger,
+                                    started_position,
+                                    total_devices,
+                                )
+                            if not _interruptible_sleep(
+                                stagger, is_cancelled, sleep_fn
+                            ):
+                                break
 
-                    future = executor.submit(worker, device_id)
-                    active[future] = index
+                    fut = executor.submit(worker, device_id)
+                    active_futures[fut] = index
                     started_position += 1
-                    has_started = True
+                    has_started_any = True
 
-                while active:
-                    done, _ = wait(
-                        tuple(active),
-                        timeout=0.25,
-                        return_when=FIRST_COMPLETED,
-                    )
-                    for future in done:
-                        index = active.pop(future)
-                        results[index] = future.result()
+                # 3. Tính từ thời điểm đợt hiện tại mở: chờ 1 - 2 phút (60 - 120s) rồi mở đợt tiếp theo
+                if queued and not is_cancelled():
+                    wave_interval = randint_fn(*wave_interval_range)
+                    if wave_interval > 0:
+                        _interruptible_sleep(
+                            wave_interval, is_cancelled, sleep_fn
+                        )
+
+            # 4. Đợi tất cả các máy đang chạy hoàn tất
+            while active_futures:
+                done, _ = wait(
+                    tuple(active_futures),
+                    timeout=0.25,
+                    return_when=FIRST_COMPLETED,
+                )
+                for fut in done:
+                    index = active_futures.pop(fut)
+                    results[index] = fut.result()
 
         return [results[index] for index in sorted(results)]
 
-    active = {}
+    # Trường hợp không phân chia đợt ngẫu nhiên (chạy pool giới hạn max_workers)
+    max_workers = max(1, min(policy.max_workers, len(queued)))
     next_position = 0
+    has_started = False
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        while next_position < len(queued) or active:
+        while next_position < len(queued) or active_futures:
             while (
                 next_position < len(queued)
-                and len(active) < max_workers
+                and len(active_futures) < max_workers
                 and not is_cancelled()
             ):
                 index, device_id = queued[next_position]
@@ -137,18 +176,18 @@ def run_adaptive(
                         break
 
                 future = executor.submit(worker, device_id)
-                active[future] = index
+                active_futures[future] = index
                 next_position += 1
                 has_started = True
 
-            if not active:
+            if not active_futures:
                 break
 
             done, _ = wait(
-                tuple(active), timeout=0.25, return_when=FIRST_COMPLETED
+                tuple(active_futures), timeout=0.25, return_when=FIRST_COMPLETED
             )
             for future in done:
-                index = active.pop(future)
+                index = active_futures.pop(future)
                 results[index] = future.result()
 
     return [results[index] for index in sorted(results)]

@@ -340,7 +340,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
 
         devices, policy, kwargs = captured[0]
         self.assertEqual(["d1", "d2", "d3"], devices)
-        self.assertEqual(3, policy.max_workers)
+        self.assertEqual(40, policy.max_workers)
         self.assertTrue(kwargs["randomize_queue"])
         self.assertTrue(kwargs["randomize_wave_size"])
         self.assertTrue(callable(kwargs["on_wave"]))
@@ -403,7 +403,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         ):
             app.run_par_tiktok(adaptive=True)
 
-        self.assertEqual(3, captured[0][1].max_workers)
+        self.assertEqual(40, captured[0][1].max_workers)
         self.assertEqual((5, 15), captured[0][1].stagger_seconds)
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
@@ -435,7 +435,7 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         ):
             app.run_par_facebook(adaptive=True)
 
-        self.assertEqual(3, captured[0][1].max_workers)
+        self.assertEqual(40, captured[0][1].max_workers)
         self.assertEqual((5, 15), captured[0][1].stagger_seconds)
         self.assertTrue(captured[0][2]["randomize_queue"])
         self.assertTrue(captured[0][2]["randomize_wave_size"])
