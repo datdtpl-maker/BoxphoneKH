@@ -465,8 +465,9 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         app.ent_fb_selection = _Entry("1")
         app.ent_fb_seed = _Entry("seed")
         app.ent_fb_target = _Entry("target1, target2")
-        app.ent_fb_runs = _Entry("2")
-        app.ent_fb_delay = _Entry("1-2")
+        app.all_day_var = SimpleNamespace(get=lambda: True)
+        app.ent_all_day_runs = _Entry("2")
+        app.ent_all_day_delay = _Entry("1-2")
         app.parse_targets = lambda entry_widget=None: ["d1"]
         app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
         app.run_in_thread = lambda action: action()
@@ -486,6 +487,40 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
             patch("builtins.print"),
         ):
             app.run_par_facebook(adaptive=False)
+
+        self.assertEqual(["d1", "d1"], sessions_run)
+        self.assertEqual(1, mock_sleep.call_count)
+        self.assertTrue(any("LƯỢT 1/2" in log for log in logs))
+        self.assertTrue(any("LƯỢT 2/2" in log for log in logs))
+        self.assertTrue(any("ĐÃ HOÀN THÀNH TẤT CẢ 2/2 LƯỢT CHẠY" in log for log in logs))
+
+    def test_tiktok_multiple_sessions_run_and_delay(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_tt_selection = _Entry("1")
+        app.ent_tt_seed = _Entry("seed")
+        app.ent_tt_channel = _Entry("target_channel")
+        app.all_day_var = SimpleNamespace(get=lambda: True)
+        app.ent_all_day_runs = _Entry("2")
+        app.ent_all_day_delay = _Entry("1-2")
+        app.parse_targets = lambda entry_widget=None: ["d1"]
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
+        app.run_in_thread = lambda action: action()
+        logs = []
+        app.log_message = lambda msg: logs.append(msg)
+        sessions_run = []
+        fake_adb = SimpleNamespace(
+            tiktok_automation_workflow=lambda dev, **_kwargs: sessions_run.append(dev) or (True, "OK"),
+            clear_recent_apps=lambda _dev: True,
+        )
+
+        with (
+            patch("gui_app.config.ALLOWED_USER_IDS", []),
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", side_effect=lambda d: d),
+            patch("gui_app.GUIApp._interruptible_session_sleep", return_value=True) as mock_sleep,
+            patch("builtins.print"),
+        ):
+            app.run_par_tiktok(adaptive=False)
 
         self.assertEqual(["d1", "d1"], sessions_run)
         self.assertEqual(1, mock_sleep.call_count)

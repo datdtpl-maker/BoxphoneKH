@@ -894,6 +894,7 @@ class ADBController:
         target_phrase,
         max_swipes=4,
         exact_page_name=None,
+        randomize_matching_pages=False,
     ):
         """Tìm và bấm Page có tên chứa đầy đủ cụm target đã nhập."""
         target_normalized = self._normalize_facebook_text(target_phrase)
@@ -1053,12 +1054,42 @@ class ADBController:
                                 -len(label_normalized),
                                 tap_x,
                                 tap_y,
+                                label,
                             )
                         )
 
                     if candidates:
-                        candidates.sort()
-                        _, _, _, _, x, y = candidates[0]
+                        min_tier = min(c[0] for c in candidates)
+                        top_tier_candidates = [
+                            c for c in candidates if c[0] == min_tier
+                        ]
+                        top_tier_candidates.sort()
+
+                        if randomize_matching_pages:
+                            # Gom cụm theo vị trí thẻ card (tọa độ Y cách nhau >= 60px để phân biệt các page khác nhau)
+                            distinct_cards = []
+                            for c in top_tier_candidates:
+                                if not any(
+                                    abs(c[5] - d[5]) < 60 for d in distinct_cards
+                                ):
+                                    distinct_cards.append(c)
+
+                            if len(distinct_cards) > 1:
+                                chosen = random.choice(distinct_cards)
+                                try:
+                                    print(
+                                        f"[Device {device_id[:6]}][Facebook] "
+                                        f"Phát hiện {len(distinct_cards)} Page phù hợp trên màn hình • "
+                                        f"Bốc ngẫu nhiên Page '{chosen[6]}' tại ({chosen[4]}, {chosen[5]})..."
+                                    )
+                                except Exception:
+                                    pass
+                            else:
+                                chosen = top_tier_candidates[0]
+                        else:
+                            chosen = top_tier_candidates[0]
+
+                        x, y = chosen[4], chosen[5]
                         self.tap(device_id, x, y)
                         time.sleep(3.0)
                         return True
@@ -2891,6 +2922,7 @@ class ADBController:
                     device_id,
                     target_phrase,
                     exact_page_name=exact_page_name,
+                    randomize_matching_pages=True,
                 ):
                     page_clicked = True
                     break

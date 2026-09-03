@@ -1246,7 +1246,7 @@ class FacebookAutomationTests(unittest.TestCase):
             or True
         )
         controller.find_and_click_facebook_page = (
-            lambda _device_id, target, exact_page_name=None:
+            lambda _device_id, target, exact_page_name=None, **_kwargs:
             events.append(("page", target)) or True
         )
         controller.is_facebook_target_page_open = (
@@ -1530,6 +1530,53 @@ class FacebookAutomationTests(unittest.TestCase):
             f"Statuses must contain multi-target log, got: {statuses}"
         )
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_find_and_click_facebook_page_randomizes_among_matching_cards(
+        self, _exists, _remove, _sleep
+    ):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.EditText"
+                    text="Nhà thuốc Khải Hoàn"
+                    bounds="[60,25][900,145]" />
+              <node clickable="true" bounds="[20,200][1060,380]">
+                <node class="android.widget.TextView"
+                      text="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Spa Clinic"
+                      bounds="[100,230][800,300]" />
+              </node>
+              <node clickable="true" bounds="[20,400][1060,580]">
+                <node class="android.widget.TextView"
+                      text="Nhà Thuốc Khải Hoàn - Khải Hoàn Skincare"
+                      bounds="[100,430][950,500]" />
+              </node>
+              <node clickable="true" bounds="[20,600][1060,780]">
+                <node class="android.widget.TextView"
+                      text="Nhà thuốc Khải Hoàn Dược Mỹ Phẩm"
+                      bounds="[100,630][950,700]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda _device_id, _args, timeout=15: (0, "", "")
+        taps = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        with patch("adb_controller.ET.parse", return_value=SimpleNamespace(getroot=lambda: root)):
+            success = controller.find_and_click_facebook_page(
+                "device-1",
+                "Nhà thuốc Khải Hoàn",
+                randomize_matching_pages=True,
+            )
+        self.assertTrue(success)
+        self.assertEqual(1, len(taps))
+        possible_ys = {290, 490, 690}
+        self.assertIn(taps[0][1], possible_ys)
+
 
 if __name__ == "__main__":
     unittest.main()
+

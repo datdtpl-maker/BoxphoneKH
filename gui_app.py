@@ -94,7 +94,8 @@ class GUIApp(ctk.CTk):
         self.tiktok_combined_var = ctk.BooleanVar(value=False)
         self.facebook_combined_var = ctk.BooleanVar(value=False)
         self.social_combined_var = ctk.BooleanVar(value=False)
-        self.auto_schedule_var = ctk.BooleanVar(value=config.AUTO_SCHEDULE_ENABLED)
+        self.all_day_var = ctk.BooleanVar(value=True)
+        self.auto_schedule_var = ctk.BooleanVar(value=False)
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -545,13 +546,13 @@ class GUIApp(ctk.CTk):
         )
         self.switch_social_combined.pack(side="left", padx=(0, 14))
 
-        self.switch_auto_schedule = ctk.CTkSwitch(
+        self.switch_all_day = ctk.CTkSwitch(
             self.social_combined_right,
-            text="Hẹn giờ chạy",
-            variable=self.auto_schedule_var,
+            text="Chạy lặp cả ngày",
+            variable=self.all_day_var,
             onvalue=True,
             offvalue=False,
-            width=135,
+            width=145,
             height=36,
             switch_width=46,
             switch_height=24,
@@ -562,25 +563,48 @@ class GUIApp(ctk.CTk):
             button_color="#ffffff",
             button_hover_color="#f8fafc",
         )
-        self.switch_auto_schedule.pack(side="left", padx=(0, 8))
+        self.switch_all_day.pack(side="left", padx=(0, 8))
 
-        self.ent_schedule_hours = ctk.CTkEntry(
+        self.lbl_all_day_runs = ctk.CTkLabel(
             self.social_combined_right,
-            placeholder_text="11:45, 19:30, 22:30",
-            width=145,
+            text="Số lượt:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=text,
+        )
+        self.lbl_all_day_runs.pack(side="left", padx=(0, 4))
+
+        self.ent_all_day_runs = ctk.CTkEntry(
+            self.social_combined_right,
+            placeholder_text="10",
+            width=50,
             height=34,
             **field_style,
         )
-        self.ent_schedule_hours.insert(0, config.AUTO_SCHEDULE_HOURS_DEFAULT)
-        self.ent_schedule_hours.pack(side="left", padx=(0, 8))
-
-        self.lbl_schedule_countdown = ctk.CTkLabel(
-            self.social_combined_right,
-            text="⏰ Lên lịch: TẮT",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=muted,
+        self.ent_all_day_runs.insert(
+            0, str(getattr(config, "SESSION_RUNS_DEFAULT", 10))
         )
-        self.lbl_schedule_countdown.pack(side="left", padx=(0, 8))
+        self.ent_all_day_runs.pack(side="left", padx=(0, 8))
+
+        self.lbl_all_day_delay = ctk.CTkLabel(
+            self.social_combined_right,
+            text="Nghỉ:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=text,
+        )
+        self.lbl_all_day_delay.pack(side="left", padx=(0, 4))
+
+        self.ent_all_day_delay = ctk.CTkEntry(
+            self.social_combined_right,
+            placeholder_text="30-60",
+            width=90,
+            height=34,
+            **field_style,
+        )
+        self.ent_all_day_delay.insert(
+            0,
+            f"{getattr(config, 'SESSION_DELAY_MIN_DEFAULT', 30)}-{getattr(config, 'SESSION_DELAY_MAX_DEFAULT', 60)}",
+        )
+        self.ent_all_day_delay.pack(side="left", padx=(0, 10))
 
         self.btn_lock_rotation = ctk.CTkButton(
             self.social_combined_right,
@@ -1000,74 +1024,6 @@ class GUIApp(ctk.CTk):
             text_color=muted,
             anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 9))
-
-        self.fb_loop_card = ctk.CTkFrame(
-            self.facebook_scroll,
-            fg_color="#f8fafc",
-            corner_radius=13,
-            border_width=1,
-            border_color="#e2e8f0",
-        )
-        self.fb_loop_card.pack(fill="x", padx=16, pady=(0, 9))
-        ctk.CTkLabel(
-            self.fb_loop_card,
-            text="4. Chạy lặp lại cả ngày (Nghỉ tính riêng từng máy)",
-            font=label_font,
-            text_color=text,
-            anchor="w",
-        ).pack(fill="x", padx=14, pady=(10, 4))
-        self.fb_loop_inputs = ctk.CTkFrame(self.fb_loop_card, fg_color="transparent")
-        self.fb_loop_inputs.pack(fill="x", padx=14, pady=(0, 6))
-        self.fb_loop_inputs.columnconfigure(0, weight=1)
-        self.fb_loop_inputs.columnconfigure(1, weight=1)
-
-        fb_col_runs = ctk.CTkFrame(self.fb_loop_inputs, fg_color="transparent")
-        fb_col_runs.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(
-            fb_col_runs,
-            text="Số lượt chạy mỗi máy",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=text,
-            anchor="w",
-        ).pack(fill="x", pady=(0, 2))
-        self.ent_fb_runs = ctk.CTkEntry(
-            fb_col_runs,
-            placeholder_text="1",
-            height=38,
-            **field_style,
-        )
-        self.ent_fb_runs.insert(0, str(getattr(config, "SESSION_RUNS_DEFAULT", 1)))
-        self.ent_fb_runs.pack(fill="x")
-
-        fb_col_delay = ctk.CTkFrame(self.fb_loop_inputs, fg_color="transparent")
-        fb_col_delay.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        ctk.CTkLabel(
-            fb_col_delay,
-            text="Nghỉ giữa các lượt (phút)",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=text,
-            anchor="w",
-        ).pack(fill="x", pady=(0, 2))
-        self.ent_fb_delay = ctk.CTkEntry(
-            fb_col_delay,
-            placeholder_text="30-60",
-            height=38,
-            **field_style,
-        )
-        self.ent_fb_delay.insert(
-            0,
-            f"{getattr(config, 'SESSION_DELAY_MIN_DEFAULT', 30)}-{getattr(config, 'SESSION_DELAY_MAX_DEFAULT', 60)}",
-        )
-        self.ent_fb_delay.pack(fill="x")
-
-        ctk.CTkLabel(
-            self.fb_loop_card,
-            text="Mỗi máy xong 1 lượt sẽ tự đếm giờ nghỉ riêng và tự chạy lượt tiếp theo.",
-            font=ctk.CTkFont(family="Segoe UI", size=10),
-            text_color=muted,
-            anchor="w",
-        ).pack(fill="x", padx=14, pady=(0, 8))
-
         # Các card công tắc cũ vẫn được khởi tạo để giữ tương thích cấu hình,
         # nhưng được ẩn khỏi UI; người dùng chỉ thao tác công tắc chung phía trên.
         for name_parts in (("tt", "_combined_card"), ("fb", "_combined_card")):
@@ -2599,105 +2555,11 @@ class GUIApp(ctk.CTk):
         self.after_idle(self._reset_operation_scrolls)
 
     def _start_auto_scheduler(self):
-        """Khởi chạy luồng đếm giờ tự động theo khung giờ vàng."""
-        threading.Thread(target=self._auto_scheduler_loop, daemon=True).start()
+        """Chế độ hẹn giờ cũ đã được thay thế bằng Chạy lặp cả ngày trên thanh Top Bar."""
+        pass
 
     def _auto_scheduler_loop(self):
-        """Vòng lặp kiểm tra mốc giờ và tự động kích hoạt chiến dịch."""
-        last_triggered_date_hour = None
-        while True:
-            try:
-                time.sleep(10.0)
-                if (
-                    not hasattr(self, "auto_schedule_var")
-                    or not self.auto_schedule_var.get()
-                ):
-                    if hasattr(self, "lbl_schedule_countdown"):
-                        self.after_idle(
-                            lambda: self.lbl_schedule_countdown.configure(
-                                text="⏰ Lịch: TẮT"
-                            )
-                        )
-                    continue
-
-                hours_raw = (
-                    self.ent_schedule_hours.get().strip()
-                    if hasattr(self, "ent_schedule_hours")
-                    else config.AUTO_SCHEDULE_HOURS_DEFAULT
-                )
-                scheduled_times = [
-                    h.strip() for h in hours_raw.split(",") if ":" in h
-                ]
-                if not scheduled_times:
-                    if hasattr(self, "lbl_schedule_countdown"):
-                        self.after_idle(
-                            lambda: self.lbl_schedule_countdown.configure(
-                                text="⏰ Chưa đặt giờ"
-                            )
-                        )
-                    continue
-
-                now = time.localtime()
-                now_str = time.strftime("%H:%M", now)
-                today_str = time.strftime("%Y-%m-%d", now)
-
-                # Tính mốc giờ tiếp theo để hiển thị đếm ngược
-                current_minutes = now.tm_hour * 60 + now.tm_min
-                best_diff = 24 * 60
-                next_target = None
-                for st in scheduled_times:
-                    try:
-                        sh, sm = map(int, st.split(":"))
-                        target_mins = sh * 60 + sm
-                        diff = target_mins - current_minutes
-                        if diff <= 0:
-                            diff += 24 * 60
-                        if diff < best_diff:
-                            best_diff = diff
-                            next_target = st
-                    except Exception:
-                        pass
-
-                if next_target and hasattr(self, "lbl_schedule_countdown"):
-                    hours_left = best_diff // 60
-                    mins_left = best_diff % 60
-                    countdown_text = (
-                        f"⏰ Đợt tới: {next_target} (còn {hours_left}h {mins_left:02d}m)"
-                    )
-                    self.after_idle(
-                        lambda t=countdown_text: self.lbl_schedule_countdown.configure(
-                            text=t
-                        )
-                    )
-
-                # Kiểm tra kích hoạt đúng phút
-                for st in scheduled_times:
-                    if st == now_str:
-                        trigger_key = f"{today_str}_{st}"
-                        if last_triggered_date_hour != trigger_key:
-                            last_triggered_date_hour = trigger_key
-                            self.log_message(
-                                f"⏰ [LÊN LỊCH TỰ ĐỘNG] ĐÃ ĐẾN KHUNG GIỜ VÀNG {st}! "
-                                "Hệ thống đang tự động kích hoạt toàn bộ 40 máy..."
-                            )
-                            chat_id = (
-                                config.ALLOWED_USER_IDS[0]
-                                if config.ALLOWED_USER_IDS
-                                else None
-                            )
-                            if chat_id:
-                                try:
-                                    main.bot.send_message(
-                                        chat_id,
-                                        f"⏰ [BoxPhoneControl] ĐÃ ĐẾN KHUNG GIỜ VÀNG {st}!\n"
-                                        "Tự động kích hoạt toàn bộ máy chạy chiến dịch Social...",
-                                    )
-                                except Exception:
-                                    pass
-
-                            self.after_idle(self.run_combined_social_adaptive)
-            except Exception:
-                time.sleep(5.0)
+        pass
 
     @staticmethod
     def _random_social_order():
@@ -2755,6 +2617,24 @@ class GUIApp(ctk.CTk):
         except Exception:
             pass
         return default_min * 60, default_max * 60
+
+    def _get_session_loop_config(self):
+        """Đọc cấu hình lặp cả ngày từ thanh điều khiển chung (Top Bar)."""
+        is_all_day = bool(
+            self.__dict__.get("all_day_var")
+            and self.__dict__["all_day_var"].get()
+        )
+        if not is_all_day:
+            return 1, 0, 0
+
+        runs_entry = self.__dict__.get("ent_all_day_runs")
+        total_runs = self._parse_session_runs(runs_entry, default=10)
+        if total_runs < 1:
+            total_runs = 10
+
+        delay_entry = self.__dict__.get("ent_all_day_delay")
+        delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(delay_entry)
+        return total_runs, delay_min_sec, delay_max_sec
 
     def _interruptible_session_sleep(self, seconds, is_cancelled):
         remaining = max(0.0, float(seconds))
@@ -2826,12 +2706,7 @@ class GUIApp(ctk.CTk):
         workflow_session = main.start_workflow_session()
         is_cancelled = main.make_session_cancel_checker(workflow_session)
 
-        runs_widget = self.__dict__.get("ent_fb_runs")
-        delay_widget = self.__dict__.get("ent_fb_delay")
-        total_runs = self._parse_session_runs(runs_widget)
-        delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
-            delay_widget
-        )
+        total_runs, delay_min_sec, delay_max_sec = self._get_session_loop_config()
 
         def run_device(device_id):
             device_name = main.get_device_name(device_id)
@@ -3089,6 +2964,8 @@ class GUIApp(ctk.CTk):
             workflow_session
         )
 
+        total_runs, delay_min_sec, delay_max_sec = self._get_session_loop_config()
+
         print(f"[GUI] Bắt đầu chạy TikTok Tuần Tự trên {len(target_devices)} máy...")
 
         def action():
@@ -3100,6 +2977,16 @@ class GUIApp(ctk.CTk):
                 "facebook",
                 is_cancelled=session_is_cancelled,
             )
+            now = time.monotonic()
+            device_queue = [(now, dev_id, 1) for dev_id in target_devices]
+            device_results = {
+                dev_id: {
+                    "runs_done": 0,
+                    "success": True,
+                    "last_msg": "",
+                }
+                for dev_id in target_devices
+            }
             success_count = 0
             tracker = None
             chat_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else None
@@ -3115,25 +3002,59 @@ class GUIApp(ctk.CTk):
                     print(f"[GUI] Không khởi tạo được Telegram Tracker TikTok: {exc}")
                     tracker = None
 
-            for idx, dev in enumerate(target_devices):
+            while device_queue and not session_is_cancelled():
+                device_queue.sort(key=lambda x: x[0])
+                ready_at, dev, session_idx = device_queue.pop(0)
+
+                current_time = time.monotonic()
+                if ready_at > current_time:
+                    wait_sec = ready_at - current_time
+                    wait_m = int(wait_sec // 60)
+                    wait_s = int(wait_sec % 60)
+                    dev_name = main.get_device_name(dev)
+                    time_desc = (
+                        f"{wait_m}p{wait_s}s" if wait_m > 0 else f"{wait_s}s"
+                    )
+                    self.log_message(
+                        f"[TikTok Tuần tự] Chờ máy kế tiếp ({dev_name} - Lượt {session_idx}/{total_runs}) trong {time_desc}..."
+                    )
+                    if not self._interruptible_session_sleep(
+                        wait_sec, session_is_cancelled
+                    ):
+                        break
+
                 if session_is_cancelled():
                     print("[GUI] ⏹️ Tiến trình TikTok đã bị dừng.")
                     break
+
                 dev_name = main.get_device_name(dev)
-                print(f"[GUI] TikTok -> Máy {dev_name} ({idx+1}/{len(target_devices)})")
+                if total_runs > 1:
+                    self.log_message(
+                        f"[Máy {dev_name}][TikTok] 🚀 Bắt đầu LƯỢT {session_idx}/{total_runs}..."
+                    )
 
                 if tracker:
+                    run_info = (
+                        f"TikTok: {channel} (Lượt {session_idx}/{total_runs})"
+                        if total_runs > 1
+                        else f"TikTok: {channel}"
+                    )
                     tracker.set_active_device(
                         dev_name,
                         dev,
-                        f"TikTok: {channel}",
-                        idx + 1,
+                        run_info,
+                        device_results[dev]["runs_done"] + 1,
                         len(target_devices),
                         platform="TikTok",
                     )
 
                 def tt_status_cb(d, msg):
-                    self.log_message(f"[{msg}]")
+                    prefix = (
+                        f" (Lượt {session_idx}/{total_runs})"
+                        if total_runs > 1
+                        else ""
+                    )
+                    self.log_message(f"[Máy {dev_name}]{prefix} {msg}")
                     if tracker:
                         tracker.status_callback(d, msg)
 
@@ -3146,26 +3067,55 @@ class GUIApp(ctk.CTk):
                     is_cancelled=session_is_cancelled
                 )
                 dev_duration = time.time() - dev_start
+                device_results[dev]["runs_done"] += 1
+                device_results[dev]["last_msg"] = message
                 main.clear_device_recents_after_success(
                     dev, status_callback=tt_status_cb
                 )
-                if success:
-                    success_count += 1
-                else:
+                if not success:
+                    device_results[dev]["success"] = False
                     print(f"[GUI] ❌ TikTok máy {dev_name} THẤT BẠI: {message}")
                 if chat_id:
                     try:
+                        run_label = (
+                            f" LƯỢT {session_idx}/{total_runs}"
+                            if total_runs > 1
+                            else ""
+                        )
                         main.send_device_finished_card(
                             chat_id,
                             dev_name,
                             dev,
-                            f"TikTok: {channel}",
+                            f"TikTok{run_label}: {channel}",
                             success,
                             message,
                             dev_duration,
                         )
                     except Exception:
                         pass
+
+                if session_idx < total_runs and not session_is_cancelled():
+                    delay_sec = int(random.uniform(delay_min_sec, delay_max_sec))
+                    next_ready = time.monotonic() + delay_sec
+                    device_queue.append((next_ready, dev, session_idx + 1))
+                    delay_m = delay_sec // 60
+                    delay_s = delay_sec % 60
+                    time_desc = (
+                        f"{delay_m} phút {delay_s} giây"
+                        if delay_s > 0
+                        else f"{delay_m} phút"
+                    )
+                    self.log_message(
+                        f"[Máy {dev_name}][TikTok] ⏳ Xong lượt {session_idx}/{total_runs}. "
+                        f"Lượt {session_idx + 1} sẽ sẵn sàng sau {time_desc}..."
+                    )
+                elif session_idx == total_runs:
+                    if device_results[dev]["success"]:
+                        success_count += 1
+                    if total_runs > 1:
+                        self.log_message(
+                            f"[Máy {dev_name}][TikTok] 🎉 ĐÃ HOÀN THÀNH TẤT CẢ {total_runs}/{total_runs} LƯỢT CHẠY!"
+                        )
 
             if success_count == len(target_devices):
                 print("[GUI] 🏁 Hoàn tất tiến trình chạy TikTok Tuần Tự!")
@@ -3201,69 +3151,130 @@ class GUIApp(ctk.CTk):
             workflow_session
         )
 
+        total_runs, delay_min_sec, delay_max_sec = self._get_session_loop_config()
+
         print(f"[GUI] Bắt đầu chạy TikTok Song Song trên {len(target_devices)} máy...")
 
         def run_parallel_tt(device_id):
             dev_name = main.get_device_name(device_id)
-            chat_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else None
-            tracker = None
-            if chat_id:
-                try:
-                    tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
-                    tracker.start_dashboard(
-                        f"🎵 **[GUI] TIKTOK SONG SONG • MÁY {dev_name}**\n"
-                        f"Kênh: `{channel}`"
-                    )
-                    tracker.set_active_device(
-                        dev_name,
-                        device_id,
-                        f"TikTok: {channel}",
-                        1,
-                        1,
-                        platform="TikTok",
-                    )
-                except Exception:
-                    tracker = None
+            overall_success = True
+            last_message = ""
 
-            def tt_status_cb(d, msg):
-                self.log_message(f"[Máy {dev_name}] {msg}")
-                if tracker:
-                    tracker.status_callback(d, msg)
+            for session_idx in range(1, total_runs + 1):
+                if session_is_cancelled():
+                    return dev_name, False, "Bị dừng bởi người dùng"
 
-            dev_start = time.time()
-            success, message = main.adb.tiktok_automation_workflow(
-                device_id, 
-                seed_keywords=seed_raw, 
-                target_channel=channel, 
-                status_callback=tt_status_cb,
-                is_cancelled=session_is_cancelled
-            )
-            duration = time.time() - dev_start
-            main.clear_device_recents_after_success(
-                device_id, status_callback=tt_status_cb
-            )
-            if tracker:
-                tracker.finish_dashboard(
-                    (
-                        f"✅ **MÁY {dev_name} HOÀN THÀNH TIKTOK**"
-                        if success
-                        else f"❌ **MÁY {dev_name} TIKTOK THẤT BẠI**\n`{message}`"
+                if total_runs > 1:
+                    self.log_message(
+                        f"[Máy {dev_name}][TikTok] 🚀 Bắt đầu LƯỢT {session_idx}/{total_runs}..."
                     )
+
+                chat_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else None
+                tracker = None
+                if chat_id:
+                    try:
+                        tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
+                        run_info = (
+                            f"TikTok: {channel} (Lượt {session_idx}/{total_runs})"
+                            if total_runs > 1
+                            else f"TikTok: {channel}"
+                        )
+                        tracker.start_dashboard(
+                            f"🎵 **[GUI] TIKTOK SONG SONG • MÁY {dev_name}**\n"
+                            f"Kênh: `{channel}`"
+                        )
+                        tracker.set_active_device(
+                            dev_name,
+                            device_id,
+                            run_info,
+                            1,
+                            1,
+                            platform="TikTok",
+                        )
+                    except Exception:
+                        tracker = None
+
+                def tt_status_cb(d, msg):
+                    prefix = (
+                        f" (Lượt {session_idx}/{total_runs})"
+                        if total_runs > 1
+                        else ""
+                    )
+                    self.log_message(f"[Máy {dev_name}]{prefix} {msg}")
+                    if tracker:
+                        tracker.status_callback(d, msg)
+
+                dev_start = time.time()
+                success, message = main.adb.tiktok_automation_workflow(
+                    device_id, 
+                    seed_keywords=seed_raw, 
+                    target_channel=channel, 
+                    status_callback=tt_status_cb,
+                    is_cancelled=session_is_cancelled
                 )
-            if chat_id:
-                try:
-                    main.send_device_finished_card(
-                        chat_id,
-                        dev_name,
-                        device_id,
-                        f"TikTok: {channel}",
-                        success,
-                        message,
-                        duration,
+                duration = time.time() - dev_start
+                last_message = message
+                main.clear_device_recents_after_success(
+                    device_id, status_callback=tt_status_cb
+                )
+                if not success:
+                    overall_success = False
+
+                if tracker:
+                    run_label = (
+                        f" LƯỢT {session_idx}/{total_runs}"
+                        if total_runs > 1
+                        else ""
                     )
-                except Exception:
-                    pass
-            return dev_name, success, message
+                    tracker.finish_dashboard(
+                        (
+                            f"✅ **MÁY {dev_name} HOÀN THÀNH TIKTOK{run_label}**"
+                            if success
+                            else f"❌ **MÁY {dev_name} TIKTOK{run_label} THẤT BẠI**\n`{message}`"
+                        )
+                    )
+                if chat_id:
+                    try:
+                        run_label = (
+                            f" LƯỢT {session_idx}/{total_runs}"
+                            if total_runs > 1
+                            else ""
+                        )
+                        main.send_device_finished_card(
+                            chat_id,
+                            dev_name,
+                            device_id,
+                            f"TikTok{run_label}: {channel}",
+                            success,
+                            message,
+                            duration,
+                        )
+                    except Exception:
+                        pass
+
+                if session_idx < total_runs and not session_is_cancelled():
+                    delay_sec = int(random.uniform(delay_min_sec, delay_max_sec))
+                    delay_m = delay_sec // 60
+                    delay_s = delay_sec % 60
+                    time_desc = (
+                        f"{delay_m} phút {delay_s} giây"
+                        if delay_s > 0
+                        else f"{delay_m} phút"
+                    )
+                    self.log_message(
+                        f"[Máy {dev_name}][TikTok] ⏳ Xong lượt {session_idx}/{total_runs}. "
+                        f"Nghỉ {time_desc} trước khi bắt đầu lượt {session_idx + 1}..."
+                    )
+                    if not self._interruptible_session_sleep(
+                        delay_sec, session_is_cancelled
+                    ):
+                        return dev_name, False, "Bị dừng bởi người dùng"
+
+            if total_runs > 1:
+                self.log_message(
+                    f"[Máy {dev_name}][TikTok] 🎉 ĐÃ HOÀN THÀNH TẤT CẢ {total_runs}/{total_runs} LƯỢT CHẠY!"
+                )
+            return dev_name, overall_success, last_message
 
         def action():
             self.bulk_disable_rotation(
@@ -3360,12 +3371,7 @@ class GUIApp(ctk.CTk):
                 if config.ALLOWED_USER_IDS
                 else None
             )
-            total_runs = self._parse_session_runs(
-                self.__dict__.get("ent_fb_runs")
-            )
-            delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
-                self.__dict__.get("ent_fb_delay")
-            )
+            total_runs, delay_min_sec, delay_max_sec = self._get_session_loop_config()
             success_count = 0
             now = time.monotonic()
             device_queue = [(now, dev_id, 1) for dev_id in target_devices]
@@ -3560,10 +3566,7 @@ class GUIApp(ctk.CTk):
             else None
         )
 
-        total_runs = self._parse_session_runs(self.__dict__.get("ent_fb_runs"))
-        delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
-            self.__dict__.get("ent_fb_delay")
-        )
+        total_runs, delay_min_sec, delay_max_sec = self._get_session_loop_config()
 
         def run_device(device_id):
             device_name = main.get_device_name(device_id)
