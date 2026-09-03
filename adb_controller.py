@@ -6260,31 +6260,39 @@ class ADBController:
         self, device_id, status_callback=None
     ):
         """Phát hiện và tự động đóng bảng bình luận / bàn phím TikTok nếu còn mở."""
+        width, height = self.get_effective_screen_size(device_id)
+        # 1. Luôn gửi phím Escape để đóng bàn phím mềm nếu đang mở
+        self.keyevent(device_id, 111)
+
+        # 2. Kiểm tra nhanh qua dumpsys input_method nếu bàn phím đang hiển thị
+        try:
+            code_ime, stdout_ime, _ = self.execute_adb(
+                device_id, ["shell", "dumpsys", "input_method"], timeout=4
+            )
+            if code_ime == 0 and "minputshown=true" in stdout_ime.casefold():
+                self.keyevent(device_id, 111)
+                self.keyevent(device_id, 4)
+                self.tap(device_id, width // 2, int(height * 0.12))
+        except Exception:
+            pass
+
+        # 3. Quét XML UI xem có bảng bình luận hay không
         root = self._get_tiktok_ui_root(device_id, "tt_cm_chk")
-        if root is None:
-            return False
         found_sheet = False
         close_coords = None
-        width, height = self.get_effective_screen_size(device_id)
-        for elem in root.iter():
-            text = self._normalize_tiktok_text(elem.get("text", ""))
-            desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
-            if (
-                "comments" in text
-                or "binh luan" in text
-                or "add comment" in text
-                or "them binh luan" in text
-                or "binh luan" in desc
-                or "comments" in desc
-            ):
-                found_sheet = True
-            if "dong" in desc or "close" in desc or "dong binh luan" in desc or "close" in text:
-                bounds = elem.get("bounds", "")
-                m = re.findall(r"\d+", bounds)
-                if len(m) >= 4:
-                    x1, y1, x2, y2 = map(int, m[:4])
-                    if y1 < int(height * 0.55):
-                        close_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+        if root is not None:
+            for elem in root.iter():
+                raw = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+                norm = self._normalize_facebook_text(raw.replace("đ", "d").replace("Đ", "d"))
+                if any(k in norm for k in ("comment", "comments", "binh luan", "them binh luan", "add comment")):
+                    found_sheet = True
+                if any(k in norm for k in ("dong", "close")):
+                    bounds = elem.get("bounds", "")
+                    m = re.findall(r"\d+", bounds)
+                    if len(m) >= 4:
+                        x1, y1, x2, y2 = map(int, m[:4])
+                        if y1 < int(height * 0.55):
+                            close_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
 
         if found_sheet:
             if status_callback:
@@ -6294,13 +6302,20 @@ class ADBController:
                 )
             if close_coords:
                 self.tap(device_id, close_coords[0], close_coords[1])
-            else:
-                self.tap(device_id, int(width * 0.90), int(height * 0.44))
+                time.sleep(0.3)
+            # Tap backdrop phía trên và kéo xuống để đóng triệt để (không bao giờ tap vào vùng comments)
+            self.tap(device_id, width // 2, int(height * 0.12))
+            time.sleep(0.2)
+            self.swipe(
+                device_id,
+                width // 2,
+                int(height * 0.32),
+                width // 2,
+                int(height * 0.80),
+                duration=250,
+            )
             time.sleep(0.3)
-            self.keyevent(device_id, 4)
-            time.sleep(0.3)
-            self.keyevent(device_id, 4)
-            time.sleep(0.3)
+            self.keyevent(device_id, 111)
             return True
         return False
 
@@ -6356,23 +6371,36 @@ class ADBController:
                 )
             time.sleep(0.5)
 
-        # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ bấm mở xem 2-3s rồi Back ra lướt tiếp
+        # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ mở xem lướt 1.5-2.5s rồi ĐÓNG NGAY, tuyệt đối không gửi bình luận
         if random.random() < config.INTERACTION_COMMENT_RATE:
             cm_x = int(width * 0.92)
             cm_y = int(height * 0.63)
             self.tap(device_id, cm_x, cm_y)
-            time.sleep(random.uniform(2.0, 3.0))
+            time.sleep(random.uniform(1.8, 2.5))
             
-            # Đóng bảng bình luận dứt điểm: bấm nút [X] ở góc phải tiêu đề popup và gửi Back
-            self.tap(device_id, int(width * 0.90), int(height * 0.44))
+            # ĐÓNG BẢNG BÌNH LUẬN AN TOÀN TUYỆT ĐỐI (KHÔNG CHẠM VÀO NỬA DƯỚI / Ô BÌNH LUẬN / EMOJI):
+            # 1. Tap vùng nền video phía trên (backdrop y=12%) để đóng sheet mà không chạm vào comment/emoji
+            self.tap(device_id, width // 2, int(height * 0.12))
             time.sleep(0.3)
-            self.keyevent(device_id, 4)
+            # 2. Vuốt kéo tiêu đề bảng bình luận xuống dưới để thu gọn
+            self.swipe(
+                device_id,
+                width // 2,
+                int(height * 0.32),
+                width // 2,
+                int(height * 0.80),
+                duration=250,
+            )
             time.sleep(0.3)
-            self.keyevent(device_id, 4)
+            # 3. Đóng bàn phím mềm nếu bị bung (Escape)
+            self.keyevent(device_id, 111)
+            time.sleep(0.2)
+            # 4. Tap lại backdrop phía trên lần nữa để video trở lại toàn màn hình
+            self.tap(device_id, width // 2, int(height * 0.12))
             time.sleep(0.3)
             if status_callback:
                 status_callback(
-                    device_id, "[TikTok Vi tương tác] 💬 Mở xem bình luận 2-3s rồi đóng về video..."
+                    device_id, "[TikTok Vi tương tác] 💬 Xem lướt bình luận và đã đóng về video toàn màn hình..."
                 )
             time.sleep(0.5)
 
@@ -6681,7 +6709,13 @@ class ADBController:
                     f"đã ở Kênh {step3_elapsed}/{step3_total}s..."
                 )
                 
-                # Thực hiện vi tương tác (Thả tim, Bookmark, Share, Comment)
+                # 1. Ưu tiên xem video trên Kênh trước (3-6s)
+                initial_watch = min(random.randint(3, 6), watch_duration)
+                for _ in range(initial_watch):
+                    time.sleep(1.0)
+                    check_cancelled()
+
+                # 2. Thực hiện vi tương tác (Thả tim, Bookmark, Share, Xem lướt bình luận)
                 try:
                     self.perform_tiktok_micro_interactions(
                         device_id, width, height, status_callback=update_status, is_cancelled=check_cancelled
@@ -6689,7 +6723,9 @@ class ADBController:
                 except Exception:
                     pass
 
-                for _ in range(watch_duration):
+                # 3. Xem tiếp phần thời lượng còn lại của video toàn màn hình
+                remaining_watch = max(0, watch_duration - initial_watch)
+                for _ in range(remaining_watch):
                     time.sleep(1.0)
                     check_cancelled()
 
@@ -6718,12 +6754,17 @@ class ADBController:
                         )
                     except Exception:
                         pass
+                    # BẢO VỆ CHUYỂN CLIP: Luôn gửi Escape và tap backdrop phía trên để chắc chắn đóng mọi popup/bàn phím
+                    self.keyevent(device_id, 111)
+                    self.tap(device_id, width // 2, int(height * 0.12))
+                    time.sleep(0.2)
+                    # Vuốt chuyển clip trong vùng an toàn giữa màn hình (62% -> 22%), tuyệt đối không chạm đáy màn hình
                     self.swipe(
                         device_id,
                         cx,
-                        int(height * 0.75) + random.randint(-20, 20),
+                        int(height * 0.62) + random.randint(-15, 15),
                         cx,
-                        int(height * 0.25) + random.randint(-20, 20),
+                        int(height * 0.22) + random.randint(-15, 15),
                         duration=random.randint(450, 700),
                     )
                     channel_video += 1
