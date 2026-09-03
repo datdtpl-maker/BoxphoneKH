@@ -802,23 +802,24 @@ class ADBController:
     def prepare_facebook_target_results(self, device_id):
         """Đưa kết quả target về đầu và ưu tiên bộ lọc Page/Trang."""
         self.lock_portrait(device_id, retries=3)
+        self.collapse_statusbar_if_expanded(device_id)
+        self.dismiss_facebook_messenger_if_present(device_id)
         if not self.is_facebook_in_foreground(device_id):
             return False
 
         width, height = self.get_effective_screen_size(device_id)
-        # B2 có lướt kết quả mồi nên Facebook đôi lúc giữ nguyên offset khi
-        # tìm target. Vuốt nhẹ 2 lần trong vùng nội dung để đưa về đầu;
-        # tuyệt đối không kéo từ status bar để tránh notification shade.
+        # Vuốt nhẹ trong vùng an toàn giữa màn hình (45%-65%), không chạm nửa trên để tránh thanh thông báo
         for swipe_duration in (500, 520):
             self.swipe(
                 device_id,
                 width // 2,
-                int(height * 0.38),
+                int(height * 0.45),
                 width // 2,
-                int(height * 0.72),
+                int(height * 0.65),
                 duration=swipe_duration,
             )
             time.sleep(0.35)
+        self.collapse_statusbar_if_expanded(device_id)
         self.lock_portrait(device_id, retries=3)
 
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
@@ -1091,7 +1092,9 @@ class ADBController:
 
                         x, y = chosen[4], chosen[5]
                         self.tap(device_id, x, y)
-                        time.sleep(3.0)
+                        time.sleep(1.5)
+                        self.dismiss_facebook_messenger_if_present(device_id)
+                        time.sleep(1.5)
                         return True
             except Exception as exc:
                 print(
@@ -1118,6 +1121,7 @@ class ADBController:
                     int(height * 0.30),
                     duration=random.randint(650, 950),
                 )
+                self.collapse_statusbar_if_expanded(device_id)
                 time.sleep(1.5)
         return False
 
@@ -1581,6 +1585,13 @@ class ADBController:
                         node.get("resource-id", ""),
                     )
                 ).casefold()
+                if any(
+                    neg in haystack
+                    for neg in (
+                        "messaging", "messenger", "nhan tin", "chat", "tin nhan",
+                    )
+                ):
+                    continue
                 if not any(
                     marker in haystack
                     for marker in (
@@ -1617,8 +1628,10 @@ class ADBController:
                         <= candidate_width
                         <= int(width * 0.95)
                     )
+                    # Kính lúp Home nằm trong khoảng 65%-84% bề ngang (không được vượt quá 84% để tránh icon Messenger)
                     right_header_icon = (
-                        cx >= int(width * 0.65)
+                        depth == 0
+                        and int(width * 0.65) <= cx <= int(width * 0.84)
                         and candidate_width < int(width * 0.25)
                     )
                     if wide_field:
@@ -1761,7 +1774,8 @@ class ADBController:
                         time.sleep(0.35)
                         continue
                     return False
-                time.sleep(1.0)
+                time.sleep(0.8)
+                self.dismiss_facebook_messenger_if_present(device_id)
                 self.lock_portrait(device_id)
                 for verify_attempt in range(2):
                     input_state = self._get_facebook_search_input_state(device_id)
@@ -2117,6 +2131,130 @@ class ADBController:
             return True
         return False
 
+    def dismiss_facebook_messenger_if_present(
+        self, device_id, status_callback=None
+    ):
+        """Phát hiện và tự động thoát khỏi màn hình Messenger / Cài đặt Messenger nếu bị mở nhầm."""
+        try:
+            # 1. Kiểm tra nếu app Messenger độc lập (com.facebook.orca) đang chiếm foreground
+            dumpsys_code, stdout, _ = self.execute_adb(
+                device_id, ["shell", "dumpsys", "window", "windows"]
+            )
+            if dumpsys_code == 0 and "com.facebook.orca" in stdout.casefold():
+                if status_callback:
+                    status_callback(
+                        device_id,
+                        "[Facebook] Phát hiện ứng dụng Messenger mở nhầm • Đang thoát về Facebook...",
+                    )
+                self.keyevent(device_id, 4)
+                time.sleep(0.4)
+                self.launch_app(device_id, config.FACEBOOK_PACKAGE)
+                time.sleep(0.8)
+                self.lock_portrait(device_id, retries=3)
+                return True
+
+            # 2. Kiểm tra màn hình nội bộ Facebook (com.facebook.katana) bị dẫn sang Cài đặt Messenger / Chat
+            root = self._get_facebook_ui_root(device_id, "fb_messenger_chk")
+            if root is None:
+                return False
+
+            found_messenger = False
+            back_coords = None
+            width, height = self.get_effective_screen_size(device_id)
+
+            for elem in root.iter():
+                text = self._normalize_facebook_text(elem.get("text", ""))
+                desc = self._normalize_facebook_text(elem.get("content-desc", ""))
+                combined = f"{text} {desc}"
+
+                if any(
+                    marker in combined
+                    for marker in (
+                        "cai dat messenger",
+                        "install messenger",
+                        "nhan tin hoac goi cho ban be",
+                        "mo trong messenger",
+                        "open in messenger",
+                        "nhan tin tren messenger",
+                        "tai messenger",
+                        "get messenger",
+                    )
+                ):
+                    found_messenger = True
+
+                if any(
+                    back_marker in desc
+                    for back_marker in ("tro lai", "back", "dong", "close", "dieu huong len", "navigate up")
+                ):
+                    bounds = elem.get("bounds", "")
+                    m = re.findall(r"\d+", bounds)
+                    if len(m) >= 4:
+                        x1, y1, x2, y2 = map(int, m[:4])
+                        if y1 < int(height * 0.15):
+                            back_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+            if found_messenger:
+                if status_callback:
+                    status_callback(
+                        device_id,
+                        "[Facebook] Phát hiện màn hình Messenger/Cài đặt Messenger • Đang tự động thoát ra...",
+                    )
+                if back_coords:
+                    self.tap(device_id, back_coords[0], back_coords[1])
+                else:
+                    self.tap(device_id, int(width * 0.08), int(height * 0.055))
+                time.sleep(0.5)
+                self.keyevent(device_id, 4)
+                time.sleep(0.5)
+                self.lock_portrait(device_id, retries=3)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def collapse_statusbar_if_expanded(
+        self, device_id, status_callback=None
+    ):
+        """Phát hiện và tự động thu gọn thanh thông báo (Notification Shade / Status Bar) nếu bị kéo xuống."""
+        try:
+            # 1. Gọi lệnh hệ thống Android để thu gọn statusbar/notification shade
+            self.execute_adb(device_id, ["shell", "service", "call", "statusbar", "2"])
+            self.execute_adb(device_id, ["shell", "cmd", "statusbar", "collapse"])
+
+            # 2. Kiểm tra nếu NotificationShade / StatusBar đang chiếm focus
+            code, stdout, _ = self.execute_adb(
+                device_id, ["shell", "dumpsys", "window", "windows"]
+            )
+            if code == 0:
+                stdout_lower = stdout.casefold()
+                for line in stdout_lower.splitlines():
+                    if "mcurrentfocus" in line and any(
+                        s in line
+                        for s in (
+                            "notificationshade",
+                            "statusbar",
+                            "quick_settings",
+                            "trackingview",
+                            "com.android.systemui",
+                        )
+                    ):
+                        # Gửi phím Back để ép đóng thanh thông báo
+                        self.keyevent(device_id, 4)
+                        time.sleep(0.3)
+                        self.execute_adb(
+                            device_id,
+                            ["shell", "service", "call", "statusbar", "2"],
+                        )
+                        if status_callback:
+                            status_callback(
+                                device_id,
+                                "[Hệ thống] Phát hiện thanh thông báo bị kéo xuống • Đã tự động thu gọn!",
+                            )
+                        return True
+        except Exception:
+            pass
+        return False
+
     def perform_facebook_micro_interactions(
         self, device_id, width, height, status_callback=None
     ):
@@ -2160,14 +2298,26 @@ class ADBController:
                     )
                     text = self._normalize_facebook_text(elem.get("text", ""))
                     if "thich" in desc or "like" in desc or "thich" in text:
+                        # Tuyệt đối không bấm nếu là nút Nhắn tin / Messenger / Gửi
+                        if any(
+                            k in desc or k in text
+                            for k in ("nhan tin", "tin nhan", "messenger", "message", "gui")
+                        ):
+                            continue
                         bounds = elem.get("bounds", "")
                         m = re.findall(r"\d+", bounds)
                         if len(m) >= 4:
                             x1, y1, x2, y2 = map(int, m[:4])
-                            if y1 > int(height * 0.25) and y2 < int(height * 0.88):
+                            cx = (x1 + x2) // 2
+                            # Nút Thích bài viết chuẩn luôn ở 40% bề ngang bên trái
+                            if (
+                                y1 > int(height * 0.25)
+                                and y2 < int(height * 0.88)
+                                and cx < int(width * 0.40)
+                            ):
                                 self.tap(
                                     device_id,
-                                    (x1 + x2) // 2,
+                                    cx,
                                     (y1 + y2) // 2,
                                 )
                                 if status_callback:
@@ -2234,7 +2384,19 @@ class ADBController:
 
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
-            # Tự động thoát ô Bài viết mới nếu bị mở nhầm
+            # Tự động thu gọn thanh thông báo và thoát Messenger/Bài viết mới nếu bị mở nhầm
+            try:
+                self.collapse_statusbar_if_expanded(
+                    device_id, status_callback=status_callback
+                )
+            except Exception:
+                pass
+            try:
+                self.dismiss_facebook_messenger_if_present(
+                    device_id, status_callback=status_callback
+                )
+            except Exception:
+                pass
             try:
                 self.dismiss_facebook_composer_if_present(
                     device_id, status_callback=status_callback
@@ -2286,6 +2448,18 @@ class ADBController:
                         f"{label_name}: Facebook không ở foreground; "
                         "không thực hiện swipe"
                     )
+                try:
+                    self.collapse_statusbar_if_expanded(
+                        device_id, status_callback=status_callback
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.dismiss_facebook_messenger_if_present(
+                        device_id, status_callback=status_callback
+                    )
+                except Exception:
+                    pass
                 try:
                     self.dismiss_facebook_composer_if_present(
                         device_id, status_callback=status_callback
@@ -2783,6 +2957,8 @@ class ADBController:
         def ensure_facebook_action_context(step_name):
             """Phục hồi Facebook trước khi thao tác nhập liệu của từng bước."""
             self.lock_portrait(device_id, retries=3)
+            self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
+            self.dismiss_facebook_messenger_if_present(device_id, status_callback=status_callback)
             if self.is_facebook_in_foreground(device_id):
                 return
             update_status(
@@ -6301,8 +6477,10 @@ class ADBController:
             check_cancelled()
 
             # ================= BƯỚC 1: DẠO TRANG CHỦ TIKTOK =================
+            self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
             update_status("[TikTok B1] Mở ứng dụng TikTok...")
             self.launch_tiktok(device_id)
+            self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
             check_cancelled()
             if not self.ensure_tiktok_feed_motion(
                 device_id, status_callback=status_callback
@@ -6348,6 +6526,7 @@ class ADBController:
 
             # ================= BƯỚC 2: TÌM TỪ KHÓA NHIỆM VỤ / MỒI KÊNH =================
             check_cancelled()
+            self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
             seed_kw = random.choice(seed_keywords)
             update_status(f"[TikTok B2] Mở Kính lúp & Tìm từ khóa mồi '{seed_kw}'...")
             if not self.ensure_tiktok_foreground_ready(
@@ -6430,6 +6609,7 @@ class ADBController:
 
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
+            self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
             if not seed_search_completed:
                 raise RuntimeError(
                     "TikTok B2 chưa hoàn tất; đã chặn chuyển sang B3"

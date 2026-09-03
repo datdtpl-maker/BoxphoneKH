@@ -1576,6 +1576,68 @@ class FacebookAutomationTests(unittest.TestCase):
         possible_ys = {290, 490, 690}
         self.assertIn(taps[0][1], possible_ys)
 
+    def test_dismiss_facebook_messenger_when_install_screen_present(self):
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.ImageView" content-desc="Trở lại" bounds="[30,60][120,150]" />
+              <node class="android.widget.TextView" text="Cài đặt Messenger" bounds="[150,60][600,150]" />
+              <node class="android.widget.TextView" text="Để nhắn tin hoặc gọi cho bạn bè trên Facebook" bounds="[100,400][980,600]" />
+              <node class="android.widget.Button" text="Cài đặt" bounds="[100,1700][980,1850]" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda _device_id, args, **_kwargs: (0, "mCurrentFocus=com.facebook.katana", "")
+        controller._get_facebook_ui_root = lambda _dev, _p="": root
+        taps = []
+        keyevents = []
+        controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        controller.keyevent = lambda _device_id, key: keyevents.append(key)
+        controller.lock_portrait = lambda _device_id, **_kwargs: True
+
+        dismissed = controller.dismiss_facebook_messenger_if_present("dev-1")
+
+        self.assertTrue(dismissed)
+        self.assertEqual(1, len(taps))
+        self.assertEqual((75, 105), taps[0])
+        self.assertIn(4, keyevents)
+
+    def test_dismiss_facebook_messenger_when_orca_app_in_foreground(self):
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda _device_id, args, **_kwargs: (0, "mCurrentFocus=com.facebook.orca/com.facebook.orca.MainActivity", "")
+        keyevents = []
+        launched = []
+        controller.keyevent = lambda _device_id, key: keyevents.append(key)
+        controller.launch_app = lambda _device_id, pkg: launched.append(pkg)
+        controller.lock_portrait = lambda _device_id, **_kwargs: True
+
+        dismissed = controller.dismiss_facebook_messenger_if_present("dev-1")
+        self.assertTrue(dismissed)
+        self.assertIn(4, keyevents)
+        self.assertEqual(["com.facebook.katana"], launched)
+
+    def test_collapse_statusbar_if_expanded(self):
+        controller = ADBController(adb_path="adb")
+        executed_cmds = []
+        keyevents = []
+
+        def fake_exec(_dev, args, **_kwargs):
+            cmd_str = " ".join(args)
+            executed_cmds.append(cmd_str)
+            if "dumpsys window" in cmd_str:
+                return (0, "mCurrentFocus=Window{123 NotificationShade}", "")
+            return (0, "", "")
+
+        controller.execute_adb = fake_exec
+        controller.keyevent = lambda _device_id, key: keyevents.append(key)
+
+        collapsed = controller.collapse_statusbar_if_expanded("dev-1")
+        self.assertTrue(collapsed)
+        self.assertTrue(any("service call statusbar 2" in cmd for cmd in executed_cmds))
+        self.assertTrue(any("cmd statusbar collapse" in cmd for cmd in executed_cmds))
+        self.assertIn(4, keyevents)
+
 
 if __name__ == "__main__":
     unittest.main()

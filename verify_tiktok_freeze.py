@@ -158,7 +158,10 @@ def main() -> int:
         return 0
     errors = verify()
     if errors:
-        print("\n".join(errors))
+        try:
+            print("\n".join(errors))
+        except UnicodeEncodeError:
+            print("\n".join(e.encode("ascii", errors="backslashreplace").decode("ascii") for e in errors))
         return 1
     print("TikTok freeze guard: OK")
     return 0

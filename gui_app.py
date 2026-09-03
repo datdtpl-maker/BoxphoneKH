@@ -2442,6 +2442,10 @@ class GUIApp(ctk.CTk):
                 with main.adb.device_workflow_scope(device_id):
                     if is_cancelled and is_cancelled():
                         return device_id, False
+                    if hasattr(main.adb, "collapse_statusbar_if_expanded"):
+                        main.adb.collapse_statusbar_if_expanded(device_id)
+                    if hasattr(main.adb, "dismiss_facebook_messenger_if_present"):
+                        main.adb.dismiss_facebook_messenger_if_present(device_id)
                     if opening_platform == "facebook":
                         ready = main.adb.ensure_facebook_ready(device_id)
                     elif opening_platform == "tiktok":
