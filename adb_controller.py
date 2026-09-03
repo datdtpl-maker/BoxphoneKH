@@ -5515,6 +5515,51 @@ class ADBController:
             ch for ch in value if unicodedata.category(ch) != "Mn"
         )
 
+    @staticmethod
+    def _clean_channel_tokens(text):
+        """Tách các token chữ/số sau khi bỏ dấu và ký tự đặc biệt."""
+        normalized = unicodedata.normalize("NFKD", text or "")
+        without_marks = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        ).replace("đ", "d").replace("Đ", "d")
+        return [
+            token
+            for token in re.sub(r"[^a-z0-9]+", " ", without_marks.casefold()).split()
+            if token
+        ]
+
+    def _match_tiktok_channel_name(self, candidate, target):
+        """So khớp tên kênh thông minh, tuyệt đối không nhầm người khác (như 'Trần Khải Hoàn')."""
+        if not candidate or not target:
+            return False
+        c_tokens = self._clean_channel_tokens(candidate)
+        t_tokens = self._clean_channel_tokens(target)
+        if not c_tokens or not t_tokens:
+            return False
+
+        c_compact = "".join(c_tokens)
+        t_compact = "".join(t_tokens)
+
+        # 1. Trùng khớp chuỗi liền (compact) hoặc tiếp đầu ngữ bắt đầu bằng target
+        if t_compact == c_compact:
+            return True
+        if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 6:
+            return True
+        if t_compact.startswith(c_compact) and len(t_compact) <= len(c_compact) + 4:
+            return True
+
+        # 2. Kiểm tra các từ khóa đặc trưng (distinctive tokens)
+        # Ví dụ: "101", "skincare", "pt", "not", "mun"
+        distinctive = {
+            token for token in t_tokens
+            if token in ("101", "skincare", "pt", "not", "mun", "spa", "clinic", "derma")
+            or token.isdigit()
+        }
+        if distinctive and not distinctive.issubset(set(c_tokens)):
+            return False
+
+        return False
+
     def _remember_tiktok_target_tap(self, device_id, channel_name):
         self._recent_tiktok_target_taps[device_id] = (
             self._normalize_tiktok_identity(channel_name),
@@ -5534,6 +5579,7 @@ class ADBController:
                 target == remembered_target
                 or target.startswith(f"{remembered_target} ")
                 or remembered_target.startswith(f"{target} ")
+                or self._match_tiktok_channel_name(target, remembered_target)
             )
         )
         return same_target and time.monotonic() - tapped_at <= 60.0
@@ -5825,6 +5871,7 @@ class ADBController:
                 value == target
                 or value.startswith(f"{target} ")
                 or (target_clean and value.replace(" ", "").lstrip("@") == target_clean)
+                or self._match_tiktok_channel_name(value, channel_name)
                 for value in identity_values
             ):
                 has_target = True
@@ -5871,6 +5918,31 @@ class ADBController:
             and not has_search_results_marker
             and (has_profile_action or video_nodes >= 2)
         )
+
+    def _switch_to_tiktok_users_tab(self, device_id, root=None):
+        """Chuyển sang tab Người dùng / Tài khoản trong kết quả tìm kiếm TikTok."""
+        if root is None:
+            root = self._get_tiktok_ui_root(device_id, "tt_users_tab")
+        if root is None:
+            return False
+        screen_width, screen_height = self.get_effective_screen_size(device_id)
+        for elem in root.iter():
+            raw_text = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            norm = self._normalize_facebook_text(raw_text.replace("đ", "d").replace("Đ", "d"))
+            if any(k in norm for k in ("nguoi dung", "tai khoan", "users", "accounts")):
+                bounds = elem.get("bounds", "")
+                m = re.findall(r"\d+", bounds)
+                if len(m) >= 4:
+                    x1, y1, x2, y2 = map(int, m[:4])
+                    if int(screen_height * 0.06) <= y1 <= int(screen_height * 0.18):
+                        print(
+                            f"[Device {device_id[:6]}] Chuyển sang tab "
+                            f"'{raw_text.strip()}' tại ({(x1+x2)//2}, {(y1+y2)//2})..."
+                        )
+                        self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
+                        time.sleep(1.5)
+                        return True
+        return False
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
@@ -5937,7 +6009,11 @@ class ADBController:
                 prefixed_identity = any(
                     value.startswith(target) for value in text_values
                 )
-                if not target or not (exact_identity or prefixed_identity):
+                fuzzy_identity = any(
+                    self._match_tiktok_channel_name(value, channel_name)
+                    for value in text_values
+                )
+                if not target or not (exact_identity or prefixed_identity or fuzzy_identity):
                     continue
 
                 clickable = elem
@@ -6040,33 +6116,23 @@ class ADBController:
                     # của kênh khác dù nhắc tên target vẫn bị loại.
                     and (
                         exact_identity
+                        or fuzzy_identity
                         or has_identity_resource
                         or has_profile_row_cue
                     )
                 ):
-                    score = 14 if has_identity_resource else 10
+                    score = 16 if (exact_identity or fuzzy_identity) else (14 if has_identity_resource else 10)
                     if has_profile_row_cue or nearby_profile_row_cue:
                         score += 3
                     matches.append((score, coords, target))
 
             if not matches:
-                # Trên UI thật, tên kênh có thể bị render ngoài accessibility
-                # tree nhưng nút Follow cùng hàng vẫn có bounds. Với kết quả
-                # đầu tiên sau truy vấn target, tap trực tiếp vùng tên bên trái.
-                top_row_cues = [
-                    (cue_x, cue_y)
-                    for cue_x, cue_y in cue_centers
-                    if int(screen_height * 0.18)
-                    < cue_y
-                    < int(screen_height * 0.42)
-                ]
-                if attempt == 0 and top_row_cues:
-                    _, cue_y = min(top_row_cues, key=lambda point: point[1])
-                    return self._tap_tiktok_target_name_fallback(
-                        device_id,
-                        channel_name,
-                        coords=(int(screen_width * 0.38), cue_y),
-                    )
+                # Nếu chưa thấy card khớp ở lần đầu, thử chuyển sang tab "Người dùng" / "Tài khoản"
+                if attempt == 0:
+                    switched_tab = self._switch_to_tiktok_users_tab(device_id, root=root)
+                    if switched_tab:
+                        time.sleep(1.0)
+                        continue
                 if attempt >= max_scan_attempts - 1:
                     break
                 if not self.wait_for_tiktok_foreground(device_id):
@@ -6101,6 +6167,14 @@ class ADBController:
             if self.is_on_tiktok_target_profile(device_id, channel_name):
                 self._remember_tiktok_target_tap(device_id, channel_name)
                 return True
+            else:
+                # Nếu tap nhầm vào tài khoản khác (hoặc chưa vào đúng profile), bấm Back để ra lại tìm kiếm
+                print(
+                    f"[Device {device_id[:6]}] Chưa xác nhận đúng profile '{channel_name}' • "
+                    f"quay lại tìm kiếm..."
+                )
+                self.keyevent(device_id, 4)
+                time.sleep(1.2)
 
         return False
 
@@ -6126,6 +6200,22 @@ class ADBController:
                 if not profile_confirmed:
                     time.sleep(0.8)
                     continue
+
+            # Để dàn đều lượt xem trên các video của kênh (không dồn cục vào 1-2 video đầu):
+            # 50% số máy cuộn nhẹ lưới video xuống 1 lần trước khi chọn clip
+            if attempt == 0 and profile_confirmed and random.random() < 0.50:
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.75),
+                    width // 2,
+                    int(height * 0.40),
+                    duration=random.randint(500, 700),
+                )
+                time.sleep(0.8)
+                scrolled_root = self._get_tiktok_ui_root(device_id, "tt_profile_videos_scrolled")
+                if scrolled_root is not None:
+                    root = scrolled_root
 
             candidates = []
             candidate_set = set()
@@ -6740,10 +6830,6 @@ class ADBController:
 
                 step3_elapsed += watch_duration
                 if step3_elapsed < step3_total:
-                    update_status(
-                        f"[TikTok B3] Vuốt sang clip ngẫu nhiên tiếp theo "
-                        f"(còn {step3_total - step3_elapsed}s)..."
-                    )
                     if not self.wait_for_tiktok_foreground(device_id):
                         raise RuntimeError(
                             "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
@@ -6758,15 +6844,36 @@ class ADBController:
                     self.keyevent(device_id, 111)
                     self.tap(device_id, width // 2, int(height * 0.12))
                     time.sleep(0.2)
-                    # Vuốt chuyển clip trong vùng an toàn giữa màn hình (62% -> 22%), tuyệt đối không chạm đáy màn hình
-                    self.swipe(
-                        device_id,
-                        cx,
-                        int(height * 0.62) + random.randint(-15, 15),
-                        cx,
-                        int(height * 0.22) + random.randint(-15, 15),
-                        duration=random.randint(450, 700),
-                    )
+
+                    # Dàn đều dòng chảy video trên Kênh:
+                    # 85% vuốt tiếp sang clip sau trong playlist của Kênh
+                    # 15% (khi đã xem từ clip 2) thỉnh thoảng vuốt lùi lại clip trước rồi xem tiếp
+                    if channel_video > 1 and random.random() < 0.15:
+                        update_status(
+                            f"[TikTok B3] 🔄 Lướt lại clip trước trong dòng chảy Kênh..."
+                        )
+                        self.swipe(
+                            device_id,
+                            cx,
+                            int(height * 0.30) + random.randint(-15, 15),
+                            cx,
+                            int(height * 0.70) + random.randint(-15, 15),
+                            duration=random.randint(450, 700),
+                        )
+                    else:
+                        update_status(
+                            f"[TikTok B3] 🎬 Vuốt sang clip tiếp theo trong dòng chảy ({channel_video + 1}) • "
+                            f"còn {step3_total - step3_elapsed}s..."
+                        )
+                        # Vuốt chuyển clip trong vùng an toàn giữa màn hình (62% -> 22%), tuyệt đối không chạm đáy màn hình
+                        self.swipe(
+                            device_id,
+                            cx,
+                            int(height * 0.62) + random.randint(-15, 15),
+                            cx,
+                            int(height * 0.22) + random.randint(-15, 15),
+                            duration=random.randint(450, 700),
+                        )
                     channel_video += 1
 
             update_status("Hoàn thành tác vụ Bơm TikTok!")

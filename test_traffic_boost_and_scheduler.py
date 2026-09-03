@@ -105,6 +105,60 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         # 4. Keyboard closed
         self.assertIn(111, keyevents)
 
+    def test_smart_tiktok_channel_matching_rejects_wrong_person(self):
+        """Verify _match_tiktok_channel_name rejects similar but wrong persons (like Trần Khải Hoàn)."""
+        # Target 1: Khải Hoàn & 101 Nốt Mụn
+        t1 = "Khải Hoàn & 101 Nốt Mụn"
+        self.assertFalse(self.adb._match_tiktok_channel_name("Trần Khải Hoàn", t1))
+        self.assertFalse(self.adb._match_tiktok_channel_name("@kh.super", t1))
+        self.assertTrue(self.adb._match_tiktok_channel_name("Khải Hoàn & 101 Nốt Mụn", t1))
+        self.assertTrue(self.adb._match_tiktok_channel_name("Khải Hoàn 101 Nốt Mụn", t1))
+        self.assertTrue(self.adb._match_tiktok_channel_name("@khaihoan101notmun", t1))
+
+        # Target 2: Khải Hoàn Skincare PT
+        t2 = "Khải Hoàn Skincare PT"
+        self.assertFalse(self.adb._match_tiktok_channel_name("Trần Khải Hoàn", t2))
+        self.assertFalse(self.adb._match_tiktok_channel_name("@kh.super", t2))
+        self.assertTrue(self.adb._match_tiktok_channel_name("Khải Hoàn Skincare PT", t2))
+        self.assertTrue(self.adb._match_tiktok_channel_name("Khải Hoàn Skincare PT (Spa)", t2))
+        self.assertTrue(self.adb._match_tiktok_channel_name("@khaihoanskincarept", t2))
+
+    def test_channel_search_rejects_tran_khai_hoan_when_searching_khai_hoan_skincare(self):
+        """When search results show Trần Khải Hoàn at the top, tool must ignore it and click the real target."""
+        import xml.etree.ElementTree as ET
+        from unittest.mock import patch
+
+        search_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.RelativeLayout" clickable="true" bounds="[0,200][1080,360]">
+                <node class="android.widget.TextView" text="Trần Khải Hoàn" bounds="[160,220][500,270]" />
+                <node class="android.widget.TextView" text="@kh.super" bounds="[160,280][400,320]" />
+                <node class="android.widget.Button" text="Follow" bounds="[850,230][1040,310]" />
+              </node>
+              <node class="android.widget.RelativeLayout" clickable="true" bounds="[0,380][1080,540]">
+                <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[160,400][600,450]" />
+                <node class="android.widget.TextView" text="@khaihoanskincarept" bounds="[160,460][450,500]" />
+                <node class="android.widget.Button" text="Follow" bounds="[850,410][1040,490]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        taps = []
+        self.adb.get_effective_screen_size = lambda _dev: (1080, 1920)
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": search_root
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+        self.adb.wait_for_tiktok_foreground = lambda _dev: True
+        self.adb.is_on_tiktok_target_profile = lambda _dev, _target, **_kw: len(taps) > 0
+
+        with patch("adb_controller.time.sleep", return_value=None):
+            result = self.adb.find_and_click_tiktok_channel("dev-1", "Khải Hoàn Skincare PT")
+
+        self.assertTrue(result)
+        # Verify it tapped the second card at y=460, NOT the first card (Trần Khải Hoàn at y=280)
+        self.assertEqual(1, len(taps))
+        self.assertGreater(taps[0][1], 360, "Must tap the real target card, NOT Trần Khải Hoàn!")
+
 
 if __name__ == "__main__":
     unittest.main()

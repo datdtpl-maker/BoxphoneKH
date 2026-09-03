@@ -56,7 +56,9 @@ TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
 TIKTOK_PACKAGE_ALT = "com.zhiliaoapp.musically"
 
 # Cấu hình mặc định cho tự động hóa Bơm TikTok
-TIKTOK_TARGET_CHANNEL_DEFAULT = os.getenv("TIKTOK_TARGET_CHANNEL", "")
+TIKTOK_TARGET_CHANNEL_DEFAULT = os.getenv(
+    "TIKTOK_TARGET_CHANNEL", "Khải Hoàn Skincare PT, Khải Hoàn & 101 Nốt Mụn"
+)
 TIKTOK_SEED_KEYWORDS_DEFAULT = "skincare, trị mụn, nặn mụn, chăm sóc da"
 TIKTOK_WATCH_TIME_MIN_DEFAULT = 5
 TIKTOK_WATCH_TIME_MAX_DEFAULT = 10
