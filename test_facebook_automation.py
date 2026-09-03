@@ -1504,6 +1504,32 @@ class FacebookAutomationTests(unittest.TestCase):
             f"Tap Y ({tap_y}) phải nằm trong bounds của Item 3 [660, 880]"
         )
 
+    @patch("adb_controller.time.sleep")
+    def test_facebook_workflow_multi_page_random_selection(self, _mock_sleep):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: None
+        controller.warmup_tiktok_before_facebook = lambda *_args, **_kwargs: None
+        controller.launch_facebook = lambda *_args, **_kwargs: None
+        controller.ensure_facebook_ready = lambda *_args, **_kwargs: True
+        controller.is_facebook_in_foreground = lambda *_args, **_kwargs: True
+        controller.browse_facebook_surface = lambda *_args, **_kwargs: None
+
+        statuses = []
+        target_input = (
+            "Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Spa Clinic, "
+            "Nhà Thuốc Khải Hoàn - Khải Hoàn Skincare"
+        )
+        controller.facebook_automation_workflow(
+            "device-1",
+            seed_keywords="mồi da mụn",
+            target_pages=target_input,
+            status_callback=lambda _dev, text: statuses.append(text),
+        )
+        self.assertTrue(
+            any("Chọn ngẫu nhiên Page mục tiêu" in s for s in statuses),
+            f"Statuses must contain multi-target log, got: {statuses}"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

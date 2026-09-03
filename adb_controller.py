@@ -2738,7 +2738,10 @@ class ADBController:
     ):
         """Nuôi feed, tìm từ khóa mồi rồi vào đúng Page mục tiêu."""
         def update_status(message):
-            print(f"[Device {device_id[:6]}] {message}")
+            try:
+                print(f"[Device {device_id[:6]}] {message}")
+            except Exception:
+                pass
             if status_callback:
                 status_callback(device_id, message)
 
@@ -2781,6 +2784,11 @@ class ADBController:
                 raise RuntimeError("Chưa nhập Page target Facebook")
             seed_keyword = random.choice(seeds)
             target_phrase = random.choice(targets)
+            if len(targets) > 1:
+                update_status(
+                    f"[Facebook] Chọn ngẫu nhiên Page mục tiêu "
+                    f"'{target_phrase}' (1/{len(targets)} page)..."
+                )
             exact_page_name = self._resolve_facebook_exact_page_name(
                 target_phrase
             )

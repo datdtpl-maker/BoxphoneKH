@@ -1001,6 +1001,73 @@ class GUIApp(ctk.CTk):
             anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 9))
 
+        self.fb_loop_card = ctk.CTkFrame(
+            self.facebook_scroll,
+            fg_color="#f8fafc",
+            corner_radius=13,
+            border_width=1,
+            border_color="#e2e8f0",
+        )
+        self.fb_loop_card.pack(fill="x", padx=16, pady=(0, 9))
+        ctk.CTkLabel(
+            self.fb_loop_card,
+            text="4. Chạy lặp lại cả ngày (Nghỉ tính riêng từng máy)",
+            font=label_font,
+            text_color=text,
+            anchor="w",
+        ).pack(fill="x", padx=14, pady=(10, 4))
+        self.fb_loop_inputs = ctk.CTkFrame(self.fb_loop_card, fg_color="transparent")
+        self.fb_loop_inputs.pack(fill="x", padx=14, pady=(0, 6))
+        self.fb_loop_inputs.columnconfigure(0, weight=1)
+        self.fb_loop_inputs.columnconfigure(1, weight=1)
+
+        fb_col_runs = ctk.CTkFrame(self.fb_loop_inputs, fg_color="transparent")
+        fb_col_runs.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(
+            fb_col_runs,
+            text="Số lượt chạy mỗi máy",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=text,
+            anchor="w",
+        ).pack(fill="x", pady=(0, 2))
+        self.ent_fb_runs = ctk.CTkEntry(
+            fb_col_runs,
+            placeholder_text="1",
+            height=38,
+            **field_style,
+        )
+        self.ent_fb_runs.insert(0, str(getattr(config, "SESSION_RUNS_DEFAULT", 1)))
+        self.ent_fb_runs.pack(fill="x")
+
+        fb_col_delay = ctk.CTkFrame(self.fb_loop_inputs, fg_color="transparent")
+        fb_col_delay.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(
+            fb_col_delay,
+            text="Nghỉ giữa các lượt (phút)",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=text,
+            anchor="w",
+        ).pack(fill="x", pady=(0, 2))
+        self.ent_fb_delay = ctk.CTkEntry(
+            fb_col_delay,
+            placeholder_text="30-60",
+            height=38,
+            **field_style,
+        )
+        self.ent_fb_delay.insert(
+            0,
+            f"{getattr(config, 'SESSION_DELAY_MIN_DEFAULT', 30)}-{getattr(config, 'SESSION_DELAY_MAX_DEFAULT', 60)}",
+        )
+        self.ent_fb_delay.pack(fill="x")
+
+        ctk.CTkLabel(
+            self.fb_loop_card,
+            text="Mỗi máy xong 1 lượt sẽ tự đếm giờ nghỉ riêng và tự chạy lượt tiếp theo.",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=muted,
+            anchor="w",
+        ).pack(fill="x", padx=14, pady=(0, 8))
+
         # Các card công tắc cũ vẫn được khởi tạo để giữ tương thích cấu hình,
         # nhưng được ẩn khỏi UI; người dùng chỉ thao tác công tắc chung phía trên.
         for name_parts in (("tt", "_combined_card"), ("fb", "_combined_card")):
@@ -2652,6 +2719,51 @@ class GUIApp(ctk.CTk):
         variable = self.__dict__.get(variable_name)
         return bool(variable and variable.get())
 
+    def _parse_session_runs(self, entry_widget=None, default=None):
+        if default is None:
+            default = getattr(config, "SESSION_RUNS_DEFAULT", 1)
+        if not entry_widget:
+            return default
+        try:
+            val = entry_widget.get().strip() if hasattr(entry_widget, "get") else ""
+            if not val:
+                return default
+            return max(1, int(val))
+        except Exception:
+            return default
+
+    def _parse_session_delay_seconds(self, entry_widget=None, default_min=None, default_max=None):
+        if default_min is None:
+            default_min = getattr(config, "SESSION_DELAY_MIN_DEFAULT", 30)
+        if default_max is None:
+            default_max = getattr(config, "SESSION_DELAY_MAX_DEFAULT", 60)
+        if not entry_widget:
+            return default_min * 60, default_max * 60
+        try:
+            val = entry_widget.get().strip() if hasattr(entry_widget, "get") else ""
+            if not val:
+                return default_min * 60, default_max * 60
+            parts = re.split(r"[-–,;\s]+", val.strip())
+            parts = [p.strip() for p in parts if p.strip()]
+            if len(parts) == 1:
+                mins = max(1, int(parts[0]))
+                return mins * 60, mins * 60
+            elif len(parts) >= 2:
+                mins_1 = max(1, int(parts[0]))
+                mins_2 = max(mins_1, int(parts[1]))
+                return mins_1 * 60, mins_2 * 60
+        except Exception:
+            pass
+        return default_min * 60, default_max * 60
+
+    def _interruptible_session_sleep(self, seconds, is_cancelled):
+        remaining = max(0.0, float(seconds))
+        while remaining > 0 and not (is_cancelled and is_cancelled()):
+            chunk = min(1.0, remaining)
+            time.sleep(chunk)
+            remaining -= chunk
+        return not (is_cancelled and is_cancelled())
+
     def _log_social_adaptive_wave(
         self, label, devices, wave_number, total_devices
     ):
@@ -2714,156 +2826,211 @@ class GUIApp(ctk.CTk):
         workflow_session = main.start_workflow_session()
         is_cancelled = main.make_session_cancel_checker(workflow_session)
 
-        def run_device(device_id):
-            device_started_at = time.monotonic()
-            device_name = main.get_device_name(device_id)
-            order = self._random_social_order()
-            order_text = " → ".join(
-                "TikTok" if item == "tiktok" else "Facebook"
-                for item in order
-            )
-            self.log_message(
-                f"[Máy {device_name}] Kết hợp ngẫu nhiên: {order_text}"
-            )
-            chat_id = (
-                config.ALLOWED_USER_IDS[0]
-                if config.ALLOWED_USER_IDS
-                else None
-            )
-            tracker = None
-            if chat_id:
-                try:
-                    tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
-                    tracker.set_active_device(
-                        device_name,
-                        device_id,
-                        f"Social: {order_text}",
-                        1,
-                        1,
-                        platform="Social",
-                    )
-                    tracker.start_dashboard(tracker.render_progress_text())
-                except Exception:
-                    tracker = None
+        runs_widget = self.__dict__.get("ent_fb_runs")
+        delay_widget = self.__dict__.get("ent_fb_delay")
+        total_runs = self._parse_session_runs(runs_widget)
+        delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
+            delay_widget
+        )
 
-            results = []
-            for platform_index, platform in enumerate(order, start=1):
+        def run_device(device_id):
+            device_name = main.get_device_name(device_id)
+            overall_success = True
+            last_message = ""
+
+            for session_idx in range(1, total_runs + 1):
                 if is_cancelled():
                     return device_name, False, "Bị dừng bởi người dùng"
 
-                platform_label = (
-                    "TIKTOK" if platform == "tiktok" else "FACEBOOK"
-                )
-                platform_plan = (
-                    "nuôi chéo Facebook → TikTok B1-B3"
-                    if platform == "tiktok"
-                    else (
-                        "nuôi chéo TikTok → Facebook B1-B3 "
-                        "(từ khóa mồi → Page target)"
-                    )
-                )
-                phase_message = (
-                    f"[Kết hợp {platform_index}/2] BẮT ĐẦU MODULE "
-                    f"{platform_label} ĐẦY ĐỦ • {platform_plan}."
-                )
-                self.log_message(f"[Máy {device_name}] {phase_message}")
-                if tracker:
-                    tracker.status_callback(device_id, phase_message)
-
-                def status_callback(dev, message, current=platform):
-                    label = "TikTok" if current == "tiktok" else "Facebook"
+                if total_runs > 1:
                     self.log_message(
-                        f"[Máy {device_name}][{label}] {message}"
+                        f"[Máy {device_name}][Social kết hợp] 🚀 Bắt đầu LƯỢT {session_idx}/{total_runs}..."
                     )
-                    if tracker:
-                        tracker.status_callback(dev, f"[{label}] {message}")
 
-                try:
-                    if platform == "tiktok":
-                        success, message = main.adb.tiktok_automation_workflow(
-                            device_id,
-                            seed_keywords=tt_seed,
-                            target_channel=tt_channel,
-                            status_callback=status_callback,
-                            is_cancelled=is_cancelled,
-                        )
-                    else:
-                        success, message = main.adb.facebook_automation_workflow(
-                            device_id,
-                            seed_keywords=fb_seed,
-                            target_pages=fb_target,
-                            status_callback=status_callback,
-                            is_cancelled=is_cancelled,
-                        )
-                except Exception as exc:
-                    success = False
-                    message = f"Lỗi ngoài dự kiến: {exc}"
-                results.append((platform, success, message))
-
-                result_message = (
-                    f"[Kết hợp {platform_index}/2] "
-                    f"{'HOÀN TẤT' if success else 'KẾT THÚC CÓ LỖI'} "
-                    f"MODULE {platform_label}: {message}"
+                device_started_at = time.monotonic()
+                order = self._random_social_order()
+                order_text = " → ".join(
+                    "TikTok" if item == "tiktok" else "Facebook"
+                    for item in order
                 )
-                self.log_message(f"[Máy {device_name}] {result_message}")
-                if tracker:
-                    tracker.status_callback(device_id, result_message)
-
-                if platform_index < len(order):
-                    next_platform = (
-                        "TIKTOK" if order[platform_index] == "tiktok"
-                        else "FACEBOOK"
-                    )
-                    transition_message = (
-                        f"[Kết hợp] CHUYỂN SANG MODULE {next_platform} "
-                        "ĐẦY ĐỦ cho cùng máy."
-                    )
-                    self.log_message(
-                        f"[Máy {device_name}] {transition_message}"
-                    )
-                    if tracker:
-                        tracker.status_callback(
-                            device_id, transition_message
-                        )
-
-            success = len(results) == 2 and all(item[1] for item in results)
-            message = "Thành công cả TikTok và Facebook" if success else "; ".join(
-                f"{platform}: {detail}"
-                for platform, ok, detail in results
-                if not ok
-            )
-            elapsed_seconds = max(0, time.monotonic() - device_started_at)
-            elapsed_minutes = int(elapsed_seconds // 60)
-            elapsed_remainder = int(elapsed_seconds % 60)
-            duration_text = (
-                f"{elapsed_minutes} phút {elapsed_remainder} giây"
-                if elapsed_minutes
-                else f"{elapsed_remainder} giây"
-            )
-            def cleanup_status(dev, cleanup_message):
                 self.log_message(
-                    f"[Máy {device_name}] {cleanup_message}"
+                    f"[Máy {device_name}] Kết hợp ngẫu nhiên: {order_text}"
+                )
+                chat_id = (
+                    config.ALLOWED_USER_IDS[0]
+                    if config.ALLOWED_USER_IDS
+                    else None
+                )
+                tracker = None
+                if chat_id:
+                    try:
+                        tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
+                        run_info = (
+                            f"Social: {order_text} (Lượt {session_idx}/{total_runs})"
+                            if total_runs > 1
+                            else f"Social: {order_text}"
+                        )
+                        tracker.set_active_device(
+                            device_name,
+                            device_id,
+                            run_info,
+                            1,
+                            1,
+                            platform="Social",
+                        )
+                        tracker.start_dashboard(tracker.render_progress_text())
+                    except Exception:
+                        tracker = None
+
+                results = []
+                for platform_index, platform in enumerate(order, start=1):
+                    if is_cancelled():
+                        return device_name, False, "Bị dừng bởi người dùng"
+
+                    platform_label = (
+                        "TIKTOK" if platform == "tiktok" else "FACEBOOK"
+                    )
+                    platform_plan = (
+                        "nuôi chéo Facebook → TikTok B1-B3"
+                        if platform == "tiktok"
+                        else (
+                            "nuôi chéo TikTok → Facebook B1-B3 "
+                            "(từ khóa mồi → Page target)"
+                        )
+                    )
+                    phase_message = (
+                        f"[Kết hợp {platform_index}/2] BẮT ĐẦU MODULE "
+                        f"{platform_label} ĐẦY ĐỦ • {platform_plan}."
+                    )
+                    self.log_message(f"[Máy {device_name}] {phase_message}")
+                    if tracker:
+                        tracker.status_callback(device_id, phase_message)
+
+                    def status_callback(dev, message, current=platform):
+                        label = "TikTok" if current == "tiktok" else "Facebook"
+                        self.log_message(
+                            f"[Máy {device_name}][{label}] {message}"
+                        )
+                        if tracker:
+                            tracker.status_callback(dev, f"[{label}] {message}")
+
+                    try:
+                        if platform == "tiktok":
+                            success, message = main.adb.tiktok_automation_workflow(
+                                device_id,
+                                seed_keywords=tt_seed,
+                                target_channel=tt_channel,
+                                status_callback=status_callback,
+                                is_cancelled=is_cancelled,
+                            )
+                        else:
+                            success, message = main.adb.facebook_automation_workflow(
+                                device_id,
+                                seed_keywords=fb_seed,
+                                target_pages=fb_target,
+                                status_callback=status_callback,
+                                is_cancelled=is_cancelled,
+                            )
+                    except Exception as exc:
+                        success = False
+                        message = f"Lỗi ngoài dự kiến: {exc}"
+                    results.append((platform, success, message))
+
+                    result_message = (
+                        f"[Kết hợp {platform_index}/2] "
+                        f"{'HOÀN TẤT' if success else 'KẾT THÚC CÓ LỖI'} "
+                        f"MODULE {platform_label}: {message}"
+                    )
+                    self.log_message(f"[Máy {device_name}] {result_message}")
+                    if tracker:
+                        tracker.status_callback(device_id, result_message)
+
+                    if platform_index < len(order):
+                        next_platform = (
+                            "TIKTOK" if order[platform_index] == "tiktok"
+                            else "FACEBOOK"
+                        )
+                        transition_message = (
+                            f"[Kết hợp] CHUYỂN SANG MODULE {next_platform} "
+                            "ĐẦY ĐỦ cho cùng máy."
+                        )
+                        self.log_message(
+                            f"[Máy {device_name}] {transition_message}"
+                        )
+                        if tracker:
+                            tracker.status_callback(
+                                device_id, transition_message
+                            )
+
+                success = len(results) == 2 and all(item[1] for item in results)
+                message = "Thành công cả TikTok và Facebook" if success else "; ".join(
+                    f"{platform}: {detail}"
+                    for platform, ok, detail in results
+                    if not ok
+                )
+                if not success:
+                    overall_success = False
+                last_message = message
+                elapsed_seconds = max(0, time.monotonic() - device_started_at)
+                elapsed_minutes = int(elapsed_seconds // 60)
+                elapsed_remainder = int(elapsed_seconds % 60)
+                duration_text = (
+                    f"{elapsed_minutes} phút {elapsed_remainder} giây"
+                    if elapsed_minutes
+                    else f"{elapsed_remainder} giây"
+                )
+                def cleanup_status(dev, cleanup_message):
+                    self.log_message(
+                        f"[Máy {device_name}] {cleanup_message}"
+                    )
+                    if tracker:
+                        tracker.status_callback(dev, cleanup_message)
+
+                recents_cleared = main.clear_device_recents_after_success(
+                    device_id, status_callback=cleanup_status
                 )
                 if tracker:
-                    tracker.status_callback(dev, cleanup_message)
+                    cleanup_text = (
+                        "\n🧹 Đa nhiệm: **Đã xóa**"
+                        if recents_cleared
+                        else "\n⚠️ Đa nhiệm: **Chưa xóa được**"
+                    )
+                    run_label = (
+                        f" LƯỢT {session_idx}/{total_runs}"
+                        if total_runs > 1
+                        else ""
+                    )
+                    tracker.finish_dashboard(
+                        f"{'✅' if success else '❌'} **MÁY {device_name} "
+                        f"KẾT HỢP{run_label} {'HOÀN THÀNH' if success else 'THẤT BẠI'}**\n"
+                        f"Thứ tự: `{order_text}`\n`{message}`"
+                        f"\n⏱️ Thời gian hoàn thành: **{duration_text}**"
+                        f"{cleanup_text}"
+                    )
 
-            recents_cleared = main.clear_device_recents_after_success(
-                device_id, status_callback=cleanup_status
-            )
-            if tracker:
-                cleanup_text = (
-                    "\n🧹 Đa nhiệm: **Đã xóa**"
-                    if recents_cleared
-                    else "\n⚠️ Đa nhiệm: **Chưa xóa được**"
+                if session_idx < total_runs and not is_cancelled():
+                    delay_sec = int(random.uniform(delay_min_sec, delay_max_sec))
+                    delay_m = delay_sec // 60
+                    delay_s = delay_sec % 60
+                    time_desc = (
+                        f"{delay_m} phút {delay_s} giây"
+                        if delay_s > 0
+                        else f"{delay_m} phút"
+                    )
+                    self.log_message(
+                        f"[Máy {device_name}][Social kết hợp] ⏳ Xong lượt {session_idx}/{total_runs}. "
+                        f"Nghỉ {time_desc} trước khi bắt đầu lượt {session_idx + 1}..."
+                    )
+                    if not self._interruptible_session_sleep(
+                        delay_sec, is_cancelled
+                    ):
+                        return device_name, False, "Bị dừng bởi người dùng"
+
+            if total_runs > 1:
+                self.log_message(
+                    f"[Máy {device_name}][Social kết hợp] 🎉 ĐÃ HOÀN THÀNH TẤT CẢ {total_runs}/{total_runs} LƯỢT CHẠY!"
                 )
-                tracker.finish_dashboard(
-                    f"{'✅' if success else '❌'} **MÁY {device_name} "
-                    f"KẾT HỢP {'HOÀN THÀNH' if success else 'THẤT BẠI'}**\n"
-                    f"Thứ tự: `{order_text}`\n`{message}`"
-                    f"\n⏱️ Thời gian hoàn thành: **{duration_text}**"
-                    f"{cleanup_text}"
-                )
-            return device_name, success, message
+            return device_name, overall_success, last_message
 
         def action():
             self.bulk_disable_rotation(
@@ -3193,22 +3360,70 @@ class GUIApp(ctk.CTk):
                 if config.ALLOWED_USER_IDS
                 else None
             )
+            total_runs = self._parse_session_runs(
+                self.__dict__.get("ent_fb_runs")
+            )
+            delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
+                self.__dict__.get("ent_fb_delay")
+            )
             success_count = 0
-            for index, device_id in enumerate(target_devices):
+            now = time.monotonic()
+            device_queue = [(now, dev_id, 1) for dev_id in target_devices]
+            device_results = {
+                dev_id: {
+                    "runs_done": 0,
+                    "success": True,
+                    "last_msg": "",
+                }
+                for dev_id in target_devices
+            }
+
+            while device_queue and not session_is_cancelled():
+                device_queue.sort(key=lambda x: x[0])
+                ready_at, device_id, session_idx = device_queue.pop(0)
+
+                current_time = time.monotonic()
+                if ready_at > current_time:
+                    wait_sec = ready_at - current_time
+                    wait_m = int(wait_sec // 60)
+                    wait_s = int(wait_sec % 60)
+                    dev_name = main.get_device_name(device_id)
+                    time_desc = (
+                        f"{wait_m}p{wait_s}s" if wait_m > 0 else f"{wait_s}s"
+                    )
+                    self.log_message(
+                        f"[Facebook Tuần tự] Chờ máy kế tiếp ({dev_name} - Lượt {session_idx}/{total_runs}) trong {time_desc}..."
+                    )
+                    if not self._interruptible_session_sleep(
+                        wait_sec, session_is_cancelled
+                    ):
+                        break
+
                 if session_is_cancelled():
                     break
+
                 device_name = main.get_device_name(device_id)
+                if total_runs > 1:
+                    self.log_message(
+                        f"[Máy {device_name}][Facebook] 🚀 Bắt đầu LƯỢT {session_idx}/{total_runs}..."
+                    )
+
                 tracker = None
                 if chat_id:
                     try:
                         tracker = main.TelegramRealtimeTracker(
                             main.bot, chat_id
                         )
+                        run_info = (
+                            f"Facebook: {target_raw} (Lượt {session_idx}/{total_runs})"
+                            if total_runs > 1
+                            else f"Facebook: {target_raw}"
+                        )
                         tracker.set_active_device(
                             device_name,
                             device_id,
-                            f"Facebook: {target_raw}",
-                            index + 1,
+                            run_info,
+                            device_results[device_id]["runs_done"] + 1,
                             len(target_devices),
                             platform="Facebook",
                         )
@@ -3223,7 +3438,12 @@ class GUIApp(ctk.CTk):
                         tracker = None
 
                 def fb_status_callback(dev, message):
-                    self.log_message(f"[Máy {device_name}] {message}")
+                    prefix = (
+                        f" (Lượt {session_idx}/{total_runs})"
+                        if total_runs > 1
+                        else ""
+                    )
+                    self.log_message(f"[Máy {device_name}]{prefix} {message}")
                     if tracker:
                         tracker.status_callback(dev, message)
 
@@ -3236,31 +3456,58 @@ class GUIApp(ctk.CTk):
                     is_cancelled=session_is_cancelled,
                 )
                 duration = time.time() - started_at
+                device_results[device_id]["runs_done"] += 1
+                device_results[device_id]["last_msg"] = message
                 if success:
                     main.clear_device_recents_after_success(
                         device_id, status_callback=fb_status_callback
                     )
-                    success_count += 1
+                else:
+                    device_results[device_id]["success"] = False
+
                 if tracker:
                     duration_text = (
                         f"{int(duration // 60)} phút {int(duration % 60)} giây"
                     )
+                    run_label = (
+                        f" LƯỢT {session_idx}/{total_runs}"
+                        if total_runs > 1
+                        else ""
+                    )
                     tracker.finish_dashboard(
                         (
-                            f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK**\n"
+                            f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK{run_label}**\n"
                             f"🎯 Target: `{target_raw}`\n"
                             f"⏱️ Thời gian: **{duration_text}**"
                             if success
                             else
-                            f"❌ **PROFILE {device_name} FACEBOOK THẤT BẠI**\n"
+                            f"❌ **PROFILE {device_name} FACEBOOK{run_label} THẤT BẠI**\n"
                             f"⚠️ `{message}`"
                         )
                     )
-                if not success:
-                    print(
-                        f"[GUI] ❌ Facebook máy {device_name} "
-                        f"THẤT BẠI: {message}"
+
+                if session_idx < total_runs and not session_is_cancelled():
+                    delay_sec = int(random.uniform(delay_min_sec, delay_max_sec))
+                    next_ready = time.monotonic() + delay_sec
+                    device_queue.append((next_ready, device_id, session_idx + 1))
+                    delay_m = delay_sec // 60
+                    delay_s = delay_sec % 60
+                    time_desc = (
+                        f"{delay_m} phút {delay_s} giây"
+                        if delay_s > 0
+                        else f"{delay_m} phút"
                     )
+                    self.log_message(
+                        f"[Máy {device_name}][Facebook] ⏳ Xong lượt {session_idx}/{total_runs}. "
+                        f"Lượt {session_idx + 1} sẽ sẵn sàng sau {time_desc}..."
+                    )
+                elif session_idx == total_runs:
+                    if device_results[device_id]["success"]:
+                        success_count += 1
+                    if total_runs > 1:
+                        self.log_message(
+                            f"[Máy {device_name}][Facebook] 🎉 ĐÃ HOÀN THÀNH TẤT CẢ {total_runs}/{total_runs} LƯỢT CHẠY!"
+                        )
 
             summary = (
                 f"🏁 **FACEBOOK TUẦN TỰ HOÀN TẤT**\n\n"
@@ -3313,51 +3560,117 @@ class GUIApp(ctk.CTk):
             else None
         )
 
+        total_runs = self._parse_session_runs(self.__dict__.get("ent_fb_runs"))
+        delay_min_sec, delay_max_sec = self._parse_session_delay_seconds(
+            self.__dict__.get("ent_fb_delay")
+        )
+
         def run_device(device_id):
             device_name = main.get_device_name(device_id)
-            tracker = None
-            if chat_id:
-                try:
-                    tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
-                    tracker.set_active_device(
-                        device_name,
-                        device_id,
-                        f"Facebook: {target_raw}",
-                        1,
-                        1,
-                        platform="Facebook",
-                    )
-                    tracker.start_dashboard(tracker.render_progress_text())
-                except Exception:
-                    tracker = None
+            overall_success = True
+            last_message = ""
 
-            def fb_status_callback(dev, message):
-                self.log_message(f"[Máy {device_name}] {message}")
+            for session_idx in range(1, total_runs + 1):
+                if session_is_cancelled():
+                    return device_name, False, "Bị dừng bởi người dùng"
+
+                if total_runs > 1:
+                    self.log_message(
+                        f"[Máy {device_name}][Facebook] 🚀 Bắt đầu LƯỢT {session_idx}/{total_runs}..."
+                    )
+
+                tracker = None
+                if chat_id:
+                    try:
+                        tracker = main.TelegramRealtimeTracker(main.bot, chat_id)
+                        run_info = (
+                            f"Facebook: {target_raw} (Lượt {session_idx}/{total_runs})"
+                            if total_runs > 1
+                            else f"Facebook: {target_raw}"
+                        )
+                        tracker.set_active_device(
+                            device_name,
+                            device_id,
+                            run_info,
+                            1,
+                            1,
+                            platform="Facebook",
+                        )
+                        tracker.start_dashboard(tracker.render_progress_text())
+                    except Exception:
+                        tracker = None
+
+                def fb_status_callback(dev, message):
+                    prefix = (
+                        f" (Lượt {session_idx}/{total_runs})"
+                        if total_runs > 1
+                        else ""
+                    )
+                    self.log_message(f"[Máy {device_name}]{prefix} {message}")
+                    if tracker:
+                        tracker.status_callback(dev, message)
+
+                started_at = time.time()
+                success, message = main.adb.facebook_automation_workflow(
+                    device_id,
+                    seed_keywords=seed_raw,
+                    target_pages=target_raw,
+                    status_callback=fb_status_callback,
+                    is_cancelled=session_is_cancelled,
+                )
+                duration = time.time() - started_at
+                last_message = message
+                if success:
+                    main.clear_device_recents_after_success(
+                        device_id, status_callback=fb_status_callback
+                    )
+                else:
+                    overall_success = False
+
                 if tracker:
-                    tracker.status_callback(dev, message)
-
-            success, message = main.adb.facebook_automation_workflow(
-                device_id,
-                seed_keywords=seed_raw,
-                target_pages=target_raw,
-                status_callback=fb_status_callback,
-                is_cancelled=session_is_cancelled,
-            )
-            if success:
-                main.clear_device_recents_after_success(
-                    device_id, status_callback=fb_status_callback
-                )
-            if tracker:
-                tracker.finish_dashboard(
-                    (
-                        f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK**"
-                        if success
-                        else
-                        f"❌ **PROFILE {device_name} FACEBOOK THẤT BẠI**\n"
-                        f"⚠️ `{message}`"
+                    duration_text = (
+                        f"{int(duration // 60)} phút {int(duration % 60)} giây"
                     )
+                    run_label = (
+                        f" LƯỢT {session_idx}/{total_runs}"
+                        if total_runs > 1
+                        else ""
+                    )
+                    tracker.finish_dashboard(
+                        (
+                            f"✅ **PROFILE {device_name} HOÀN THÀNH FACEBOOK{run_label}**\n"
+                            f"🎯 Target: `{target_raw}`\n"
+                            f"⏱️ Thời gian: **{duration_text}**"
+                            if success
+                            else
+                            f"❌ **PROFILE {device_name} FACEBOOK{run_label} THẤT BẠI**\n"
+                            f"⚠️ `{message}`"
+                        )
+                    )
+
+                if session_idx < total_runs and not session_is_cancelled():
+                    delay_sec = int(random.uniform(delay_min_sec, delay_max_sec))
+                    delay_m = delay_sec // 60
+                    delay_s = delay_sec % 60
+                    time_desc = (
+                        f"{delay_m} phút {delay_s} giây"
+                        if delay_s > 0
+                        else f"{delay_m} phút"
+                    )
+                    self.log_message(
+                        f"[Máy {device_name}][Facebook] ⏳ Xong lượt {session_idx}/{total_runs}. "
+                        f"Nghỉ {time_desc} trước khi bắt đầu lượt {session_idx + 1}..."
+                    )
+                    if not self._interruptible_session_sleep(
+                        delay_sec, session_is_cancelled
+                    ):
+                        return device_name, False, "Bị dừng bởi người dùng"
+
+            if total_runs > 1:
+                self.log_message(
+                    f"[Máy {device_name}][Facebook] 🎉 ĐÃ HOÀN THÀNH TẤT CẢ {total_runs}/{total_runs} LƯỢT CHẠY!"
                 )
-            return device_name, success, message
+            return device_name, overall_success, last_message
 
         def action():
             self.bulk_disable_rotation(

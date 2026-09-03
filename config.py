@@ -123,3 +123,9 @@ AUTO_SCHEDULE_MODE_DEFAULT = os.getenv(
     "AUTO_SCHEDULE_MODE", "adaptive"
 )
 
+# Cấu hình lặp lại cả ngày & nghỉ giữa các lượt (tính theo từng máy)
+SESSION_RUNS_DEFAULT = int(os.getenv("SESSION_RUNS_DEFAULT", "1"))
+SESSION_DELAY_MIN_DEFAULT = int(os.getenv("SESSION_DELAY_MIN_DEFAULT", "30"))
+SESSION_DELAY_MAX_DEFAULT = int(os.getenv("SESSION_DELAY_MAX_DEFAULT", "60"))
+
+

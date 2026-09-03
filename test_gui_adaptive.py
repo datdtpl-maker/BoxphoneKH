@@ -442,6 +442,57 @@ class AdaptiveGuiIntegrationTests(unittest.TestCase):
         self.assertTrue(callable(captured[0][2]["on_wave"]))
         self.assertCountEqual(["d1", "d2"], cleared)
 
+    def test_parse_session_runs(self):
+        app = GUIApp.__new__(GUIApp)
+        self.assertEqual(1, app._parse_session_runs(None))
+        self.assertEqual(3, app._parse_session_runs(_Entry("3")))
+        self.assertEqual(1, app._parse_session_runs(_Entry("")))
+        self.assertEqual(1, app._parse_session_runs(_Entry("abc")))
+        self.assertEqual(1, app._parse_session_runs(_Entry("0")))
+        self.assertEqual(1, app._parse_session_runs(_Entry("-5")))
+
+    def test_parse_session_delay_seconds(self):
+        app = GUIApp.__new__(GUIApp)
+        self.assertEqual((1800, 3600), app._parse_session_delay_seconds(None))
+        self.assertEqual((1200, 1200), app._parse_session_delay_seconds(_Entry("20")))
+        self.assertEqual((1800, 3600), app._parse_session_delay_seconds(_Entry("30-60")))
+        self.assertEqual((1800, 3600), app._parse_session_delay_seconds(_Entry("30 - 60")))
+        self.assertEqual((1800, 3600), app._parse_session_delay_seconds(_Entry("")))
+        self.assertEqual((1800, 3600), app._parse_session_delay_seconds(_Entry("invalid")))
+
+    def test_facebook_multiple_sessions_run_and_delay(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_fb_selection = _Entry("1")
+        app.ent_fb_seed = _Entry("seed")
+        app.ent_fb_target = _Entry("target1, target2")
+        app.ent_fb_runs = _Entry("2")
+        app.ent_fb_delay = _Entry("1-2")
+        app.parse_targets = lambda entry_widget=None: ["d1"]
+        app.bulk_disable_rotation = lambda target_devices=None, **_kwargs: None
+        app.run_in_thread = lambda action: action()
+        logs = []
+        app.log_message = lambda msg: logs.append(msg)
+        sessions_run = []
+        fake_adb = SimpleNamespace(
+            facebook_automation_workflow=lambda dev, **_kwargs: sessions_run.append(dev) or (True, "OK"),
+            clear_recent_apps=lambda _dev: True,
+        )
+
+        with (
+            patch("gui_app.config.ALLOWED_USER_IDS", []),
+            patch("gui_app.main.adb", fake_adb),
+            patch("gui_app.main.get_device_name", side_effect=lambda d: d),
+            patch("gui_app.GUIApp._interruptible_session_sleep", return_value=True) as mock_sleep,
+            patch("builtins.print"),
+        ):
+            app.run_par_facebook(adaptive=False)
+
+        self.assertEqual(["d1", "d1"], sessions_run)
+        self.assertEqual(1, mock_sleep.call_count)
+        self.assertTrue(any("LƯỢT 1/2" in log for log in logs))
+        self.assertTrue(any("LƯỢT 2/2" in log for log in logs))
+        self.assertTrue(any("ĐÃ HOÀN THÀNH TẤT CẢ 2/2 LƯỢT CHẠY" in log for log in logs))
+
 
 if __name__ == "__main__":
     unittest.main()
