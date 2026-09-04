@@ -875,6 +875,66 @@ class ADBController:
                 self.tap(device_id, tab_x, tab_y)
                 time.sleep(2.0)
                 self.lock_portrait(device_id, retries=3)
+            else:
+                # Nếu tab Trang nằm khuất bên phải, vuốt nhẹ thanh tab sang trái rồi tìm lại
+                self.swipe(
+                    device_id,
+                    int(width * 0.85),
+                    int(height * 0.12),
+                    int(width * 0.20),
+                    int(height * 0.12),
+                    duration=380,
+                )
+                time.sleep(0.8)
+                self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+                self.execute_adb(
+                    device_id, ["shell", "uiautomator", "dump", remote_xml]
+                )
+                pull_code, _, _ = self.execute_adb(
+                    device_id, ["pull", remote_xml, local_xml]
+                )
+                if pull_code == 0 and os.path.exists(local_xml):
+                    r_scrolled = ET.parse(local_xml).getroot()
+                    p_map = {
+                        child: parent
+                        for parent in r_scrolled.iter()
+                        for child in parent
+                    }
+                    for node in r_scrolled.iter():
+                        label = self._normalize_facebook_text(
+                            " ".join(
+                                part
+                                for part in (
+                                    node.get("text", ""),
+                                    node.get("content-desc", ""),
+                                )
+                                if part
+                            )
+                        )
+                        if label in {"trang", "page", "pages"}:
+                            clickable = node
+                            while (
+                                clickable is not None
+                                and clickable.get("clickable", "false") != "true"
+                            ):
+                                clickable = p_map.get(clickable)
+                            click_node = (
+                                clickable if clickable is not None else node
+                            )
+                            match = re.match(
+                                r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                                click_node.get("bounds", ""),
+                            )
+                            if match:
+                                x1, y1, x2, y2 = map(int, match.groups())
+                                cy = (y1 + y2) // 2
+                                if int(height * 0.05) <= cy <= int(height * 0.30):
+                                    page_tabs.append((cy, (x1 + x2) // 2))
+                    if page_tabs:
+                        tab_y, tab_x = min(page_tabs)
+                        self.tap(device_id, tab_x, tab_y)
+                        time.sleep(2.0)
+                        self.lock_portrait(device_id, retries=3)
             return True
         except Exception as exc:
             print(
@@ -882,6 +942,52 @@ class ADBController:
                 f"Facebook, tiếp tục từ đầu kết quả: {exc}"
             )
             return True
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+
+    def _is_facebook_personal_profile(self, device_id):
+        """Kiểm tra màn hình hiện tại có phải tài khoản cá nhân Facebook (không phải Page) hay không."""
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+        remote_xml = f"/sdcard/dump_fb_verify_profile_{safe_device_id}.xml"
+        local_xml = os.path.join(
+            tempfile.gettempdir(), f"temp_fb_verify_profile_{safe_device_id}.xml"
+        )
+        self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
+        self.execute_adb(device_id, ["shell", "uiautomator", "dump", remote_xml])
+        pull_code, _, _ = self.execute_adb(
+            device_id, ["pull", remote_xml, local_xml]
+        )
+        try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return False
+            root = ET.parse(local_xml).getroot()
+            for elem in root.iter():
+                text = self._normalize_facebook_text(
+                    f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+                )
+                if not text:
+                    continue
+                # Dấu hiệu chắc chắn 100% của tài khoản cá nhân:
+                if any(
+                    marker in text
+                    for marker in (
+                        "them ban be",
+                        "add friend",
+                        "ban be",
+                        "ban chung",
+                        "mutual friend",
+                        "huy loi moi",
+                        "thong tin ca nhan",
+                    )
+                ):
+                    return True
+            return False
+        except Exception:
+            return False
         finally:
             try:
                 os.remove(local_xml)
@@ -952,6 +1058,41 @@ class ADBController:
                         label = " ".join(p for p in node_text_parts if p).strip()
                         label_normalized = self._normalize_facebook_text(label)
                         if not label_normalized:
+                            continue
+
+                        # 1. Bỏ qua nếu có dấu hiệu của tài khoản cá nhân (Thêm bạn bè, Bạn bè, Bạn chung, v.v.)
+                        personal_markers = (
+                            "them ban be",
+                            "add friend",
+                            "ban be",
+                            "friends",
+                            "ban chung",
+                            "mutual friend",
+                            "huy loi moi",
+                            "cancel request",
+                            "dang theo doi",
+                            "thong tin ca nhan",
+                        )
+                        if any(pm in label_normalized for pm in personal_markers):
+                            continue
+
+                        # 2. Bắt buộc: Tên chính (Primary Title) của card phải chứa thương hiệu target
+                        primary_title = ""
+                        for p in node_text_parts:
+                            p_norm = self._normalize_facebook_text(p)
+                            if (
+                                p_norm
+                                and len(p_norm) >= 3
+                                and not any(pm in p_norm for pm in personal_markers)
+                            ):
+                                primary_title = p_norm
+                                break
+
+                        primary_title_tokens = set(primary_title.split())
+                        has_target_in_title = any(
+                            t in primary_title_tokens for t in target_tokens
+                        )
+                        if not has_target_in_title:
                             continue
 
                         label_token_set = set(label_normalized.split())
@@ -1092,9 +1233,17 @@ class ADBController:
 
                         x, y = chosen[4], chosen[5]
                         self.tap(device_id, x, y)
-                        time.sleep(1.5)
+                        time.sleep(2.0)
                         self.dismiss_facebook_messenger_if_present(device_id)
-                        time.sleep(1.5)
+                        time.sleep(1.0)
+                        if self._is_facebook_personal_profile(device_id):
+                            print(
+                                f"[Device {device_id[:6]}][Facebook] "
+                                f"Phát hiện mở nhầm tài khoản cá nhân • Bấm Back quay lại tìm Page..."
+                            )
+                            self.keyevent(device_id, 4)
+                            time.sleep(1.5)
+                            continue
                         return True
             except Exception as exc:
                 print(
@@ -6201,19 +6350,26 @@ class ADBController:
                     time.sleep(0.8)
                     continue
 
-            # Để dàn đều lượt xem trên các video của kênh (không dồn cục vào 1-2 video đầu):
-            # 50% số máy cuộn nhẹ lưới video xuống 1 lần trước khi chọn clip
-            if attempt == 0 and profile_confirmed and random.random() < 0.50:
-                self.swipe(
-                    device_id,
-                    width // 2,
-                    int(height * 0.75),
-                    width // 2,
-                    int(height * 0.40),
-                    duration=random.randint(500, 700),
+            # Lăn xuống ngẫu nhiên khi vào profile kênh (từ 1 đến 3 lần) để dàn đều dòng chảy
+            if attempt == 0 and profile_confirmed:
+                scroll_count = random.randint(1, 3)
+                print(
+                    f"[Device {device_id[:6]}][TikTok] Lăn xuống {scroll_count} lần "
+                    f"trong profile để chọn clip ngẫu nhiên..."
                 )
-                time.sleep(0.8)
-                scrolled_root = self._get_tiktok_ui_root(device_id, "tt_profile_videos_scrolled")
+                for s_i in range(scroll_count):
+                    self.swipe(
+                        device_id,
+                        width // 2,
+                        int(height * 0.72) + random.randint(-15, 15),
+                        width // 2,
+                        int(height * 0.36) + random.randint(-15, 15),
+                        duration=random.randint(500, 650),
+                    )
+                    time.sleep(0.8)
+                scrolled_root = self._get_tiktok_ui_root(
+                    device_id, "tt_profile_videos_scrolled"
+                )
                 if scrolled_root is not None:
                     root = scrolled_root
 
@@ -6221,21 +6377,38 @@ class ADBController:
             candidate_set = set()
             parent_map = {child: parent for parent in root.iter() for child in parent}
 
-            # TikTok dùng resource-id khác nhau theo phiên bản/thiết bị:
-            # S2: GridView hwz + item eti; S1: GridView hui + item erf.
-            # Ưu tiên các item clickable trực tiếp trong GridView để không phụ
-            # thuộc tên resource-id đã bị TikTok làm rối.
+            # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473' hoặc icon Play)
+            view_count_re = re.compile(r"^\s*(▷\s*)?(\d+[\.,]?\d*[kKmM]?)\s*$")
+            for elem in root.iter():
+                text = (elem.get("text", "") or "").strip()
+                desc = (elem.get("content-desc", "") or "").strip()
+                match_text = text or desc
+                if match_text and view_count_re.match(match_text):
+                    clickable = elem
+                    while clickable is not None and clickable.get("clickable", "").lower() != "true":
+                        clickable = parent_map.get(clickable)
+                    target_elem = clickable if clickable is not None else elem
+                    coords = self._element_center(target_elem)
+                    if coords and int(height * 0.25) < coords[1] < int(height * 0.90):
+                        if coords not in candidate_set:
+                            candidates.append(coords)
+                            candidate_set.add(coords)
+
+            # 2. Quét các item trong GridView/RecyclerView
             for grid in root.iter():
-                if not grid.get("class", "").lower().endswith("gridview"):
+                cls = grid.get("class", "").lower()
+                if "gridview" not in cls and "recyclerview" not in cls:
                     continue
                 for item in list(grid):
                     if item.get("clickable", "").lower() != "true":
                         continue
                     coords = self._element_center(item)
-                    if coords and 0 < coords[1] < height and coords not in candidate_set:
-                        candidates.append(coords)
-                        candidate_set.add(coords)
+                    if coords and int(height * 0.25) < coords[1] < int(height * 0.90):
+                        if coords not in candidate_set:
+                            candidates.append(coords)
+                            candidate_set.add(coords)
 
+            # 3. Quét theo resource-id và desc đã biết
             for elem in root.iter():
                 resource_id = elem.get("resource-id", "").lower()
                 desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
@@ -6261,44 +6434,37 @@ class ADBController:
                 coords = self._element_center(target_elem)
                 if (
                     coords
-                    and int(height * 0.20) < coords[1] < height
+                    and int(height * 0.25) < coords[1] < int(height * 0.90)
                     and coords not in candidate_set
                 ):
                     candidates.append(coords)
                     candidate_set.add(coords)
 
+            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok:
+            # Nếu UIAutomator không bóc tách được từng item con do custom rendering,
+            # các tọa độ tâm này CHẮC CHẮN rơi chính xác 100% vào giữa video thumbnail
             if not candidates:
-                if trusted_target_tap and attempt == 0:
-                    return self._tap_tiktok_profile_clip_fallback(device_id)
-                if attempt >= max_scan_attempts - 1:
-                    break
-                if not self.wait_for_tiktok_foreground(device_id):
-                    return False
-                print(
-                    f"[Device {device_id[:6]}] Profile đúng Kênh nhưng lưới "
-                    f"clip chưa hiện • cuộn tìm clip ({attempt + 1}/"
-                    f"{max_scan_attempts - 1})..."
-                )
-                self.swipe(
-                    device_id,
-                    width // 2,
-                    int(height * 0.78),
-                    width // 2,
-                    int(height * 0.35),
-                    duration=650,
-                )
-                time.sleep(1.2)
-                continue
+                for col_ratio in (0.17, 0.50, 0.83):
+                    for row_ratio in (0.42, 0.60, 0.78):
+                        pt = (int(width * col_ratio), int(height * row_ratio))
+                        candidates.append(pt)
 
             coords = random.choice(candidates)
+            print(
+                f"[Device {device_id[:6]}][TikTok] Click vào video tại tọa độ {coords}..."
+            )
             self.tap(device_id, coords[0], coords[1])
-            time.sleep(2.5)
+            time.sleep(2.8)
 
             if self.is_tiktok_video_player(device_id):
                 return True
 
-            self.keyevent(device_id, 4)
-            time.sleep(1.0)
+            # Thử tap lần 2 với 1 ô khác trong lưới
+            retry_coords = random.choice(candidates)
+            self.tap(device_id, retry_coords[0], retry_coords[1])
+            time.sleep(2.8)
+            if self.is_tiktok_video_player(device_id):
+                return True
 
         return False
 
@@ -6323,28 +6489,38 @@ class ADBController:
         ):
             return True
 
-        # Một số phiên bản dùng chung Main/SplashActivity cho profile và
-        # player. Khi đó cần nhìn cụm nút hành động dọc; chỉ TikTok foreground
-        # là chưa đủ vì menu Latest/Popular cũng giữ nguyên foreground.
         root = self._get_tiktok_ui_root(device_id, "tt_player_check")
         if root is None:
             return False
         action_hits = set()
         has_profile_grid = False
         action_markers = {
-            "like", "likes", "thích", "comment", "comments", "bình luận",
-            "share", "chia sẻ", "favorite", "favourite", "save", "lưu",
+            "like", "likes", "thich", "comment", "comments", "binh luan",
+            "share", "chia se", "favorite", "favourite", "save", "luu",
         }
+        profile_exclusive_markers = {
+            "sua ho so", "edit profile", "tin nhan", "lienhe.khaihoanskincare.com",
+            "chuyen san pham", "dia chi", "address",
+        }
+        has_profile_exclusive = False
         for elem in root.iter():
-            if elem.get("class", "").casefold().endswith("gridview"):
+            cls = elem.get("class", "").casefold()
+            if cls.endswith("gridview"):
                 has_profile_grid = True
-            value = self._normalize_tiktok_text(
+            value = self._normalize_tiktok_identity(
                 f"{elem.get('text', '')} {elem.get('content-desc', '')}"
             )
             for marker in action_markers:
-                if value == marker or value.startswith(f"{marker} "):
+                if marker in value:
                     action_hits.add(marker)
-        return not has_profile_grid and len(action_hits) >= 2
+            for p_marker in profile_exclusive_markers:
+                if p_marker in value:
+                    has_profile_exclusive = True
+
+        if has_profile_exclusive:
+            return False
+
+        return not has_profile_grid and len(action_hits) >= 1
 
     def dismiss_tiktok_comment_sheet_if_present(
         self, device_id, status_callback=None

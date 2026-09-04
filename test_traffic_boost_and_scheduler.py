@@ -159,6 +159,73 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         self.assertEqual(1, len(taps))
         self.assertGreater(taps[0][1], 360, "Must tap the real target card, NOT Trần Khải Hoàn!")
 
+    def test_facebook_page_search_rejects_personal_account_like_phan_huynh_thao_ngoc(self):
+        """Verify find_and_click_facebook_page ignores personal accounts (Phan Huỳnh Thảo Ngọc) and taps real Page."""
+        import xml.etree.ElementTree as ET
+        from unittest.mock import patch
+
+        fb_search_root = ET.fromstring(
+            """
+            <hierarchy>
+              <!-- Card 1: Personal Account Phan Huỳnh Thảo Ngọc -->
+              <node class="android.widget.RelativeLayout" clickable="true" bounds="[0,200][1080,380]">
+                <node class="android.widget.TextView" text="Phan Huỳnh Thảo Ngọc" bounds="[160,220][550,270]" />
+                <node class="android.widget.TextView" text="Dược sĩ tư vấn tại Nhà thuốc Khải Hoàn Skincare, điều trị mụn..." bounds="[160,280][800,330]" />
+                <node class="android.widget.Button" text="Thêm bạn bè" bounds="[850,230][1040,310]" />
+              </node>
+              <!-- Card 2: Real Page Nhà thuốc Khải Hoàn Skincare -->
+              <node class="android.widget.RelativeLayout" clickable="true" bounds="[0,400][1080,580]">
+                <node class="android.widget.TextView" text="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết" bounds="[160,420][800,470]" />
+                <node class="android.widget.TextView" text="Trang · Doanh nghiệp y tế &amp; sức khỏe" bounds="[160,480][600,520]" />
+                <node class="android.widget.Button" text="Theo dõi" bounds="[850,430][1040,510]" />
+              </node>
+            </hierarchy>
+            """
+        )
+        taps = []
+        self.adb.get_effective_screen_size = lambda _dev: (1080, 1920)
+        self.adb.execute_adb = lambda _dev, cmd: (0, "", "")
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+        self.adb.dismiss_facebook_messenger_if_present = lambda _dev: None
+        self.adb._is_facebook_personal_profile = lambda _dev: False
+
+        with patch("xml.etree.ElementTree.parse") as mock_parse, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.remove", return_value=None), \
+             patch("adb_controller.time.sleep", return_value=None):
+            mock_tree = mock_parse.return_value
+            mock_tree.getroot.return_value = fb_search_root
+
+            res = self.adb.find_and_click_facebook_page(
+                "dev-fb", "Nhà thuốc Khải Hoàn", exact_page_name="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết"
+            )
+
+        self.assertTrue(res)
+        self.assertEqual(1, len(taps))
+        # Must tap Card 2 (y around 490), NOT Card 1 (y around 290)
+        self.assertGreater(taps[0][1], 390, "Must tap real Page card, NOT personal account!")
+
+    def test_tiktok_video_player_detects_views_and_action_markers(self):
+        """Verify is_tiktok_video_player detects player with numbers in front of markers."""
+        import xml.etree.ElementTree as ET
+
+        player_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.FrameLayout">
+                <node class="android.widget.ImageView" content-desc="1,598 thích" />
+                <node class="android.widget.ImageView" content-desc="12 bình luận" />
+                <node class="android.widget.ImageView" content-desc="Chia sẻ" />
+              </node>
+            </hierarchy>
+            """
+        )
+        self.adb.execute_adb = lambda _dev, _cmd: (0, "com.ss.android.ugc.trill/com.ss.android.ugc.aweme.main.MainActivity", "")
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": player_root
+
+        is_player = self.adb.is_tiktok_video_player("dev-tt")
+        self.assertTrue(is_player, "Must recognize TikTok player when action buttons have counts in front")
+
 
 if __name__ == "__main__":
     unittest.main()
