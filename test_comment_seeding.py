@@ -340,6 +340,35 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         # Never mix platforms
         self.assertTrue(all(t.platform == "Facebook" for t in exec_fb))
 
+    def test_parse_comment_devices(self):
+        devices = ["dev1", "dev2", "dev3", "dev4", "dev5"]
+
+        # Blank input: should take min(total_tasks, len(devices))
+        self.assertEqual(comment_controller.parse_comment_devices("", 3, devices), ["dev1", "dev2", "dev3"])
+        self.assertEqual(comment_controller.parse_comment_devices("", 1, devices), ["dev1"])
+
+        # Single number '3' or '3 máy': should take first 3 devices
+        self.assertEqual(comment_controller.parse_comment_devices("3", 3, devices), ["dev1", "dev2", "dev3"])
+        self.assertEqual(comment_controller.parse_comment_devices("3 máy", 3, devices), ["dev1", "dev2", "dev3"])
+
+        # Range '1-3'
+        self.assertEqual(comment_controller.parse_comment_devices("1-3", 3, devices), ["dev1", "dev2", "dev3"])
+
+        # Specific list '1, 3'
+        self.assertEqual(comment_controller.parse_comment_devices("1, 3", 2, devices), ["dev1", "dev3"])
+        self.assertEqual(comment_controller.parse_comment_devices("1 2", 2, devices), ["dev1", "dev2"])
+
+    def test_find_send_button_coords_calibrated(self):
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (1, "", "") # fail dump to trigger calibrated
+        x, y = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
+        self.assertEqual(x, int(1080 * 0.893))
+        self.assertEqual(y, int(1920 * 0.928))
+
+        x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
+        self.assertEqual(x_fb, int(1080 * 0.905))
+        self.assertEqual(y_fb, int(1920 * 0.928))
+
 
 if __name__ == "__main__":
     unittest.main()

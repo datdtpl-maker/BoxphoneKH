@@ -6,11 +6,14 @@ kết hợp giả lập hành vi người dùng tự nhiên (dwell, jitter, gõ 
 
 from __future__ import annotations
 
+import os
 import random
 import re
+import tempfile
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Callable, Optional
 
 PLATFORM_TIKTOK = "TikTok"
@@ -189,18 +192,21 @@ def post_tiktok_comment(
         return False
 
     # 4. Bấm nút Gửi
-    log("Bấm nút Gửi bình luận...")
-    send_x = int(width * 0.92)
-    send_y = int(height * 0.95)
+    log("Tìm nút Gửi bình luận...")
+    send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
+    log(f"Chạm nút Gửi TikTok tại ({send_x}, {send_y})...")
     adb.tap(device_id, send_x, send_y)
-    time.sleep(random.uniform(2.0, 3.0))
+    time.sleep(0.4)
+    # Kích hoạt phím Enter / Action Send
+    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+    time.sleep(0.4)
+    adb.tap(device_id, send_x, send_y)
+    time.sleep(random.uniform(2.5, 3.2))
 
-    # 5. Đóng khung comment để giữ màn hình an toàn
+    # 5. Đóng khung comment để giữ màn hình an toàn (Phím Back an toàn)
     log("Đóng khung bình luận...")
-    backdrop_x = int(width * 0.50)
-    backdrop_y = int(height * 0.12)
-    adb.tap(device_id, backdrop_x, backdrop_y)
-    time.sleep(0.8)
+    adb.keyevent(device_id, 4)
+    time.sleep(1.0)
 
     log("Đã đăng bình luận TikTok thành công!")
     return True
@@ -281,23 +287,134 @@ def post_facebook_comment(
         return False
 
     # 4. Bấm nút Gửi bình luận
-    log("Bấm nút Gửi bình luận...")
-    send_x = int(width * 0.92)
-    send_y = int(height * 0.95)
+    log("Tìm nút Gửi bình luận...")
+    send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
+    log(f"Chạm nút Gửi Facebook tại ({send_x}, {send_y})...")
     adb.tap(device_id, send_x, send_y)
-    time.sleep(random.uniform(2.0, 3.0))
+    time.sleep(0.4)
+    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+    time.sleep(0.4)
+    adb.tap(device_id, send_x, send_y)
+    time.sleep(random.uniform(2.5, 3.2))
 
     # 5. Thoát khung bình luận (phím Back an toàn)
     log("Thoát khung bình luận...")
     adb.keyevent(device_id, 4)
-    time.sleep(0.8)
+    time.sleep(1.0)
 
     log("Đã đăng bình luận Facebook thành công!")
     return True
 
 
+def find_send_button_coords(
+    adb, device_id: str, platform: str, width: int, height: int
+) -> tuple[int, int]:
+    """Tìm tọa độ nút Gửi bình luận qua UI dump hoặc tọa độ đã hiệu chuẩn thực tế."""
+    xml_file = f"/sdcard/dump_cmt_{device_id}.xml"
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_cmt_{safe_dev}.xml")
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", xml_file]
+        )
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml])
+            if os.path.exists(local_xml):
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    if not m:
+                        continue
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    if cy < height * 0.55:
+                        continue
+
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+
+                    is_send = any(
+                        keyword in desc or keyword in txt or keyword in rid
+                        for keyword in (
+                            "gửi", "send", "submit", "publish", "post",
+                            "btn_send", "send_btn", "iv_send"
+                        )
+                    )
+                    if is_send:
+                        return cx, cy
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    clean_p = (platform or "").strip().casefold()
+    if "tiktok" in clean_p:
+        # Tọa độ nút tròn đỏ gửi TikTok: x=89.3%, y=92.8%
+        return int(width * 0.893), int(height * 0.928)
+    else:
+        # Tọa độ nút gửi Facebook: x=90.5%, y=92.8%
+        return int(width * 0.905), int(height * 0.928)
+
+
+def parse_comment_devices(selection_text: str, total_tasks: int, all_devices: list) -> list:
+    """Xác định danh sách thiết bị chạy bình luận lần lượt.
+    - Nếu để trống: Lấy lần lượt Máy 1, Máy 2, ... tương ứng với số câu bình luận.
+    - Nếu nhập số lượng (VD: '3' hoặc '3 máy'): Lấy 3 máy đầu tiên (Máy 1, 2, 3).
+    - Nếu nhập dải (VD: '1-3' hoặc '1, 2, 3'): Lấy đúng danh sách chỉ định.
+    """
+    if not all_devices:
+        return []
+
+    raw = (selection_text or "").strip()
+    needed = max(1, min(total_tasks, len(all_devices)))
+    if not raw:
+        return all_devices[:needed]
+
+    digit_match = re.match(r"^(\d+)\s*(?:máy|may|device|devices)?$", raw, re.IGNORECASE)
+    if digit_match:
+        qty = int(digit_match.group(1))
+        if 1 < qty <= len(all_devices):
+            return all_devices[:qty]
+        elif qty == 1:
+            return [all_devices[0]]
+
+    selected_indices = set()
+    tokens = re.split(r"[,;\s]+", raw)
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            try:
+                s, e = map(int, token.split("-"))
+                for i in range(min(s, e), max(s, e) + 1):
+                    selected_indices.add(i)
+            except ValueError:
+                pass
+        elif token.isdigit():
+            selected_indices.add(int(token))
+
+    result = []
+    for idx in sorted(selected_indices):
+        if 1 <= idx <= len(all_devices):
+            result.append(all_devices[idx - 1])
+
+    if not result:
+        return all_devices[:needed]
+
+    return result
+
+
 def execute_comment_task(
-    adb,
+    adb: ADBManager,
     device_id: str,
     platform: str,
     url: str,

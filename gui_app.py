@@ -1236,10 +1236,10 @@ class GUIApp(ctk.CTk):
         # Device selection entry
         dev_box = ctk.CTkFrame(row_cfg, fg_color="transparent")
         dev_box.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        ctk.CTkLabel(dev_box, text="Máy chạy (VD: 1-5 hoặc 1,3 - để trống = tất cả):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(dev_box, text="Máy chạy (VD: 1-3 • để trống = chia Máy 1, 2, 3...):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
         self.ent_comment_selection = ctk.CTkEntry(
             dev_box,
-            placeholder_text="Để trống = chạy toàn bộ máy đang kết nối",
+            placeholder_text="Để trống = tự động chạy lần lượt từng máy (Máy 1, 2, 3...)",
             font=body_font,
             height=36,
             corner_radius=10,
@@ -4113,11 +4113,29 @@ class GUIApp(ctk.CTk):
             )
 
     def start_comment_seeding(self):
-        """Bắt đầu tiến trình bơm bình luận."""
-        target_devices = self.parse_targets(
-            entry_widget=self.ent_comment_selection
+        """Bắt đầu tiến trình bơm bình luận lần lượt trên từng máy."""
+        selection = self.ent_comment_selection.get().strip()
+        all_devices = main.get_ordered_devices()
+        if not all_devices:
+            messagebox.showwarning("Cảnh báo", "Không có thiết bị nào đang kết nối!")
+            return
+
+        raw_lines = [
+            line.strip()
+            for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
+            if line.strip()
+        ]
+        if not raw_lines:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập ít nhất một câu bình luận!")
+            return
+
+        target_devices = comment_controller.parse_comment_devices(
+            selection,
+            len(raw_lines),
+            all_devices,
         )
         if not target_devices:
+            messagebox.showwarning("Cảnh báo", "Không tìm thấy thiết bị phù hợp để chạy!")
             return
 
         try:
@@ -4134,8 +4152,9 @@ class GUIApp(ctk.CTk):
         self.btn_comment_stop.configure(state="normal")
         self.comment_cancel_flag = False
 
+        dev_names = ", ".join(main.get_device_name(d) for d in target_devices)
         print(
-            f"[GUI] Bắt đầu Bơm bình luận trên {len(target_devices)} máy..."
+            f"[GUI] Bắt đầu Bơm bình luận lần lượt trên {len(target_devices)} máy: [{dev_names}]..."
         )
         self.run_in_thread(
             self._run_comment_seeding_worker,
@@ -4249,13 +4268,21 @@ class GUIApp(ctk.CTk):
                         )
 
             if idx < total_tasks - 1 and not self.comment_cancel_flag:
-                jitter_delay = max(3, delay_between) + random.randint(-1, 2)
+                next_dev_id = devices[(idx + 1) % total_devs]
+                next_dev_name = main.get_device_name(next_dev_id)
+                jitter_delay = max(3, delay_between) + random.randint(0, 2)
                 self.log_message(
-                    f"Giãn cách {jitter_delay}s trước bình luận tiếp theo..."
+                    f"⏸ [Máy {device_name} xong] Nghỉ {jitter_delay}s trước khi chuyển sang Máy {next_dev_name}..."
                 )
-                for _ in range(jitter_delay):
+                for remaining in range(jitter_delay, 0, -1):
                     if self.comment_cancel_flag:
                         break
+                    self.after(
+                        0,
+                        lambda r=remaining, d=next_dev_name: self.comment_status_label.configure(
+                            text=f"⏸ Nghỉ {r}s... Chuẩn bị chạy tiếp trên Máy {d}."
+                        ),
+                    )
                     time.sleep(1.0)
 
         def finish_ui():
