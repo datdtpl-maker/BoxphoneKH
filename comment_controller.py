@@ -105,10 +105,6 @@ def open_url_via_intent(
     clean_url = clean_platform_url(canonical_url, platform)
 
     if "tiktok" in clean_platform:
-        # Thoát khỏi màn hình Live stream / modal nếu đang mở
-        adb.keyevent(device_id, 4)
-        time.sleep(0.5)
-
         # Đảm bảo TikTok đã khởi động nếu đang tắt
         if hasattr(adb, "is_tiktok_in_foreground") and not adb.is_tiktok_in_foreground(device_id):
             if hasattr(adb, "launch_tiktok"):
@@ -128,43 +124,31 @@ def open_url_via_intent(
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
         code, stdout, _ = adb.execute_adb(device_id, cmd)
-        if code != 0 or "Error" in (stdout or ""):
-            # Thử mở bằng package TikTok alt
-            cmd_alt = [
-                "shell", "am", "start",
-                "-a", "android.intent.action.VIEW",
-                "-d", clean_url,
-                "-p", TIKTOK_ALT_PACKAGE,
-                "-f", "0x14000000",
-                "--es", "android.intent.extra.REFERRER_NAME", referrer,
-            ]
-            code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
-            if code_alt != 0 or "Error" in (stdout_alt or ""):
-                # Fallback Intent không gắn cố định package
-                cmd_fallback = [
-                    "shell", "am", "start",
-                    "-a", "android.intent.action.VIEW",
-                    "-d", clean_url,
-                    "-f", "0x14000000",
-                ]
-                code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
-                return code_fb == 0
+        if code == 0 and "Error" not in (stdout or ""):
+            return True
 
-        # Nếu có video_id cụ thể, kích hoạt thêm deep link native nội bộ TikTok
-        video_id = extract_tiktok_video_id(clean_url)
-        if video_id:
-            for scheme in ("snssdk1233", "snssdk1180"):
-                cmd_deep = [
-                    "shell", "am", "start",
-                    "-a", "android.intent.action.VIEW",
-                    "-d", f"{scheme}://aweme/detail/{video_id}",
-                    "-f", "0x14000000",
-                ]
-                code_d, out_d, _ = adb.execute_adb(device_id, cmd_deep)
-                if code_d == 0 and "Error" not in (out_d or ""):
-                    break
+        # Thử mở bằng package TikTok alt nếu package chính lỗi
+        cmd_alt = [
+            "shell", "am", "start",
+            "-a", "android.intent.action.VIEW",
+            "-d", clean_url,
+            "-p", TIKTOK_ALT_PACKAGE,
+            "-f", "0x14000000",
+            "--es", "android.intent.extra.REFERRER_NAME", referrer,
+        ]
+        code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
+        if code_alt == 0 and "Error" not in (stdout_alt or ""):
+            return True
 
-        return True
+        # Fallback Intent không gắn cố định package
+        cmd_fallback = [
+            "shell", "am", "start",
+            "-a", "android.intent.action.VIEW",
+            "-d", clean_url,
+            "-f", "0x14000000",
+        ]
+        code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
+        return code_fb == 0
 
     elif "facebook" in clean_platform:
         cmd = [
@@ -201,7 +185,7 @@ def open_url_via_intent(
 def wait_for_tiktok_video_ready(
     adb,
     device_id: str,
-    timeout: int = 10,
+    timeout: int = 5,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
     clean_url: str = "",
@@ -216,39 +200,10 @@ def wait_for_tiktok_video_ready(
         if is_cancelled and is_cancelled():
             return False
 
-        # Đóng các popup cản trở nếu xuất hiện
-        if hasattr(adb, "dismiss_tiktok_blocking_popup"):
-            try:
-                adb.dismiss_tiktok_blocking_popup(device_id)
-            except Exception:
-                pass
-
         # Khóa dọc giữ màn hình ổn định
         if hasattr(adb, "lock_portrait"):
             try:
                 adb.lock_portrait(device_id, retries=1)
-            except Exception:
-                pass
-
-        # Kiểm tra xem có bị kẹt ở Live stream không
-        if hasattr(adb, "get_tiktok_foreground_activity"):
-            try:
-                act = (adb.get_tiktok_foreground_activity(device_id) or "").casefold()
-                if "live" in act:
-                    log("Đang thoát màn hình Live để mở video đích...")
-                    adb.keyevent(device_id, 4)
-                    time.sleep(1.0)
-                    vid = extract_tiktok_video_id(clean_url)
-                    if vid:
-                        adb.execute_adb(
-                            device_id,
-                            [
-                                "shell", "am", "start",
-                                "-a", "android.intent.action.VIEW",
-                                "-d", f"snssdk1233://aweme/detail/{vid}",
-                                "-f", "0x14000000",
-                            ],
-                        )
             except Exception:
                 pass
 
@@ -262,6 +217,61 @@ def wait_for_tiktok_video_ready(
 
     log("Đã hoàn tất thời gian chuẩn bị video.")
     return True
+
+
+def find_tiktok_comment_icon_coords(
+    adb, device_id: str, width: int, height: int
+) -> tuple[int, int]:
+    """Tìm tọa độ icon mở bình luận bên phải video TikTok qua UI dump hoặc tọa độ chuẩn."""
+    xml_file = f"/sdcard/dump_cmt_btn_{device_id}.xml"
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_cmt_btn_{safe_dev}.xml")
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", xml_file]
+        )
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml])
+            if os.path.exists(local_xml):
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    if not m:
+                        continue
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
+                    # Icon comment nằm ở thanh điều hướng bên phải (x > 75%) và ở khoảng 40% - 65% chiều cao màn hình
+                    if cx < width * 0.75 or cy < height * 0.40 or cy > height * 0.65:
+                        continue
+
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+
+                    if any(
+                        kw in desc or kw in txt or kw in rid
+                        for kw in (
+                            "bình luận", "comment", "cmt", "comment_count",
+                            "comment_list", "comment_icon"
+                        )
+                    ):
+                        return cx, cy
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    # Tọa độ chuẩn của quả bóng chat Bình luận trên thanh điều hướng bên phải video TikTok:
+    # x = 92.5%, y = 53.5% (trên nút Bookmark 62-63% và dưới nút Like 44%)
+    return int(width * 0.925), int(height * 0.535)
 
 
 def find_comment_input_coords(
@@ -416,19 +426,9 @@ def post_tiktok_comment(
 
     # 4. Bấm nút Mở khung bình luận
     log("Mở khung bình luận...")
-    comment_coords = None
-    try:
-        comment_coords = adb.find_element_coords_by_text(device_id, "bình luận")
-    except Exception:
-        comment_coords = None
-
-    if comment_coords:
-        adb.tap(device_id, comment_coords[0], comment_coords[1])
-    else:
-        # Tọa độ icon comment chuẩn trên thanh điều hướng bên phải video TikTok
-        icon_x = int(width * 0.92)
-        icon_y = int(height * 0.63)
-        adb.tap(device_id, icon_x, icon_y)
+    comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
+    log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
+    adb.tap(device_id, comment_x, comment_y)
 
     time.sleep(random.uniform(1.8, 2.5))
     if is_cancelled and is_cancelled():

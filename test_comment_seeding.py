@@ -407,6 +407,23 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertEqual(x, int(1080 * 0.35))
         self.assertEqual(y, int(1920 * 0.962))
 
+    def test_find_tiktok_comment_icon_coords_calibrated(self):
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (1, "", "")
+        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, int(1080 * 0.925))
+        self.assertEqual(y, int(1920 * 0.535))
+
+    @patch("time.sleep", return_value=None)
+    def test_wait_for_tiktok_video_ready(self, _sleep):
+        adb_mock = MagicMock()
+        res = comment_controller.wait_for_tiktok_video_ready(
+            adb_mock, "dev1", timeout=4
+        )
+        self.assertTrue(res)
+        adb_mock.lock_portrait.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+
