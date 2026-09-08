@@ -261,12 +261,49 @@ def fetch_notion_comments(
                         except Exception:
                             stt_num = r_idx
 
-                        status_txt = _cell_text(cells[status_idx]) if status_idx < len(cells) else "Chưa comment"
+                        status_raw = _cell_text(cells[status_idx]) if status_idx < len(cells) else ""
+                        author_raw = _cell_text(cells[author_idx]) if author_idx < len(cells) else ""
+                        time_raw = _cell_text(cells[time_idx]) if time_idx < len(cells) else ""
+
+                        needs_patch = False
+                        status_txt = status_raw
                         if not status_txt.strip():
                             status_txt = "Chưa comment"
+                            needs_patch = True
 
-                        author_txt = _cell_text(cells[author_idx]) if author_idx < len(cells) else ""
-                        time_txt = _cell_text(cells[time_idx]) if time_idx < len(cells) else ""
+                        author_txt = author_raw
+                        if not author_txt.strip():
+                            author_txt = "—"
+                            needs_patch = True
+
+                        time_txt = time_raw
+                        if not time_txt.strip():
+                            time_txt = "—"
+                            needs_patch = True
+
+                        # Tự động điền 'Chưa comment', '—', '—' vào các ô trống trên Notion cho đồng bộ
+                        if needs_patch and row_id:
+                            try:
+                                def _make_text_c(t: str):
+                                    return [{"type": "text", "text": {"content": t}}]
+                                patched_cells = list(cells)
+                                while len(patched_cells) <= max(stt_idx, content_idx, status_idx, author_idx, time_idx):
+                                    patched_cells.append([])
+                                if not _cell_text(patched_cells[stt_idx]).strip():
+                                    patched_cells[stt_idx] = _make_text_c(str(stt_num))
+                                patched_cells[status_idx] = _make_text_c(status_txt)
+                                patched_cells[author_idx] = _make_text_c(author_txt)
+                                patched_cells[time_idx] = _make_text_c(time_txt)
+                                req_fill = urllib.request.Request(
+                                    f"https://api.notion.com/v1/blocks/{row_id}",
+                                    headers=_build_headers(tok),
+                                    data=json.dumps({"table_row": {"cells": patched_cells}}).encode("utf-8"),
+                                    method="PATCH",
+                                )
+                                with urllib.request.urlopen(req_fill, timeout=timeout) as _:
+                                    cells = patched_cells
+                            except Exception:
+                                pass
 
                         # BỘ LỌC QUAN TRỌNG: Nếu yêu cầu chỉ lấy uncompleted và cmt đã hoàn thành -> BỎ QUA
                         if only_uncompleted and status_txt.casefold() in ["hoàn thành", "đã đăng", "done", "completed"]:
