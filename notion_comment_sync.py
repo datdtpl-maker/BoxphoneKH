@@ -80,7 +80,7 @@ def fetch_notion_comments(
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
     query_body: dict = {
         "sorts": [
-            {"property": "STT", "direction": "ascending"}
+            {"timestamp": "created_time", "direction": "ascending"}
         ]
     }
     if only_uncompleted:
@@ -106,11 +106,12 @@ def fetch_notion_comments(
 
     results = data.get("results", [])
     tasks: list[NotionCommentTask] = []
-    for page in results:
+    for idx, page in enumerate(results):
         page_id = page.get("id", "")
         props = page.get("properties", {})
 
-        stt_num = int(props.get("STT", {}).get("number") or 0)
+        stt_val = props.get("STT", {}).get("number")
+        stt_num = int(stt_val) if stt_val is not None else (idx + 1)
         content = _plain_text(props.get("Nội dung comment", {}), "title")
         post_url = props.get("Link bài đăng", {}).get("url") or ""
 
