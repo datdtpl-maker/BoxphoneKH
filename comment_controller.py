@@ -238,6 +238,7 @@ def find_tiktok_comment_icon_coords(
                 root = tree.getroot()
                 like_cy = None
                 bookmark_cy = None
+                right_rail_elements = []
 
                 for elem in root.iter():
                     bounds = elem.get("bounds", "")
@@ -255,7 +256,7 @@ def find_tiktok_comment_icon_coords(
                     txt = (elem.get("text") or "").casefold()
                     rid = (elem.get("resource-id") or "").casefold()
 
-                    # 1. Nhận diện từ khóa bình luận (kể cả 'Bóc tem' khi video chưa có cmt nào)
+                    # 1. Nhận diện từ khóa bình luận (kể cả Tiếng Việt và Tiếng Anh)
                     is_comment = any(
                         kw in desc or kw in txt or kw in rid
                         for kw in (
@@ -263,7 +264,8 @@ def find_tiktok_comment_icon_coords(
                             "bình luận", "binh luan", "comment", "cmt",
                             "comment_count", "comment_list", "comment_icon",
                             "desc_comment", "đọc hoặc thêm bình luận", "doc hoac them binh luan",
-                            "be the first", "add comment"
+                            "be the first", "add comment", "read or add comments",
+                            "leave a comment", "post a comment", "comments"
                         )
                     )
                     if is_comment:
@@ -273,16 +275,24 @@ def find_tiktok_comment_icon_coords(
                             return cx, max(int(height * 0.35), cy - int(height * 0.025))
                         return cx, cy
 
-                    # Ghi nhận vị trí like và bookmark để neo khoảng cách nếu text bị ẩn
+                    # Ghi nhận vị trí like và bookmark để neo khoảng cách nếu text bị ẩn hoặc dùng ngôn ngữ lạ
                     if any(k in desc or k in txt or k in rid for k in ("like", "thích", "heart")):
                         like_cy = cy
-                    if any(k in desc or k in txt or k in rid for k in ("bookmark", "lưu", "favorite", "collect")):
+                    if any(k in desc or k in txt or k in rid for k in ("bookmark", "lưu", "favorite", "collect", "save")):
                         bookmark_cy = cy
+
+                    # Thu thập các phần tử ở dải độ cao đặc trưng của nút bình luận (52% - 63% chiều cao màn hình)
+                    if 0.52 * height <= cy <= 0.63 * height and elem.get("clickable", "false") == "true":
+                        right_rail_elements.append((cx, cy))
 
                 # Nếu không bắt được nhãn text nhưng bắt được nút Like và Bookmark: icon bình luận luôn nằm chính giữa
                 if like_cy is not None and bookmark_cy is not None and bookmark_cy > like_cy:
                     mid_y = (like_cy + bookmark_cy) // 2
                     return int(width * 0.934), mid_y
+
+                # Nếu phát hiện phần tử tương tác ở dải độ cao đặc trưng của bình luận
+                if right_rail_elements:
+                    return right_rail_elements[0]
     except Exception:
         pass
     finally:
