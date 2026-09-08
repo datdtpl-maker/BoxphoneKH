@@ -198,6 +198,48 @@ def fetch_notion_comments(
                     header_cells = rows[0].get("table_row", {}).get("cells", [])
                     col_map = _parse_table_header(header_cells)
 
+                    # Đếm số comment thực tế có nội dung để tự động cập nhật Notion
+                    valid_comment_rows = []
+                    completed_count = 0
+                    content_idx = col_map.get("content", 1)
+                    status_idx = col_map.get("status", 2)
+                    for r in rows[1:]:
+                        c_cells = r.get("table_row", {}).get("cells", [])
+                        c_text = _cell_text(c_cells[content_idx]) if content_idx < len(c_cells) else ""
+                        if c_text.strip():
+                            valid_comment_rows.append(r)
+                            s_text = _cell_text(c_cells[status_idx]) if status_idx < len(c_cells) else ""
+                            if s_text.casefold() in ["hoàn thành", "đã đăng", "done", "completed"]:
+                                completed_count += 1
+
+                    # Tự động cập nhật 'Số cmt dự kiến' & 'Đã đăng' ngoài bảng chính nếu người dùng vừa thêm cmt
+                    expected_now = len(valid_comment_rows)
+                    if expected_now > 0:
+                        exp_cur = int(props.get("Số cmt dự kiến", {}).get("number") or 0)
+                        post_cur = int(props.get("Đã đăng", {}).get("number") or 0)
+                        if exp_cur != expected_now or post_cur != completed_count:
+                            try:
+                                sync_body = {
+                                    "properties": {
+                                        "Số cmt dự kiến": {"number": expected_now},
+                                        "Đã đăng": {"number": completed_count},
+                                    }
+                                }
+                                if completed_count >= expected_now and expected_now > 0:
+                                    sync_body["properties"]["Trạng thái"] = {"select": {"name": "Hoàn thành"}}
+                                elif completed_count > 0:
+                                    sync_body["properties"]["Trạng thái"] = {"select": {"name": "Đang chạy"}}
+                                req_sync = urllib.request.Request(
+                                    f"https://api.notion.com/v1/pages/{page_id}",
+                                    headers=_build_headers(tok),
+                                    data=json.dumps(sync_body).encode("utf-8"),
+                                    method="PATCH",
+                                )
+                                with urllib.request.urlopen(req_sync, timeout=timeout) as _:
+                                    pass
+                            except Exception:
+                                pass
+
                     # Comment rows
                     for r_idx, r in enumerate(rows[1:], start=1):
                         row_id = r.get("id", "")
@@ -209,14 +251,20 @@ def fetch_notion_comments(
                         author_idx = col_map.get("author", 3)
                         time_idx = col_map.get("time", 4)
 
+                        content_txt = _cell_text(cells[content_idx]) if content_idx < len(cells) else ""
+                        if not content_txt.strip():
+                            continue
+
                         stt_val = _cell_text(cells[stt_idx]) if stt_idx < len(cells) else str(r_idx)
                         try:
                             stt_num = int(re.sub(r"[^\d]", "", stt_val)) if re.sub(r"[^\d]", "", stt_val) else r_idx
                         except Exception:
                             stt_num = r_idx
 
-                        content_txt = _cell_text(cells[content_idx]) if content_idx < len(cells) else ""
                         status_txt = _cell_text(cells[status_idx]) if status_idx < len(cells) else "Chưa comment"
+                        if not status_txt.strip():
+                            status_txt = "Chưa comment"
+
                         author_txt = _cell_text(cells[author_idx]) if author_idx < len(cells) else ""
                         time_txt = _cell_text(cells[time_idx]) if time_idx < len(cells) else ""
 
