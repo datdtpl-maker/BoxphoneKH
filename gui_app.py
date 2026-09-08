@@ -407,6 +407,12 @@ class GUIApp(ctk.CTk):
             "corner_radius": 10,
             "font": body_font,
         }
+        card_style = {
+            "corner_radius": 14,
+            "fg_color": glass_tint,
+            "border_width": 1,
+            "border_color": border,
+        }
 
         # ---------------- FACEBOOK + TIKTOK COMBINED ----------------
         # This panel only orchestrates the two existing workflows. Their
