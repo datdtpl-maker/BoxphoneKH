@@ -301,6 +301,44 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertTrue(hasattr(gui_app.GUIApp, "start_comment_seeding"))
         self.assertTrue(hasattr(gui_app.GUIApp, "stop_comment_seeding"))
         self.assertTrue(hasattr(gui_app.GUIApp, "_run_comment_seeding_worker"))
+        self.assertTrue(hasattr(gui_app.GUIApp, "_on_comment_platform_changed"))
+        self.assertTrue(hasattr(gui_app.GUIApp, "_on_comment_url_modified"))
+        self.assertTrue(hasattr(gui_app.GUIApp, "_sync_comment_ui_for_platform"))
+
+    def test_platform_filtering_and_task_building(self):
+        t1 = notion_comment_sync.NotionCommentTask(
+            page_id="p1", row_id="r1", stt=1, content="Cmt FB 1",
+            url="https://facebook.com/1", platform="Facebook"
+        )
+        t2 = notion_comment_sync.NotionCommentTask(
+            page_id="p1", row_id="r2", stt=2, content="Cmt FB 2",
+            url="https://facebook.com/1", platform="Facebook"
+        )
+        t3 = notion_comment_sync.NotionCommentTask(
+            page_id="p2", row_id="r3", stt=1, content="Cmt TT 1",
+            url="https://tiktok.com/1", platform="TikTok"
+        )
+        all_tasks = [t1, t2, t3]
+
+        # Test filter
+        fb_tasks = comment_controller.filter_tasks_for_platform(all_tasks, "Facebook")
+        self.assertEqual(len(fb_tasks), 2)
+        self.assertTrue(all(t.platform == "Facebook" for t in fb_tasks))
+
+        tt_tasks = comment_controller.filter_tasks_for_platform(all_tasks, "TikTok")
+        self.assertEqual(len(tt_tasks), 1)
+        self.assertEqual(tt_tasks[0].content, "Cmt TT 1")
+
+        # Test build execution tasks
+        exec_fb = comment_controller.build_execution_tasks(
+            all_tasks, "Facebook", "https://facebook.com/1", ["Cmt FB 1", "Cmt FB 2"]
+        )
+        self.assertEqual(len(exec_fb), 2)
+        self.assertEqual(exec_fb[0].row_id, "r1")
+        self.assertEqual(exec_fb[1].row_id, "r2")
+
+        # Never mix platforms
+        self.assertTrue(all(t.platform == "Facebook" for t in exec_fb))
 
 
 if __name__ == "__main__":

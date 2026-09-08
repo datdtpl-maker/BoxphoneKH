@@ -332,3 +332,98 @@ def execute_comment_task(
         if status_callback:
             status_callback(f"[Device {device_id}] Nền tảng '{platform}' chưa hỗ trợ seeding.")
         return False
+
+
+def filter_tasks_for_platform(tasks: list, platform: str) -> list:
+    """Lọc danh sách task bình luận theo nền tảng chỉ định."""
+    clean_p = (platform or "").strip().casefold()
+    return [
+        t for t in tasks
+        if (getattr(t, "platform", "") or "").strip().casefold() == clean_p
+    ]
+
+
+def get_campaign_options(tasks: list, platform: str) -> list[dict]:
+    """Lấy danh sách các bài viết/video theo nền tảng kèm URL và danh sách task con."""
+    clean_p = (platform or "").strip().casefold()
+    camps: dict[str, dict] = {}
+    for t in tasks:
+        p = (getattr(t, "platform", "") or "").strip().casefold()
+        if p == clean_p:
+            key = (getattr(t, "page_id", "") or "") + "::" + (getattr(t, "url", "") or "")
+            if key not in camps:
+                title = getattr(t, "campaign_title", "") or getattr(t, "url", "") or "Bài viết"
+                camps[key] = {
+                    "key": key,
+                    "title": title,
+                    "url": getattr(t, "url", ""),
+                    "platform": getattr(t, "platform", ""),
+                    "tasks": [],
+                }
+            camps[key]["tasks"].append(t)
+    return list(camps.values())
+
+
+def build_execution_tasks(
+    scanned_tasks: list,
+    platform: str,
+    url: str,
+    comment_lines: list[str],
+) -> list:
+    """Chuẩn bị danh sách task thực thi theo đúng nội dung trong ô nhập bình luận.
+    Ưu tiên ghép với các task Notion đã quét để giữ nguyên page_id/row_id nhằm cập nhật Notion.
+    Tuyệt đối không lẫn lộn giữa các nền tảng khác nhau.
+    """
+    clean_p = (platform or "").strip().casefold()
+    pool = [
+        t for t in scanned_tasks
+        if (getattr(t, "platform", "") or "").strip().casefold() == clean_p
+    ]
+    used_ids = set()
+    result = []
+
+    from notion_comment_sync import NotionCommentTask
+
+    for idx, text in enumerate(comment_lines):
+        clean_text = text.strip()
+        if not clean_text:
+            continue
+        found = None
+        for cand in pool:
+            cand_id = getattr(cand, "row_id", "") or id(cand)
+            if cand_id not in used_ids and getattr(cand, "content", "").strip() == clean_text:
+                found = cand
+                used_ids.add(cand_id)
+                break
+
+        if found:
+            if url and getattr(found, "url", "") != url:
+                found.url = url
+            result.append(found)
+        else:
+            fallback_cand = None
+            for cand in pool:
+                cand_id = getattr(cand, "row_id", "") or id(cand)
+                if cand_id not in used_ids:
+                    fallback_cand = cand
+                    used_ids.add(cand_id)
+                    break
+
+            if fallback_cand:
+                fallback_cand.content = clean_text
+                if url:
+                    fallback_cand.url = url
+                result.append(fallback_cand)
+            else:
+                result.append(
+                    NotionCommentTask(
+                        page_id="",
+                        stt=idx + 1,
+                        content=clean_text,
+                        url=url,
+                        platform=platform,
+                        status="Chưa comment",
+                    )
+                )
+
+    return result

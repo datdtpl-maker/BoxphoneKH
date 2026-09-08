@@ -1226,6 +1226,7 @@ class GUIApp(ctk.CTk):
         self.comment_platform_combo = ctk.CTkComboBox(
             plat_box,
             values=comment_controller.PLATFORM_CHOICES,
+            command=self._on_comment_platform_changed,
             font=body_font,
             height=36,
             corner_radius=10,
@@ -1255,6 +1256,7 @@ class GUIApp(ctk.CTk):
             corner_radius=10,
         )
         self.comment_url_entry.pack(fill="x", padx=14, pady=(0, 8))
+        self.comment_url_entry.bind("<KeyRelease>", self._on_comment_url_modified)
 
         # Timing config row
         time_row = ctk.CTkFrame(self.comment_target_card, fg_color="transparent")
@@ -4024,29 +4026,17 @@ class GUIApp(ctk.CTk):
                         self.comment_task_preview.insert(
                             "1.0", "Không còn câu nào ở trạng thái 'Chưa comment'."
                         )
+                        self.comment_url_entry.delete(0, "end")
+                        self.comment_text_box.delete("1.0", "end")
                         return
 
-                    self.comment_scan_info_lbl.configure(
-                        text=f"Đã quét được {len(tasks)} bình luận Chưa comment từ Notion. Sẵn sàng chạy!"
-                    )
-                    self.comment_task_preview.delete("1.0", "end")
-                    lines = []
-                    for t in tasks:
-                        camp_info = f"[{t.campaign_title}] " if t.campaign_title else ""
-                        lines.append(f"[STT {t.stt}] [{t.platform}] {camp_info}{t.content}\n    Link: {t.url}")
-                    self.comment_task_preview.insert("1.0", "\n\n".join(lines))
+                    active_p = self.comment_platform_combo.get().strip()
+                    matched_p = comment_controller.filter_tasks_for_platform(tasks, active_p)
+                    if not matched_p and tasks:
+                        active_p = tasks[0].platform
+                        self.comment_platform_combo.set(active_p)
 
-                    # Tự động điền link và nền tảng của câu đầu tiên
-                    if tasks[0].url:
-                        self.comment_url_entry.delete(0, "end")
-                        self.comment_url_entry.insert(0, tasks[0].url)
-                    if tasks[0].platform in comment_controller.PLATFORM_CHOICES:
-                        self.comment_platform_combo.set(tasks[0].platform)
-
-                    self.comment_text_box.delete("1.0", "end")
-                    self.comment_text_box.insert(
-                        "1.0", "\n".join(t.content for t in tasks if t.content.strip())
-                    )
+                    self._sync_comment_ui_for_platform(active_p, update_url=True)
 
                 self.after(0, update_ui)
             except Exception as exc:
@@ -4066,6 +4056,61 @@ class GUIApp(ctk.CTk):
                 )
 
         self.run_in_thread(worker)
+
+    def _on_comment_platform_changed(self, choice):
+        """Khi người dùng chuyển đổi nền tảng trong combobox."""
+        self._sync_comment_ui_for_platform(choice, update_url=True)
+
+    def _on_comment_url_modified(self, event=None):
+        """Tự động nhận diện nền tảng khi người dùng dán hoặc nhập link mới."""
+        raw_url = self.comment_url_entry.get().strip()
+        detected = notion_comment_sync.detect_platform_from_url(raw_url)
+        if detected in comment_controller.PLATFORM_CHOICES:
+            current = self.comment_platform_combo.get().strip()
+            if current != detected:
+                self.comment_platform_combo.set(detected)
+                self._sync_comment_ui_for_platform(detected, update_url=False)
+
+    def _sync_comment_ui_for_platform(self, platform_name, update_url=True):
+        """Đồng bộ link và danh sách bình luận theo đúng nền tảng được chọn."""
+        plat = (platform_name or "").strip()
+        all_tasks = getattr(self, "comment_notion_tasks", [])
+        matched = comment_controller.filter_tasks_for_platform(all_tasks, plat)
+
+        if matched:
+            if update_url and matched[0].url:
+                self.comment_url_entry.delete(0, "end")
+                self.comment_url_entry.insert(0, matched[0].url)
+
+            # Cập nhật danh sách bình luận CHỈ của nền tảng này vào Mục 3
+            self.comment_text_box.delete("1.0", "end")
+            lines_content = [t.content for t in matched if t.content.strip()]
+            self.comment_text_box.insert("1.0", "\n".join(lines_content))
+
+            # Thông báo trạng thái rõ ràng
+            camp_info = f" • Bài: {matched[0].campaign_title}" if matched[0].campaign_title else ""
+            self.comment_scan_info_lbl.configure(
+                text=f"Đã chọn [{plat}]{camp_info} • {len(matched)} câu Chưa comment từ Notion."
+            )
+
+            # Cập nhật khung xem trước chi tiết
+            self.comment_task_preview.delete("1.0", "end")
+            preview_lines = [
+                f"[STT {t.stt}] [{t.platform}] {t.content}\n    Link: {t.url}"
+                for t in matched
+            ]
+            self.comment_task_preview.insert("1.0", "\n\n".join(preview_lines))
+        else:
+            if update_url:
+                self.comment_url_entry.delete(0, "end")
+            self.comment_text_box.delete("1.0", "end")
+            self.comment_scan_info_lbl.configure(
+                text=f"Chưa có câu bình luận nào thuộc [{plat}] ở trạng thái 'Chưa comment'."
+            )
+            self.comment_task_preview.delete("1.0", "end")
+            self.comment_task_preview.insert(
+                "1.0", f"Không tìm thấy câu nào ở trạng thái 'Chưa comment' cho {plat} trên Notion."
+            )
 
     def start_comment_seeding(self):
         """Bắt đầu tiến trình bơm bình luận."""
@@ -4110,46 +4155,41 @@ class GUIApp(ctk.CTk):
     def _run_comment_seeding_worker(
         self, devices, dwell_time, delay_between
     ):
-        tasks = list(getattr(self, "comment_notion_tasks", []))
-        if not tasks:
+        all_tasks = list(getattr(self, "comment_notion_tasks", []))
+        if not all_tasks:
             # Tự động quét Notion nếu chưa quét trước đó
             try:
-                tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
-                self.comment_notion_tasks = tasks
+                all_tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
+                self.comment_notion_tasks = all_tasks
             except Exception as e:
                 self.log_message(f"[Notion] Không thể quét tự động: {e}")
-                tasks = []
+                all_tasks = []
 
-        if not tasks:
-            # Fallback nhập tay nếu Notion không có câu nào
-            url = self.comment_url_entry.get().strip()
-            platform = self.comment_platform_combo.get()
-            raw_lines = [
-                line.strip()
-                for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
-                if line.strip()
-            ]
-            if not url or not raw_lines:
-                self.after(
-                    0,
-                    lambda: self.comment_status_label.configure(
-                        text="Không có bình luận nào để chạy!"
-                    ),
-                )
-                self.after(0, lambda: self.btn_comment_start.configure(state="normal"))
-                self.after(0, lambda: self.btn_comment_stop.configure(state="disabled"))
-                return
-            tasks = [
-                notion_comment_sync.NotionCommentTask(
-                    page_id="",
-                    stt=i + 1,
-                    content=txt,
-                    url=url,
-                    platform=platform,
-                    status="Chưa comment",
-                )
-                for i, txt in enumerate(raw_lines)
-            ]
+        current_platform = self.comment_platform_combo.get().strip()
+        current_url = self.comment_url_entry.get().strip()
+        raw_lines = [
+            line.strip()
+            for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
+            if line.strip()
+        ]
+
+        if not current_url or not raw_lines:
+            self.after(
+                0,
+                lambda: self.comment_status_label.configure(
+                    text="Vui lòng kiểm tra Link bài viết và nội dung bình luận!"
+                ),
+            )
+            self.after(0, lambda: self.btn_comment_start.configure(state="normal"))
+            self.after(0, lambda: self.btn_comment_stop.configure(state="disabled"))
+            return
+
+        tasks = comment_controller.build_execution_tasks(
+            all_tasks,
+            current_platform,
+            current_url,
+            raw_lines,
+        )
 
         total_tasks = len(tasks)
         total_devs = len(devices)
