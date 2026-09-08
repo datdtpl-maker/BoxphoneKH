@@ -362,12 +362,12 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "") # fail dump to trigger calibrated
         x, y = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.893))
-        self.assertEqual(y, int(1920 * 0.928))
+        self.assertEqual(x, int(1080 * 0.90))
+        self.assertEqual(y, int(1920 * 0.960))
 
         x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
         self.assertEqual(x_fb, int(1080 * 0.905))
-        self.assertEqual(y_fb, int(1920 * 0.928))
+        self.assertEqual(y_fb, int(1920 * 0.960))
 
     def test_clean_platform_url_and_extract_video_id(self):
         raw_tiktok = "https://www.tiktok.com/@khaihoanskincare/video/7682027295724490004?is_from_webapp=1&sender_device=pc"
@@ -385,8 +385,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.40))
-        self.assertEqual(y, int(1920 * 0.915))
+        self.assertEqual(x, int(1080 * 0.35))
+        self.assertEqual(y, int(1920 * 0.962))
 
 
 if __name__ == "__main__":

@@ -292,10 +292,17 @@ def find_comment_input_coords(
                     if cy < height * 0.60:
                         continue
 
+                    elem_w = x2 - x1
                     cls_name = (elem.get("class") or "").casefold()
                     desc = (elem.get("content-desc") or "").casefold()
                     txt = (elem.get("text") or "").casefold()
                     rid = (elem.get("resource-id") or "").casefold()
+
+                    # Bỏ qua các nút emoji gợi ý phản hồi nhanh (nằm ở khoảng 85% - 93% chiều cao màn hình)
+                    if 0.85 * height <= cy <= 0.93 * height and elem_w < width * 0.35:
+                        continue
+                    if any(char in (txt + desc) for char in ("😁", "🥰", "😂", "😳", "😍", "👍", "❤️")):
+                        continue
 
                     is_input = (
                         "edittext" in cls_name
@@ -321,17 +328,24 @@ def find_comment_input_coords(
 
     clean_p = (platform or "").strip().casefold()
     if "tiktok" in clean_p:
-        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=40%, y=91.5%
-        return int(width * 0.40), int(height * 0.915)
+        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=35%, y=96.2%
+        # Tránh hàng emoji gợi ý ở y=88-91%, rơi chuẩn vào ô Add comment... ở đáy màn hình
+        return int(width * 0.35), int(height * 0.962)
     else:
-        # Tọa độ ô nhập Facebook: x=40%, y=91.5%
-        return int(width * 0.40), int(height * 0.915)
+        # Tọa độ ô nhập Facebook: x=35%, y=96.2%
+        return int(width * 0.35), int(height * 0.962)
 
 
 def ensure_comment_input_ready(
     adb, device_id: str, input_x: int, input_y: int, status_callback=None
 ) -> bool:
-    """Chạm vào ô nhập và kích hoạt bàn phím sẵn sàng nhập liệu."""
+    """Chạm vào ô nhập, bật bàn phím XwIME và xóa sạch text/emoji thừa để sẵn sàng gõ."""
+    if hasattr(adb, "ensure_ime"):
+        try:
+            adb.ensure_ime(device_id)
+        except Exception:
+            pass
+
     adb.tap(device_id, input_x, input_y)
     time.sleep(0.8)
     code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
@@ -339,6 +353,19 @@ def ensure_comment_input_ready(
     if not is_shown:
         adb.tap(device_id, input_x, input_y)
         time.sleep(0.8)
+
+    # Đảm bảo xóa sạch 100% text hoặc emoji cũ/vô tình dán trong ô nhập trước khi gõ nội dung từ Notion
+    try:
+        adb.execute_adb(
+            device_id,
+            [
+                "shell", "am", "broadcast",
+                "-a", "XW_CLEAR_TEXT",
+                "--receiver-foreground",
+            ],
+        )
+    except Exception:
+        pass
     return True
 
 
@@ -596,11 +623,11 @@ def find_send_button_coords(
 
     clean_p = (platform or "").strip().casefold()
     if "tiktok" in clean_p:
-        # Tọa độ nút tròn đỏ gửi TikTok: x=89.3%, y=92.8%
-        return int(width * 0.893), int(height * 0.928)
+        # Tọa độ nút tròn đỏ gửi TikTok: x=90.0%, y=96.0% (calibrated chính xác đáy thanh cmt)
+        return int(width * 0.90), int(height * 0.960)
     else:
-        # Tọa độ nút gửi Facebook: x=90.5%, y=92.8%
-        return int(width * 0.905), int(height * 0.928)
+        # Tọa độ nút gửi Facebook: x=90.5%, y=96.0%
+        return int(width * 0.905), int(height * 0.960)
 
 
 def parse_comment_devices(selection_text: str, total_tasks: int, all_devices: list) -> list:
