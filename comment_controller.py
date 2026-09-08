@@ -222,7 +222,7 @@ def wait_for_tiktok_video_ready(
 def find_tiktok_comment_icon_coords(
     adb, device_id: str, width: int, height: int
 ) -> tuple[int, int]:
-    """Tìm tọa độ icon mở bình luận bên phải video TikTok qua UI dump hoặc tọa độ chuẩn."""
+    """Tìm tọa độ icon mở bình luận bên phải video TikTok qua UI dump hoặc tọa độ thích ứng."""
     xml_file = f"/sdcard/dump_cmt_btn_{device_id}.xml"
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
     local_xml = os.path.join(tempfile.gettempdir(), f"dump_cmt_btn_{safe_dev}.xml")
@@ -236,6 +236,9 @@ def find_tiktok_comment_icon_coords(
             if os.path.exists(local_xml):
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
+                like_cy = None
+                bookmark_cy = None
+
                 for elem in root.iter():
                     bounds = elem.get("bounds", "")
                     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
@@ -244,22 +247,42 @@ def find_tiktok_comment_icon_coords(
                     x1, y1, x2, y2 = map(int, m.groups())
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-                    # Icon comment nằm ở thanh điều hướng bên phải (x > 75%) và ở khoảng 40% - 65% chiều cao màn hình
-                    if cx < width * 0.75 or cy < height * 0.40 or cy > height * 0.65:
+                    # Icon comment nằm ở thanh điều hướng bên phải (x > 75%) và ở khoảng 35% - 82% chiều cao màn hình
+                    if cx < width * 0.75 or cy < height * 0.35 or cy > height * 0.82:
                         continue
 
                     desc = (elem.get("content-desc") or "").casefold()
                     txt = (elem.get("text") or "").casefold()
                     rid = (elem.get("resource-id") or "").casefold()
 
-                    if any(
+                    # 1. Nhận diện từ khóa bình luận (kể cả 'Bóc tem' khi video chưa có cmt nào)
+                    is_comment = any(
                         kw in desc or kw in txt or kw in rid
                         for kw in (
-                            "bình luận", "comment", "cmt", "comment_count",
-                            "comment_list", "comment_icon"
+                            "bóc tem", "boc tem", "boc_tem",
+                            "bình luận", "binh luan", "comment", "cmt",
+                            "comment_count", "comment_list", "comment_icon",
+                            "desc_comment", "đọc hoặc thêm bình luận", "doc hoac them binh luan",
+                            "be the first", "add comment"
                         )
-                    ):
+                    )
+                    if is_comment:
+                        elem_h = y2 - y1
+                        # Nếu trúng nhãn text nhỏ ở dưới icon (như chữ 'Bóc tem'), nhấp nhẹ lên trên để trúng tâm quả bóng chat
+                        if elem_h < height * 0.05:
+                            return cx, max(int(height * 0.35), cy - int(height * 0.025))
                         return cx, cy
+
+                    # Ghi nhận vị trí like và bookmark để neo khoảng cách nếu text bị ẩn
+                    if any(k in desc or k in txt or k in rid for k in ("like", "thích", "heart")):
+                        like_cy = cy
+                    if any(k in desc or k in txt or k in rid for k in ("bookmark", "lưu", "favorite", "collect")):
+                        bookmark_cy = cy
+
+                # Nếu không bắt được nhãn text nhưng bắt được nút Like và Bookmark: icon bình luận luôn nằm chính giữa
+                if like_cy is not None and bookmark_cy is not None and bookmark_cy > like_cy:
+                    mid_y = (like_cy + bookmark_cy) // 2
+                    return int(width * 0.934), mid_y
     except Exception:
         pass
     finally:
@@ -269,9 +292,9 @@ def find_tiktok_comment_icon_coords(
             except Exception:
                 pass
 
-    # Tọa độ chuẩn của quả bóng chat Bình luận trên thanh điều hướng bên phải video TikTok:
-    # x = 92.5%, y = 53.5% (trên nút Bookmark 62-63% và dưới nút Like 44%)
-    return int(width * 0.925), int(height * 0.535)
+    # Tọa độ chuẩn hiệu chuẩn theo máy S3 và giao diện TikTok thực tế:
+    # x = 93.4%, y = 58.5% (tâm quả bóng chat bình luận, nằm giữa nút Tim và nút Bookmark)
+    return int(width * 0.934), int(height * 0.585)
 
 
 def find_comment_input_coords(
@@ -594,6 +617,7 @@ def find_send_button_coords(
             if os.path.exists(local_xml):
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
+                edit_text_cy = None
                 for elem in root.iter():
                     bounds = elem.get("bounds", "")
                     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
@@ -601,9 +625,10 @@ def find_send_button_coords(
                         continue
                     x1, y1, x2, y2 = map(int, m.groups())
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    if cy < height * 0.55:
+                    if cy < height * 0.50:
                         continue
 
+                    cls_name = (elem.get("class") or "").casefold()
                     desc = (elem.get("content-desc") or "").casefold()
                     txt = (elem.get("text") or "").casefold()
                     rid = (elem.get("resource-id") or "").casefold()
@@ -617,6 +642,13 @@ def find_send_button_coords(
                     )
                     if is_send:
                         return cx, cy
+
+                    if "edittext" in cls_name or any(k in rid for k in ("et_comment", "c0e", "comment_edit_text")):
+                        edit_text_cy = cy
+
+                # Nếu tìm thấy ô nhập EditText, nút tròn đỏ gửi luôn nằm cùng hàng ngang ở sát mép phải
+                if edit_text_cy is not None:
+                    return int(width * 0.935), edit_text_cy
     except Exception:
         pass
     finally:

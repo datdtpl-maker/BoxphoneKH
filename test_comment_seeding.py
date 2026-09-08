@@ -411,8 +411,47 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.925))
-        self.assertEqual(y, int(1920 * 0.535))
+        self.assertEqual(x, int(1080 * 0.934))
+        self.assertEqual(y, int(1920 * 0.585))
+
+    @patch("os.path.exists", return_value=True)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_find_tiktok_comment_icon_boc_tem(self, _rm, mock_parse, _exists):
+        xml_boc_tem = """<hierarchy>
+          <node class='android.widget.TextView' text='Bóc tem' bounds='[950,1185][1050,1220]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_boc_tem)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, 1000)
+        # 1202 - int(1920 * 0.025) = 1202 - 48 = 1154
+        self.assertEqual(y, 1154)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_find_tiktok_comment_icon_geometric_midpoint(self, _rm, mock_parse, _exists):
+        xml_like_bm = """<hierarchy>
+          <node content-desc='Like' bounds='[950,900][1050,1000]' />
+          <node content-desc='Bookmark' bounds='[950,1260][1050,1360]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_like_bm)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, int(1080 * 0.934))
+        # like_cy = 950, bm_cy = 1310 -> mid = (950 + 1310) // 2 = 1130
+        self.assertEqual(y, 1130)
 
     @patch("time.sleep", return_value=None)
     def test_wait_for_tiktok_video_ready(self, _sleep):
