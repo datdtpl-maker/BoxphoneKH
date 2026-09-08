@@ -412,8 +412,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.934))
-        self.assertEqual(y, int(1920 * 0.585))
+        self.assertEqual(x, int(1080 * 0.925))
+        self.assertEqual(y, int(1920 * 0.640))
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
@@ -450,7 +450,7 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (0, "", "")
         x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.934))
+        self.assertEqual(x, int(1080 * 0.925))
         # like_cy = 950, bm_cy = 1310 -> mid = (950 + 1310) // 2 = 1130
         self.assertEqual(y, 1130)
 
@@ -500,6 +500,42 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         )
         self.assertTrue(res)
         adb_mock.lock_portrait.assert_called()
+
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.getsize", return_value=500)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_is_tiktok_comment_sheet_open_true(self, _rm, mock_parse, _size, _exists):
+        xml_open = """<hierarchy>
+          <node class='android.widget.EditText' text='Thêm bình luận...' bounds='[50,1700][900,1850]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_open)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        is_open = comment_controller.is_tiktok_comment_sheet_open(adb_mock, "dev1", 1920)
+        self.assertTrue(is_open)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.getsize", return_value=500)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_is_tiktok_comment_sheet_open_false(self, _rm, mock_parse, _size, _exists):
+        xml_closed = """<hierarchy>
+          <node class='android.widget.TextView' text='Trang chủ' bounds='[10,1800][200,1900]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_closed)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        is_open = comment_controller.is_tiktok_comment_sheet_open(adb_mock, "dev1", 1920)
+        self.assertFalse(is_open)
 
 
 if __name__ == "__main__":
