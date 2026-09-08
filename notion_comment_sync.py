@@ -1,11 +1,12 @@
 """Đồng bộ bình luận Seeding 2 chiều với Notion API.
 
-Hỗ trợ quét danh sách bình luận 'Chưa comment' và cập nhật 'Hoàn thành' kèm thời gian.
+Hỗ trợ mô hình Bài viết chứa Bảng bình luận chi tiết (Nested Table Block),
+tự động lọc bỏ các cmt đã hoàn thành khi quét và đồng bộ trạng thái tổng thể.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
@@ -28,13 +29,19 @@ class NotionCommentSyncError(Exception):
 
 @dataclass
 class NotionCommentTask:
-    page_id: str
+    page_id: str                      # ID của trang bài viết cha
+    row_id: str = ""                  # ID của block table_row (nếu nằm trong bảng con)
+    table_id: str = ""                # ID của block table
     stt: int = 0
     content: str = ""
-    url: str = ""
-    platform: str = ""
-    status: str = "Chưa comment"
-    completed_time: str = ""
+    url: str = ""                     # URL bài viết (TikTok / Facebook)
+    platform: str = ""                # TikTok / Facebook
+    status: str = "Chưa comment"      # Trạng thái bình luận
+    author: str = ""                  # Máy thực hiện
+    completed_time: str = ""          # Thời gian hoàn thành
+    campaign_title: str = ""          # Tiêu đề bài viết
+    raw_cells: list = field(default_factory=list) # Dữ liệu cells gốc
+    col_map: dict = field(default_factory=dict)   # Vị trí các cột trong bảng
 
 
 def _build_headers(token: str) -> dict[str, str]:
@@ -55,6 +62,14 @@ def _plain_text(prop: dict, kind: str = "rich_text") -> str:
     ).strip()
 
 
+def _cell_text(cell: list) -> str:
+    return "".join(
+        fragment.get("plain_text")
+        or (fragment.get("text") or {}).get("content", "")
+        for fragment in cell
+    ).strip()
+
+
 def detect_platform_from_url(url: str) -> str:
     """Tự động phát hiện nền tảng từ đường dẫn bài đăng."""
     lowered = (url or "").casefold()
@@ -65,13 +80,44 @@ def detect_platform_from_url(url: str) -> str:
     return "Khác"
 
 
+def _parse_table_header(header_cells: list) -> dict[str, int]:
+    """Tự động nhận diện chỉ số các cột trong bảng bình luận con."""
+    names = [_cell_text(cell).casefold() for cell in header_cells]
+    col_map = {
+        "stt": 0,
+        "content": 1,
+        "status": 2,
+        "author": 3,
+        "time": 4,
+    }
+    for idx, name in enumerate(names):
+        if "stt" in name or "số thứ tự" in name:
+            col_map["stt"] = idx
+        elif "nội dung" in name or "bình luận" in name or "comment" in name or "cmt" in name:
+            col_map["content"] = idx
+        elif "trạng thái" in name or "status" in name:
+            col_map["status"] = idx
+        elif "ai đăng" in name or "người" in name or "máy" in name or "bot" in name:
+            col_map["author"] = idx
+        elif "thời gian" in name or "hoàn thành" in name or "time" in name:
+            col_map["time"] = idx
+
+    return col_map
+
+
 def fetch_notion_comments(
     token: Optional[str] = None,
     database_id: Optional[str] = None,
     only_uncompleted: bool = True,
     timeout: float = 12.0,
 ) -> list[NotionCommentTask]:
-    """Quét danh sách bình luận từ Notion Database."""
+    """Quét danh sách bình luận từ Notion Database.
+    
+    Hỗ trợ mô hình Bài viết chứa Bảng con:
+    - Quét các bài viết đang cần chạy.
+    - Đọc các bình luận trong bảng con của từng bài viết.
+    - Chỉ lấy những bình luận có trạng thái 'Chưa comment' (bỏ qua cmt đã Hoàn thành).
+    """
     tok = (token or DEFAULT_COMMENT_TOKEN).strip()
     db_id = (database_id or DEFAULT_COMMENT_DATABASE_ID).replace("-", "").strip()
     if not tok or not db_id:
@@ -106,52 +152,214 @@ def fetch_notion_comments(
 
     results = data.get("results", [])
     tasks: list[NotionCommentTask] = []
-    for idx, page in enumerate(results):
+
+    for page in results:
         page_id = page.get("id", "")
         props = page.get("properties", {})
 
-        stt_val = props.get("STT", {}).get("number")
-        stt_num = int(stt_val) if stt_val is not None else (idx + 1)
-        content = _plain_text(props.get("Nội dung comment", {}), "title")
+        # 1. Lấy thông tin bài viết cha
+        title_prop = props.get("Bài viết / video") or props.get("Nội dung comment") or {}
+        campaign_title = _plain_text(title_prop, "title")
         post_url = props.get("Link bài đăng", {}).get("url") or ""
 
-        # Nền tảng: lấy từ formula nếu có, nếu chưa thì tự detect từ URL
         formula_data = props.get("Nền tảng", {}).get("formula") or {}
         platform_str = formula_data.get("string") or detect_platform_from_url(post_url)
 
         status_data = props.get("Trạng thái", {}).get("select") or {}
-        status_name = status_data.get("name") or "Chưa comment"
-        time_done = _plain_text(props.get("Thời gian hoàn thành", {}), "rich_text")
+        camp_status = status_data.get("name") or "Chưa chạy"
 
-        task = NotionCommentTask(
-            page_id=page_id,
-            stt=stt_num,
-            content=content,
-            url=post_url,
-            platform=platform_str,
-            status=status_name,
-            completed_time=time_done,
-        )
-        tasks.append(task)
+        # 2. Đọc các blocks con của bài viết để tìm bảng bình luận (Table block)
+        table_found = False
+        try:
+            req_blocks = urllib.request.Request(
+                f"https://api.notion.com/v1/blocks/{page_id}/children",
+                headers=_build_headers(tok),
+            )
+            with urllib.request.urlopen(req_blocks, timeout=timeout) as r_blk:
+                blocks = json.loads(r_blk.read().decode("utf-8")).get("results", [])
+
+            for b in blocks:
+                if b.get("type") == "table":
+                    t_id = b.get("id")
+                    table_found = True
+
+                    # Lấy danh sách hàng trong bảng
+                    req_rows = urllib.request.Request(
+                        f"https://api.notion.com/v1/blocks/{t_id}/children",
+                        headers=_build_headers(tok),
+                    )
+                    with urllib.request.urlopen(req_rows, timeout=timeout) as r_rows:
+                        rows = json.loads(r_rows.read().decode("utf-8")).get("results", [])
+
+                    if not rows:
+                        continue
+
+                    # Header row
+                    header_cells = rows[0].get("table_row", {}).get("cells", [])
+                    col_map = _parse_table_header(header_cells)
+
+                    # Comment rows
+                    for r_idx, r in enumerate(rows[1:], start=1):
+                        row_id = r.get("id", "")
+                        cells = r.get("table_row", {}).get("cells", [])
+
+                        stt_idx = col_map.get("stt", 0)
+                        content_idx = col_map.get("content", 1)
+                        status_idx = col_map.get("status", 2)
+                        author_idx = col_map.get("author", 3)
+                        time_idx = col_map.get("time", 4)
+
+                        stt_val = _cell_text(cells[stt_idx]) if stt_idx < len(cells) else str(r_idx)
+                        try:
+                            stt_num = int(re.sub(r"[^\d]", "", stt_val)) if re.sub(r"[^\d]", "", stt_val) else r_idx
+                        except Exception:
+                            stt_num = r_idx
+
+                        content_txt = _cell_text(cells[content_idx]) if content_idx < len(cells) else ""
+                        status_txt = _cell_text(cells[status_idx]) if status_idx < len(cells) else "Chưa comment"
+                        author_txt = _cell_text(cells[author_idx]) if author_idx < len(cells) else ""
+                        time_txt = _cell_text(cells[time_idx]) if time_idx < len(cells) else ""
+
+                        # BỘ LỌC QUAN TRỌNG: Nếu yêu cầu chỉ lấy uncompleted và cmt đã hoàn thành -> BỎ QUA
+                        if only_uncompleted and status_txt.casefold() in ["hoàn thành", "đã đăng", "done", "completed"]:
+                            continue
+
+                        task = NotionCommentTask(
+                            page_id=page_id,
+                            row_id=row_id,
+                            table_id=t_id,
+                            stt=stt_num,
+                            content=content_txt,
+                            url=post_url,
+                            platform=platform_str,
+                            status=status_txt,
+                            author=author_txt,
+                            completed_time=time_txt,
+                            campaign_title=campaign_title,
+                            raw_cells=cells,
+                            col_map=col_map,
+                        )
+                        tasks.append(task)
+        except Exception:
+            pass
+
+        # 3. Fallback: nếu bài viết không có bảng con, hỗ trợ dạng dòng phẳng
+        if not table_found:
+            stt_val = props.get("STT", {}).get("number")
+            stt_num = int(stt_val) if stt_val is not None else (len(tasks) + 1)
+            time_done = _plain_text(props.get("Thời gian hoàn thành", {}), "rich_text")
+
+            if only_uncompleted and camp_status.casefold() in ["hoàn thành", "đã đăng", "done"]:
+                continue
+
+            task = NotionCommentTask(
+                page_id=page_id,
+                stt=stt_num,
+                content=campaign_title,
+                url=post_url,
+                platform=platform_str,
+                status=camp_status,
+                completed_time=time_done,
+                campaign_title=campaign_title,
+            )
+            tasks.append(task)
 
     return tasks
 
 
 def mark_notion_comment_completed(
-    page_id: str,
+    task_or_page_id: NotionCommentTask | str,
     device_name: str = "",
     token: Optional[str] = None,
     timeout: float = 12.0,
 ) -> bool:
-    """Cập nhật trạng thái 'Hoàn thành' và ghi rõ thời gian thực hiện lên Notion."""
+    """Cập nhật trạng thái 'Hoàn thành' cho bình luận và cập nhật trạng thái tổng thể bài viết."""
     tok = (token or DEFAULT_COMMENT_TOKEN).strip()
-    clean_page_id = page_id.strip()
-    if not clean_page_id:
+    if not task_or_page_id:
         return False
 
     now_str = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
     time_label = f"Máy {device_name} lúc {now_str}" if device_name else f"Lúc {now_str}"
 
+    if isinstance(task_or_page_id, NotionCommentTask) and task_or_page_id.row_id:
+        # Trường hợp 1: Bình luận nằm trong Bảng con (Table Block)
+        task = task_or_page_id
+        col_map = task.col_map or {"stt": 0, "content": 1, "status": 2, "author": 3, "time": 4}
+        status_idx = col_map.get("status", 2)
+        author_idx = col_map.get("author", 3)
+        time_idx = col_map.get("time", 4)
+
+        # Lấy cells hiện tại
+        cells = list(task.raw_cells or [])
+        while len(cells) <= max(status_idx, author_idx, time_idx):
+            cells.append([])
+
+        def _make_text_cell(text: str):
+            return [{"type": "text", "text": {"content": text}}]
+
+        new_cells = []
+        for i, cell in enumerate(cells):
+            if i == status_idx:
+                new_cells.append(_make_text_cell("Hoàn thành"))
+            elif i == author_idx:
+                new_cells.append(_make_text_cell(f"Máy {device_name}" if device_name else "Tool"))
+            elif i == time_idx:
+                new_cells.append(_make_text_cell(now_str))
+            else:
+                new_cells.append(cell)
+
+        patch_url = f"https://api.notion.com/v1/blocks/{task.row_id}"
+        req_patch = urllib.request.Request(
+            patch_url,
+            headers=_build_headers(tok),
+            data=json.dumps({"table_row": {"cells": new_cells}}).encode("utf-8"),
+            method="PATCH",
+        )
+        row_updated = False
+        try:
+            with urllib.request.urlopen(req_patch, timeout=timeout) as resp:
+                row_updated = resp.status == 200
+        except Exception:
+            return False
+
+        # Đồng bộ trạng thái tổng thể của bài viết cha
+        if row_updated and task.page_id:
+            try:
+                # Cập nhật số lượng 'Đã đăng' và kiểm tra trạng thái tổng thể
+                req_page = urllib.request.Request(
+                    f"https://api.notion.com/v1/pages/{task.page_id}",
+                    headers=_build_headers(tok),
+                )
+                with urllib.request.urlopen(req_page, timeout=timeout) as r_p:
+                    page_data = json.loads(r_p.read().decode("utf-8"))
+                    props = page_data.get("properties", {})
+                    posted_cur = int(props.get("Đã đăng", {}).get("number") or 0)
+                    expected_cur = int(props.get("Số cmt dự kiến", {}).get("number") or 0)
+
+                new_posted = posted_cur + 1
+                new_status = "Hoàn thành" if (expected_cur > 0 and new_posted >= expected_cur) else "Đang chạy"
+
+                page_update_payload = {
+                    "properties": {
+                        "Đã đăng": {"number": new_posted},
+                        "Trạng thái": {"select": {"name": new_status}},
+                    }
+                }
+                req_update_page = urllib.request.Request(
+                    f"https://api.notion.com/v1/pages/{task.page_id}",
+                    headers=_build_headers(tok),
+                    data=json.dumps(page_update_payload).encode("utf-8"),
+                    method="PATCH",
+                )
+                with urllib.request.urlopen(req_update_page, timeout=timeout) as r_up:
+                    pass
+            except Exception:
+                pass
+
+        return row_updated
+
+    # Trường hợp 2: Page ID trực tiếp (Fallback)
+    clean_page_id = task_or_page_id if isinstance(task_or_page_id, str) else task_or_page_id.page_id
     payload = {
         "properties": {
             "Trạng thái": {"select": {"name": "Hoàn thành"}},
@@ -160,10 +368,8 @@ def mark_notion_comment_completed(
             },
         }
     }
-
-    url = f"https://api.notion.com/v1/pages/{clean_page_id}"
     req = urllib.request.Request(
-        url,
+        f"https://api.notion.com/v1/pages/{clean_page_id}",
         headers=_build_headers(tok),
         data=json.dumps(payload).encode("utf-8"),
         method="PATCH",
@@ -173,3 +379,4 @@ def mark_notion_comment_completed(
             return resp.status == 200
     except Exception:
         return False
+

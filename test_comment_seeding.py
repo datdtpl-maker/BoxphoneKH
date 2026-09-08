@@ -147,9 +147,12 @@ class TestNotionCommentSync(unittest.TestCase):
                 }
             ]
         }
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(fake_data).encode("utf-8")
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
+        # blocks empty fallback to flat row
+        mock_resp1 = MagicMock()
+        mock_resp1.read.return_value = json.dumps(fake_data).encode("utf-8")
+        mock_resp2 = MagicMock()
+        mock_resp2.read.return_value = json.dumps({"results": []}).encode("utf-8")
+        mock_urlopen.return_value.__enter__.side_effect = [mock_resp1, mock_resp2]
 
         tasks = notion_comment_sync.fetch_notion_comments("fake_tok", "fake_db")
         self.assertEqual(len(tasks), 1)
@@ -161,24 +164,132 @@ class TestNotionCommentSync(unittest.TestCase):
         self.assertEqual(t.status, "Chưa comment")
 
     @patch("urllib.request.urlopen")
-    def test_mark_notion_comment_completed(self, mock_urlopen):
-        mock_patch_resp = MagicMock()
-        mock_patch_resp.status = 200
-        mock_urlopen.return_value.__enter__.return_value = mock_patch_resp
+    def test_fetch_nested_table_skips_completed_comments(self, mock_urlopen):
+        # 1. DB query
+        db_data = {
+            "results": [
+                {
+                    "id": "camp_page_1",
+                    "properties": {
+                        "Bài viết / video": {"title": [{"plain_text": "Chiến dịch Skincare"}]},
+                        "Link bài đăng": {"url": "https://www.facebook.com/post/1"},
+                        "Nền tảng": {"formula": {"string": "Facebook"}},
+                        "Trạng thái": {"select": {"name": "Đang chạy"}},
+                        "Số cmt dự kiến": {"number": 2},
+                        "Đã đăng": {"number": 1},
+                    },
+                }
+            ]
+        }
+        # 2. Blocks children (contains table)
+        blocks_data = {
+            "results": [
+                {"type": "heading_2", "id": "h2_id"},
+                {"type": "table", "id": "table_block_1"},
+            ]
+        }
+        # 3. Table rows: Header + Row 1 (Hoàn thành) + Row 2 (Chưa comment)
+        rows_data = {
+            "results": [
+                {
+                    "id": "header_row",
+                    "table_row": {
+                        "cells": [
+                            [{"plain_text": "STT"}],
+                            [{"plain_text": "Nội dung bình luận"}],
+                            [{"plain_text": "Trạng thái"}],
+                            [{"plain_text": "Ai đăng"}],
+                            [{"plain_text": "Thời gian hoàn thành"}],
+                        ]
+                    },
+                },
+                {
+                    "id": "row_done",
+                    "table_row": {
+                        "cells": [
+                            [{"plain_text": "1"}],
+                            [{"plain_text": "Cmt đã xong trước đó"}],
+                            [{"plain_text": "Hoàn thành"}],
+                            [{"plain_text": "Máy 01"}],
+                            [{"plain_text": "10:00 08/09/2026"}],
+                        ]
+                    },
+                },
+                {
+                    "id": "row_pending",
+                    "table_row": {
+                        "cells": [
+                            [{"plain_text": "2"}],
+                            [{"plain_text": "Cmt đang chờ chạy"}],
+                            [{"plain_text": "Chưa comment"}],
+                            [{"plain_text": "—"}],
+                            [{"plain_text": "—"}],
+                        ]
+                    },
+                },
+            ]
+        }
+        resp1 = MagicMock()
+        resp1.read.return_value = json.dumps(db_data).encode("utf-8")
+        resp2 = MagicMock()
+        resp2.read.return_value = json.dumps(blocks_data).encode("utf-8")
+        resp3 = MagicMock()
+        resp3.read.return_value = json.dumps(rows_data).encode("utf-8")
 
-        ok = notion_comment_sync.mark_notion_comment_completed(
-            page_id="page_id_123",
-            device_name="01",
-            token="fake_tok",
+        mock_urlopen.return_value.__enter__.side_effect = [resp1, resp2, resp3]
+
+        tasks = notion_comment_sync.fetch_notion_comments("fake_tok", "fake_db", only_uncompleted=True)
+        # Chỉ có Row 2 chưa comment được trả về, Row 1 đã hoàn thành bị bỏ qua!
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].stt, 2)
+        self.assertEqual(tasks[0].content, "Cmt đang chờ chạy")
+        self.assertEqual(tasks[0].status, "Chưa comment")
+        self.assertEqual(tasks[0].row_id, "row_pending")
+        self.assertEqual(tasks[0].platform, "Facebook")
+
+    @patch("urllib.request.urlopen")
+    def test_mark_nested_comment_completed(self, mock_urlopen):
+        # PATCH row
+        patch_row_resp = MagicMock()
+        patch_row_resp.status = 200
+
+        # GET page (for increment)
+        page_resp = MagicMock()
+        page_resp.read.return_value = json.dumps({
+            "properties": {
+                "Số cmt dự kiến": {"number": 1},
+                "Đã đăng": {"number": 0},
+            }
+        }).encode("utf-8")
+
+        # PATCH page
+        patch_page_resp = MagicMock()
+        patch_page_resp.status = 200
+
+        mock_urlopen.return_value.__enter__.side_effect = [patch_row_resp, page_resp, patch_page_resp]
+
+        task = notion_comment_sync.NotionCommentTask(
+            page_id="camp_page_1",
+            row_id="row_pending",
+            table_id="table_1",
+            stt=1,
+            content="Cmt 1",
+            url="https://facebook.com/1",
+            platform="Facebook",
+            status="Chưa comment",
+            raw_cells=[
+                [{"text": {"content": "1"}}],
+                [{"text": {"content": "Cmt 1"}}],
+                [{"text": {"content": "Chưa comment"}}],
+                [{"text": {"content": "—"}}],
+                [{"text": {"content": "—"}}],
+            ],
+            col_map={"stt": 0, "content": 1, "status": 2, "author": 3, "time": 4}
         )
+
+        ok = notion_comment_sync.mark_notion_comment_completed(task, device_name="05", token="fake_tok")
         self.assertTrue(ok)
-        self.assertTrue(mock_urlopen.called)
-        req = mock_urlopen.call_args[0][0]
-        self.assertEqual(req.method, "PATCH")
-        self.assertIn("page_id_123", req.full_url)
-        body = json.loads(req.data.decode("utf-8"))
-        self.assertEqual(body["properties"]["Trạng thái"]["select"]["name"], "Hoàn thành")
-        self.assertIn("Máy 01 lúc", body["properties"]["Thời gian hoàn thành"]["rich_text"][0]["text"]["content"])
+        self.assertEqual(mock_urlopen.call_count, 3)
 
 
 class TestGUICommentSeedingIntegration(unittest.TestCase):

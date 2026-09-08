@@ -4026,7 +4026,8 @@ class GUIApp(ctk.CTk):
                     self.comment_task_preview.delete("1.0", "end")
                     lines = []
                     for t in tasks:
-                        lines.append(f"[STT {t.stt}] [{t.platform}] {t.content}\n    Link: {t.url}")
+                        camp_info = f"[{t.campaign_title}] " if t.campaign_title else ""
+                        lines.append(f"[STT {t.stt}] [{t.platform}] {camp_info}{t.content}\n    Link: {t.url}")
                     self.comment_task_preview.insert("1.0", "\n\n".join(lines))
 
                     # Tự động điền link và nền tảng của câu đầu tiên
@@ -4187,10 +4188,10 @@ class GUIApp(ctk.CTk):
 
             if ok:
                 success_count += 1
-                if task.page_id:
+                if task.page_id or task.row_id:
                     try:
                         notion_comment_sync.mark_notion_comment_completed(
-                            page_id=task.page_id,
+                            task,
                             device_name=device_name,
                         )
                         self.log_message(
