@@ -17,6 +17,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import config
 import main
+import comment_controller
+import notion_comment_sync
 from adaptive_scheduler import PLATFORM_POLICIES, run_adaptive
 from notion_keyword_sync import (
     NotionSyncError,
@@ -96,6 +98,11 @@ class GUIApp(ctk.CTk):
         self.social_combined_var = ctk.BooleanVar(value=False)
         self.all_day_var = ctk.BooleanVar(value=True)
         self.auto_schedule_var = ctk.BooleanVar(value=False)
+        self.comment_campaigns_cache = []
+        self.comment_current_campaign = None
+        self.comment_current_items = []
+        self.comment_notion_tasks = []
+        self.comment_cancel_flag = False
         
         # Main Grid Layout: Header, live log, two operation cards, settings.
         self.grid_columnconfigure(0, weight=1)
@@ -642,10 +649,12 @@ class GUIApp(ctk.CTk):
         )
         self.tiktok_tab = self.module_tabs.add("TikTok")
         self.facebook_tab = self.module_tabs.add("Facebook")
+        self.comment_tab = self.module_tabs.add("Bình luận")
         self.module_tabs.set("TikTok")
         for module_tab in (
             self.tiktok_tab,
             self.facebook_tab,
+            self.comment_tab,
         ):
             module_tab.configure(fg_color="transparent")
             module_tab.grid_columnconfigure(0, weight=1)
@@ -1094,6 +1103,249 @@ class GUIApp(ctk.CTk):
             command=self.stop_all,
         )
         self.btn_fb_stop.pack(fill="x", padx=16, pady=(0, 12))
+
+        # ---------------- COMMENT SEEDING AUTOMATION ----------------
+        self.comment_scroll = ctk.CTkScrollableFrame(
+            self.comment_tab,
+            **scroll_style,
+        )
+        self.comment_scroll.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        self.comment_heading = ctk.CTkFrame(
+            self.comment_scroll, fg_color="#e0e7ff", corner_radius=16
+        )
+        self.comment_heading.pack(fill="x", padx=16, pady=(14, 10))
+
+        self.comment_mark = ctk.CTkLabel(
+            self.comment_heading,
+            text="💬",
+            width=38,
+            height=38,
+            corner_radius=12,
+            fg_color="#ffffff",
+            text_color="#4338ca",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+        )
+        self.comment_mark.pack(side="left", padx=10, pady=9)
+
+        self.comment_heading_text = ctk.CTkFrame(
+            self.comment_heading, fg_color="transparent"
+        )
+        self.comment_heading_text.pack(side="left", fill="both", expand=True, pady=6)
+
+        ctk.CTkLabel(
+            self.comment_heading_text,
+            text="BƠM BÌNH LUẬN (SEEDING ĐA NỀN TẢNG)",
+            font=section_font,
+            text_color="#312e81",
+            anchor="w",
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            self.comment_heading_text,
+            text="Mở link trực tiếp qua Android Intent tàng hình • Dwell tự nhiên • Đồng bộ Notion 2 chiều",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#4338ca",
+            anchor="w",
+        ).pack(fill="x")
+
+        # 1. Notion Direct Scan Card
+        self.comment_notion_card = ctk.CTkFrame(self.comment_scroll, **card_style)
+        self.comment_notion_card.pack(fill="x", padx=16, pady=(0, 10))
+
+        notion_head = ctk.CTkFrame(self.comment_notion_card, fg_color="transparent")
+        notion_head.pack(fill="x", padx=14, pady=(12, 6))
+
+        ctk.CTkLabel(
+            notion_head,
+            text="1. Dữ liệu từ Notion (Tự động quét câu 'Chưa comment')",
+            font=section_font,
+            text_color=text,
+        ).pack(side="left")
+
+        self.btn_comment_scan_notion = ctk.CTkButton(
+            notion_head,
+            text="🔍 Quét dữ liệu Notion",
+            font=button_font,
+            fg_color="#0f766e",
+            hover_color="#115e59",
+            text_color="#ffffff",
+            corner_radius=10,
+            height=34,
+            width=180,
+            cursor="hand2",
+            command=self._on_click_scan_notion_comments,
+        )
+        self.btn_comment_scan_notion.pack(side="right")
+
+        self.comment_scan_info_lbl = ctk.CTkLabel(
+            self.comment_notion_card,
+            text="Nhấn 'Quét dữ liệu Notion' để tự động lấy toàn bộ bình luận Chưa comment.",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=muted,
+            anchor="w",
+        )
+        self.comment_scan_info_lbl.pack(fill="x", padx=14, pady=(0, 6))
+
+        self.comment_task_preview = ctk.CTkTextbox(
+            self.comment_notion_card,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            height=85,
+            corner_radius=8,
+            border_width=1,
+            border_color=input_border,
+        )
+        self.comment_task_preview.pack(fill="x", padx=14, pady=(0, 10))
+        self.comment_task_preview.insert("1.0", "Chưa quét dữ liệu. Nhấn nút [Quét dữ liệu Notion] ở trên để tải danh sách.")
+
+        # 2. Target Link & Platform Card
+        self.comment_target_card = ctk.CTkFrame(self.comment_scroll, **card_style)
+        self.comment_target_card.pack(fill="x", padx=16, pady=(0, 10))
+
+        ctk.CTkLabel(
+            self.comment_target_card,
+            text="2. Nền tảng & Link bài đăng cần bình luận",
+            font=section_font,
+            text_color=text,
+        ).pack(fill="x", padx=14, pady=(10, 8))
+
+        row_cfg = ctk.CTkFrame(self.comment_target_card, fg_color="transparent")
+        row_cfg.pack(fill="x", padx=14, pady=(0, 8))
+        row_cfg.columnconfigure(0, weight=1)
+        row_cfg.columnconfigure(1, weight=2)
+
+        # Platform selector
+        plat_box = ctk.CTkFrame(row_cfg, fg_color="transparent")
+        plat_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(plat_box, text="Nền tảng:", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        self.comment_platform_combo = ctk.CTkComboBox(
+            plat_box,
+            values=comment_controller.PLATFORM_CHOICES,
+            font=body_font,
+            height=36,
+            corner_radius=10,
+        )
+        self.comment_platform_combo.pack(fill="x")
+
+        # Device selection entry
+        dev_box = ctk.CTkFrame(row_cfg, fg_color="transparent")
+        dev_box.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(dev_box, text="Máy chạy (VD: 1-5 hoặc 1,3 - để trống = tất cả):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        self.ent_comment_selection = ctk.CTkEntry(
+            dev_box,
+            placeholder_text="Để trống = chạy toàn bộ máy đang kết nối",
+            font=body_font,
+            height=36,
+            corner_radius=10,
+        )
+        self.ent_comment_selection.pack(fill="x")
+
+        # URL Input
+        ctk.CTkLabel(self.comment_target_card, text="Link bài viết / video / Reel:", font=label_font, text_color=text).pack(fill="x", padx=14, pady=(4, 2))
+        self.comment_url_entry = ctk.CTkEntry(
+            self.comment_target_card,
+            placeholder_text="https://... (dán link bài viết hoặc video cần bình luận)",
+            font=body_font,
+            height=36,
+            corner_radius=10,
+        )
+        self.comment_url_entry.pack(fill="x", padx=14, pady=(0, 8))
+
+        # Timing config row
+        time_row = ctk.CTkFrame(self.comment_target_card, fg_color="transparent")
+        time_row.pack(fill="x", padx=14, pady=(0, 10))
+        time_row.columnconfigure(0, weight=1)
+        time_row.columnconfigure(1, weight=1)
+
+        dwell_box = ctk.CTkFrame(time_row, fg_color="transparent")
+        dwell_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(dwell_box, text="Xem tự nhiên trước cmt (giây):", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=muted).pack(anchor="w")
+        self.comment_dwell_entry = ctk.CTkEntry(dwell_box, font=body_font, height=32, corner_radius=8)
+        self.comment_dwell_entry.insert(0, "15")
+        self.comment_dwell_entry.pack(fill="x", pady=(2, 0))
+
+        delay_box = ctk.CTkFrame(time_row, fg_color="transparent")
+        delay_box.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(delay_box, text="Giãn cách giữa các máy (giây):", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=muted).pack(anchor="w")
+        self.comment_delay_entry = ctk.CTkEntry(delay_box, font=body_font, height=32, corner_radius=8)
+        self.comment_delay_entry.insert(0, "8")
+        self.comment_delay_entry.pack(fill="x", pady=(2, 0))
+
+        # 3. Comment Content Pool Card
+        self.comment_content_card = ctk.CTkFrame(self.comment_scroll, **card_style)
+        self.comment_content_card.pack(fill="x", padx=16, pady=(0, 10))
+
+        ctk.CTkLabel(
+            self.comment_content_card,
+            text="3. Danh sách nội dung bình luận (Mỗi dòng tương ứng 1 máy):",
+            font=section_font,
+            text_color=text,
+        ).pack(fill="x", padx=14, pady=(10, 4))
+
+        ctk.CTkLabel(
+            self.comment_content_card,
+            text="Mỗi dòng là 1 câu bình luận. Máy 1 lấy dòng 1, Máy 2 lấy dòng 2... Hỗ trợ tiếng Việt có dấu chuẩn 100%.",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=muted,
+        ).pack(fill="x", padx=14, pady=(0, 6))
+
+        self.comment_text_box = ctk.CTkTextbox(
+            self.comment_content_card,
+            font=body_font,
+            height=130,
+            corner_radius=10,
+            border_width=1,
+            border_color=input_border,
+        )
+        self.comment_text_box.pack(fill="x", padx=14, pady=(0, 10))
+
+        # 4. Action Buttons & Status Card
+        self.comment_actions_card = ctk.CTkFrame(self.comment_scroll, **card_style)
+        self.comment_actions_card.pack(fill="x", padx=16, pady=(0, 12))
+
+        btn_row = ctk.CTkFrame(self.comment_actions_card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=14, pady=(12, 6))
+        btn_row.columnconfigure(0, weight=2)
+        btn_row.columnconfigure(1, weight=1)
+
+        self.btn_comment_start = ctk.CTkButton(
+            btn_row,
+            text="🚀 BẮT ĐẦU BƠM BÌNH LUẬN",
+            font=button_font,
+            fg_color=green,
+            hover_color=green_hover,
+            text_color="#ffffff",
+            corner_radius=12,
+            height=44,
+            cursor="hand2",
+            command=self.start_comment_seeding,
+        )
+        self.btn_comment_start.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        self.btn_comment_stop = ctk.CTkButton(
+            btn_row,
+            text="⏹ DỪNG LẠI",
+            font=button_font,
+            fg_color=red_soft,
+            hover_color="#fecaca",
+            text_color=red,
+            border_width=1,
+            border_color="#fca5a5",
+            corner_radius=12,
+            height=44,
+            cursor="hand2",
+            state="disabled",
+            command=self.stop_comment_seeding,
+        )
+        self.btn_comment_stop.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        self.comment_status_label = ctk.CTkLabel(
+            self.comment_actions_card,
+            text="Sẵn sàng. Nhấn Đồng bộ Notion hoặc nhập link & bình luận rồi bấm Bắt đầu.",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color="#1e3a8a",
+        )
+        self.comment_status_label.pack(fill="x", padx=14, pady=(4, 12))
+
 
         # ================= ROW 3: SYSTEM SETTINGS =================
         self.bottom_panel = ctk.CTkFrame(
@@ -1754,6 +2006,8 @@ class GUIApp(ctk.CTk):
             "TikTok": self.tiktok_scroll,
             "Facebook": self.facebook_scroll,
         }.get(self.module_tabs.get())
+        if scroll is None and self.module_tabs.get() == "Bình luận":
+            scroll = getattr(self, "comment_scroll", None)
         if scroll is not None:
             self.after_idle(lambda widget=scroll: widget._parent_canvas.yview_moveto(0))
 
@@ -2329,6 +2583,7 @@ class GUIApp(ctk.CTk):
             print("[Telegram] Đã tắt toàn bộ thông báo và kết nối bot.")
 
     def stop_all(self):
+        self.comment_cancel_flag = True
         main.cancel_all_workflows()
         print("[GUI] 🛑 ĐÃ XÓA TOÀN BỘ LUỒNG VÀ DỪNG KHẨN CẤP! Phần mềm sẵn sàng nhận lệnh mới.")
 
@@ -3738,6 +3993,235 @@ class GUIApp(ctk.CTk):
             )
 
         self.run_in_thread(action)
+
+    # ================= CÁC TÁC VỤ BƠM BÌNH LUẬN =================
+    def _on_click_scan_notion_comments(self):
+        """Quét danh sách bình luận 'Chưa comment' từ Notion Database."""
+        self.btn_comment_scan_notion.configure(
+            state="disabled", text="Đang quét Notion..."
+        )
+        self.comment_scan_info_lbl.configure(
+            text="Đang kết nối Notion API để quét bình luận Chưa comment..."
+        )
+
+        def worker():
+            try:
+                tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
+                self.comment_notion_tasks = tasks
+
+                def update_ui():
+                    if not tasks:
+                        self.comment_scan_info_lbl.configure(
+                            text="Tất cả bình luận trên Notion đã Hoàn thành!"
+                        )
+                        self.comment_task_preview.delete("1.0", "end")
+                        self.comment_task_preview.insert(
+                            "1.0", "Không còn câu nào ở trạng thái 'Chưa comment'."
+                        )
+                        return
+
+                    self.comment_scan_info_lbl.configure(
+                        text=f"Đã quét được {len(tasks)} bình luận Chưa comment từ Notion. Sẵn sàng chạy!"
+                    )
+                    self.comment_task_preview.delete("1.0", "end")
+                    lines = []
+                    for t in tasks:
+                        lines.append(f"[STT {t.stt}] [{t.platform}] {t.content}\n    Link: {t.url}")
+                    self.comment_task_preview.insert("1.0", "\n\n".join(lines))
+
+                    # Tự động điền link và nền tảng của câu đầu tiên
+                    if tasks[0].url:
+                        self.comment_url_entry.delete(0, "end")
+                        self.comment_url_entry.insert(0, tasks[0].url)
+                    if tasks[0].platform in comment_controller.PLATFORM_CHOICES:
+                        self.comment_platform_combo.set(tasks[0].platform)
+
+                    self.comment_text_box.delete("1.0", "end")
+                    self.comment_text_box.insert(
+                        "1.0", "\n".join(t.content for t in tasks if t.content.strip())
+                    )
+
+                self.after(0, update_ui)
+            except Exception as exc:
+                err_msg = str(exc)
+                self.after(
+                    0,
+                    lambda: self.comment_scan_info_lbl.configure(
+                        text=f"Lỗi quét Notion: {err_msg}"
+                    ),
+                )
+            finally:
+                self.after(
+                    0,
+                    lambda: self.btn_comment_scan_notion.configure(
+                        state="normal", text="🔍 Quét dữ liệu Notion"
+                    ),
+                )
+
+        self.run_in_thread(worker)
+
+    def start_comment_seeding(self):
+        """Bắt đầu tiến trình bơm bình luận."""
+        target_devices = self.parse_targets(
+            entry_widget=self.ent_comment_selection
+        )
+        if not target_devices:
+            return
+
+        try:
+            dwell_time = max(5, int(self.comment_dwell_entry.get().strip()))
+        except ValueError:
+            dwell_time = 15
+
+        try:
+            delay_between = max(2, int(self.comment_delay_entry.get().strip()))
+        except ValueError:
+            delay_between = 8
+
+        self.btn_comment_start.configure(state="disabled")
+        self.btn_comment_stop.configure(state="normal")
+        self.comment_cancel_flag = False
+
+        print(
+            f"[GUI] Bắt đầu Bơm bình luận trên {len(target_devices)} máy..."
+        )
+        self.run_in_thread(
+            self._run_comment_seeding_worker,
+            target_devices,
+            dwell_time,
+            delay_between,
+        )
+
+    def stop_comment_seeding(self):
+        """Dừng tiến trình bình luận."""
+        self.comment_cancel_flag = True
+        self.comment_status_label.configure(
+            text="Đang dừng tiến trình bình luận theo yêu cầu..."
+        )
+        print("[GUI] Đã gửi tín hiệu dừng tác vụ Bơm bình luận.")
+
+    def _run_comment_seeding_worker(
+        self, devices, dwell_time, delay_between
+    ):
+        tasks = list(getattr(self, "comment_notion_tasks", []))
+        if not tasks:
+            # Tự động quét Notion nếu chưa quét trước đó
+            try:
+                tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
+                self.comment_notion_tasks = tasks
+            except Exception as e:
+                self.log_message(f"[Notion] Không thể quét tự động: {e}")
+                tasks = []
+
+        if not tasks:
+            # Fallback nhập tay nếu Notion không có câu nào
+            url = self.comment_url_entry.get().strip()
+            platform = self.comment_platform_combo.get()
+            raw_lines = [
+                line.strip()
+                for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
+                if line.strip()
+            ]
+            if not url or not raw_lines:
+                self.after(
+                    0,
+                    lambda: self.comment_status_label.configure(
+                        text="Không có bình luận nào để chạy!"
+                    ),
+                )
+                self.after(0, lambda: self.btn_comment_start.configure(state="normal"))
+                self.after(0, lambda: self.btn_comment_stop.configure(state="disabled"))
+                return
+            tasks = [
+                notion_comment_sync.NotionCommentTask(
+                    page_id="",
+                    stt=i + 1,
+                    content=txt,
+                    url=url,
+                    platform=platform,
+                    status="Chưa comment",
+                )
+                for i, txt in enumerate(raw_lines)
+            ]
+
+        total_tasks = len(tasks)
+        total_devs = len(devices)
+        success_count = 0
+
+        self.after(
+            0,
+            lambda: self.comment_status_label.configure(
+                text=f"Bắt đầu chạy {total_tasks} bình luận trên {total_devs} máy..."
+            ),
+        )
+
+        for idx, task in enumerate(tasks):
+            if self.comment_cancel_flag:
+                print("[GUI] Tác vụ bình luận đã bị hủy.")
+                break
+
+            device_id = devices[idx % total_devs]
+            device_name = main.get_device_name(device_id)
+
+            def dev_cb(msg):
+                self.log_message(msg)
+                self.after(
+                    0, lambda m=msg: self.comment_status_label.configure(text=m)
+                )
+
+            self.log_message(
+                f"[Máy {device_name}] ({idx + 1}/{total_tasks}) [{task.platform}] "
+                f"STT {task.stt}: '{task.content}'..."
+            )
+
+            ok = comment_controller.execute_comment_task(
+                main.adb,
+                device_id,
+                platform=task.platform,
+                url=task.url,
+                comment_text=task.content,
+                dwell_time=dwell_time,
+                status_callback=dev_cb,
+                is_cancelled=lambda: self.comment_cancel_flag,
+            )
+
+            if ok:
+                success_count += 1
+                if task.page_id:
+                    try:
+                        notion_comment_sync.mark_notion_comment_completed(
+                            page_id=task.page_id,
+                            device_name=device_name,
+                        )
+                        self.log_message(
+                            f"[Notion] ✅ STT {task.stt} đã chuyển sang 'Hoàn thành'!"
+                        )
+                    except Exception as e:
+                        self.log_message(
+                            f"[Notion] ❌ Lỗi cập nhật STT {task.stt}: {e}"
+                        )
+
+            if idx < total_tasks - 1 and not self.comment_cancel_flag:
+                jitter_delay = max(3, delay_between) + random.randint(-1, 2)
+                self.log_message(
+                    f"Giãn cách {jitter_delay}s trước bình luận tiếp theo..."
+                )
+                for _ in range(jitter_delay):
+                    if self.comment_cancel_flag:
+                        break
+                    time.sleep(1.0)
+
+        def finish_ui():
+            self.btn_comment_start.configure(state="normal")
+            self.btn_comment_stop.configure(state="disabled")
+            self.comment_status_label.configure(
+                text=f"Hoàn thành: {success_count}/{total_tasks} bình luận đã đăng thành công."
+            )
+
+        self.after(0, finish_ui)
+        print(
+            f"[GUI] Bơm bình luận hoàn tất: {success_count}/{total_tasks} bình luận thành công."
+        )
 
     def log_message(self, msg):
         print(f"[GUI] {msg}")
