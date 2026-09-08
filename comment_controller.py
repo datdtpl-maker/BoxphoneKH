@@ -555,14 +555,21 @@ def find_comment_input_coords(
     adb, device_id: str, platform: str, width: int, height: int
 ) -> tuple[int, int]:
     """Tìm tọa độ ô nhập bình luận bằng UI dump hoặc tọa độ hiệu chuẩn thực tế."""
+    clean_p = (platform or "").strip().casefold()
+    is_tiktok = "tiktok" in clean_p
+
     xml_file = f"/sdcard/dump_in_{device_id}.xml"
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
     local_xml = os.path.join(tempfile.gettempdir(), f"dump_in_{safe_dev}.xml")
     try:
         adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         code, _, _ = adb.execute_adb(
-            device_id, ["shell", "uiautomator", "dump", xml_file]
+            device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file]
         )
+        if code != 0:
+            code, _, _ = adb.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file]
+            )
         if code == 0:
             adb.execute_adb(device_id, ["pull", xml_file, local_xml])
             if os.path.exists(local_xml):
@@ -576,7 +583,7 @@ def find_comment_input_coords(
                     x1, y1, x2, y2 = map(int, m.groups())
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     # Ô nhập luôn nằm ở nửa dưới màn hình
-                    if cy < height * 0.60:
+                    if cy < height * 0.40:
                         continue
 
                     elem_w = x2 - x1
@@ -585,9 +592,7 @@ def find_comment_input_coords(
                     txt = (elem.get("text") or "").casefold()
                     rid = (elem.get("resource-id") or "").casefold()
 
-                    # Bỏ qua các nút emoji gợi ý phản hồi nhanh (nằm ở khoảng 85% - 93% chiều cao màn hình)
-                    if 0.85 * height <= cy <= 0.93 * height and elem_w < width * 0.35:
-                        continue
+                    # Bỏ qua các nút emoji gợi ý phản hồi nhanh
                     if any(char in (txt + desc) for char in ("😁", "🥰", "😂", "😳", "😍", "👍", "❤️")):
                         continue
 
@@ -598,11 +603,15 @@ def find_comment_input_coords(
                             for kw in (
                                 "add comment", "thêm bình luận", "để lại bình luận",
                                 "viết bình luận", "nhập bình luận", "comment_edit_text",
-                                "c0e", "et_comment"
+                                "c0e", "et_comment", "text_layout", "comment_reply_text",
+                                "input_container", "comment_container"
                             )
                         )
                     )
                     if is_input:
+                        # Với thanh bottom sheet TikTok khi chưa mở bàn phím: click vào giữa text area
+                        if is_tiktok and cy > height * 0.85:
+                            return int(width * 0.450), cy
                         return cx, cy
     except Exception:
         pass
@@ -613,18 +622,24 @@ def find_comment_input_coords(
             except Exception:
                 pass
 
-    clean_p = (platform or "").strip().casefold()
-    if "tiktok" in clean_p:
-        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=50%, y=92.0%
-        # Tránh hàng tab Trang chủ - Cửa hàng ở y=96% và tránh nút Shop ở x=35%
-        return int(width * 0.50), int(height * 0.920)
+    if is_tiktok:
+        # Tọa độ ô nhập "Thêm bình luận..." trên bottom sheet TikTok:
+        # x = 45% (ở giữa thanh nhập, né avatar bên trái và icon bên phải)
+        # y = 96.2% (tâm thanh input bar sát đáy màn hình của comment sheet)
+        return int(width * 0.450), int(height * 0.962)
     else:
         # Tọa độ ô nhập Facebook: x=50%, y=92.0%
-        return int(width * 0.50), int(height * 0.920)
+        return int(width * 0.500), int(height * 0.920)
 
 
 def ensure_comment_input_ready(
-    adb, device_id: str, input_x: int, input_y: int, status_callback=None
+    adb,
+    device_id: str,
+    input_x: int,
+    input_y: int,
+    width: int = 1080,
+    height: int = 1920,
+    status_callback=None,
 ) -> bool:
     """Chạm vào ô nhập, bật bàn phím XwIME và xóa sạch text/emoji thừa để sẵn sàng gõ."""
     if hasattr(adb, "ensure_ime"):
@@ -633,13 +648,29 @@ def ensure_comment_input_ready(
         except Exception:
             pass
 
-    adb.tap(device_id, input_x, input_y)
-    time.sleep(0.8)
-    code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
-    is_shown = "minputshown=true" in (out or "").casefold()
-    if not is_shown:
-        adb.tap(device_id, input_x, input_y)
+    # Danh sách các điểm chạm ưu tiên trên thanh ô nhập để kích hoạt bàn phím chắc chắn 100%
+    candidates = [
+        (input_x, input_y),
+        (int(width * 0.450), int(height * 0.962)),
+        (int(width * 0.450), int(height * 0.950)),
+        (int(width * 0.400), int(height * 0.970)),
+    ]
+
+    for idx, (tx, ty) in enumerate(candidates):
+        adb.tap(device_id, tx, ty)
         time.sleep(0.8)
+
+        # Kiểm tra xem ô nhập / bàn phím đã bật lên chưa
+        code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
+        is_shown = "minputshown=true" in (out or "").casefold()
+        if not is_shown:
+            _, win_out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
+            is_shown = any(w in (win_out or "").casefold() for w in ("inputmethod", "softinput", "dialog"))
+
+        if is_shown:
+            break
+        if idx == 0 and (tx, ty) != candidates[1]:
+            continue
 
     # Đảm bảo xóa sạch 100% text hoặc emoji cũ/vô tình dán trong ô nhập trước khi gõ nội dung từ Notion
     try:
@@ -755,32 +786,33 @@ def post_tiktok_comment(
     # 5. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
     input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
-    ensure_comment_input_ready(adb, device_id, input_x, input_y, status_callback=status_callback)
+    ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
     time.sleep(random.uniform(0.8, 1.2))
 
-    # 6. Gõ nội dung bình luận (Unicode Tiếng Việt qua XwIME)
-    log(f"Đang nhập nội dung: '{comment_text}'...")
+    # 6. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
+    log(f"Đang nhập nội dung từ Notion: '{comment_text}'...")
     if hasattr(adb, "ensure_ime"):
         try:
             adb.ensure_ime(device_id)
         except Exception:
             pass
     adb.input_text(device_id, comment_text)
-    time.sleep(random.uniform(1.2, 1.8))
+    time.sleep(random.uniform(1.2, 1.6))
 
     if is_cancelled and is_cancelled():
         return False
 
-    # 7. Bấm nút Gửi
-    log("Tìm nút Gửi bình luận...")
+    # 7. Bấm đúng vào icon màu đỏ mũi tên trắng để gửi bình luận
+    log("Tìm nút tròn đỏ mũi tên gửi bình luận...")
+    time.sleep(0.8)
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
-    log(f"Chạm nút Gửi TikTok tại ({send_x}, {send_y})...")
+    log(f"Chạm nút tròn đỏ gửi TikTok tại ({send_x}, {send_y})...")
     adb.tap(device_id, send_x, send_y)
     time.sleep(0.4)
     # Kích hoạt phím Enter / Action Send
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(0.4)
-    # Chạm lại nút tròn đỏ mũi tên gửi một lần nữa để đảm bảo nhận touch event
+    # Chạm lại nút tròn đỏ mũi tên gửi một lần nữa để đảm bảo nhận touch event 100%
     adb.tap(device_id, send_x, send_y)
     time.sleep(random.uniform(2.5, 3.2))
 
@@ -789,10 +821,10 @@ def post_tiktok_comment(
     try:
         adb.keyevent(device_id, 4)
         time.sleep(0.5)
-        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
-        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
         if hasattr(adb, "clear_recent_apps"):
             adb.clear_recent_apps(device_id)
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
         adb.keyevent(device_id, 3)
         time.sleep(0.8)
     except Exception as e:
@@ -920,24 +952,76 @@ def post_facebook_comment(
     return True
 
 
+def find_tiktok_send_button_via_cv(
+    adb, device_id: str, width: int, height: int
+) -> Optional[tuple[int, int]]:
+    """Tìm tọa độ nút tròn màu đỏ mũi tên gửi bình luận TikTok bằng OpenCV Color & Contour Detection."""
+    screen = capture_screen_fast(adb, device_id)
+    if screen is None:
+        return None
+    try:
+        sh, sw = screen.shape[:2]
+        # Vùng chứa nút tròn đỏ mũi tên gửi: x từ 60% đến 98%, y từ 40% đến 85%
+        rx1, rx2 = int(sw * 0.60), int(sw * 0.98)
+        ry1, ry2 = int(sh * 0.40), int(sh * 0.85)
+        roi = screen[ry1:ry2, rx1:rx2]
+
+        # Lọc màu đỏ đặc trưng của nút gửi TikTok (Crimson Red: R > 180, G < 100, B < 130)
+        mask = (roi[:, :, 2] > 180) & (roi[:, :, 1] < 100) & (roi[:, :, 0] < 130)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask.astype(np.uint8))
+        if num_labels > 1:
+            best_idx = 1
+            max_area = 0
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area > max_area:
+                    max_area = area
+                    best_idx = i
+            # Nút tròn đỏ có diện tích đáng kể (thường > 500 pixel trên Full HD, > 40 trên màn hình nhỏ)
+            if max_area >= 40:
+                cx_roi, cy_roi = centroids[best_idx]
+                abs_x = rx1 + cx_roi
+                abs_y = ry1 + cy_roi
+                scale_x = width / float(sw)
+                scale_y = height / float(sh)
+                return int(abs_x * scale_x), int(abs_y * scale_y)
+    except Exception:
+        pass
+    return None
+
+
 def find_send_button_coords(
     adb, device_id: str, platform: str, width: int, height: int
 ) -> tuple[int, int]:
-    """Tìm tọa độ nút Gửi bình luận qua UI dump hoặc tọa độ đã hiệu chuẩn thực tế."""
+    """Tìm tọa độ nút Gửi bình luận qua OpenCV, UI dump hoặc tọa độ đã hiệu chuẩn thực tế."""
+    clean_p = (platform or "").strip().casefold()
+    is_tiktok = "tiktok" in clean_p
+
+    # 1. Với TikTok: Ưu tiên phát hiện bằng OpenCV trực tiếp nhận diện nút tròn đỏ mũi tên trắng
+    if is_tiktok:
+        cv_coords = find_tiktok_send_button_via_cv(adb, device_id, width, height)
+        if cv_coords is not None:
+            return cv_coords
+
+    # 2. Tìm qua UI dump XML
     xml_file = f"/sdcard/dump_cmt_{device_id}.xml"
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
     local_xml = os.path.join(tempfile.gettempdir(), f"dump_cmt_{safe_dev}.xml")
     try:
         adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         code, _, _ = adb.execute_adb(
-            device_id, ["shell", "uiautomator", "dump", xml_file]
+            device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file]
         )
+        if code != 0:
+            code, _, _ = adb.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file]
+            )
         if code == 0:
             adb.execute_adb(device_id, ["pull", xml_file, local_xml])
             if os.path.exists(local_xml):
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
-                edit_text_cy = None
+                edit_text_bottom = None
                 for elem in root.iter():
                     bounds = elem.get("bounds", "")
                     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
@@ -945,7 +1029,7 @@ def find_send_button_coords(
                         continue
                     x1, y1, x2, y2 = map(int, m.groups())
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    if cy < height * 0.50:
+                    if cy < height * 0.40:
                         continue
 
                     cls_name = (elem.get("class") or "").casefold()
@@ -964,11 +1048,12 @@ def find_send_button_coords(
                         return cx, cy
 
                     if "edittext" in cls_name or any(k in rid for k in ("et_comment", "c0e", "comment_edit_text")):
-                        edit_text_cy = cy
+                        edit_text_bottom = y2
 
-                # Nếu tìm thấy ô nhập EditText, nút tròn đỏ gửi luôn nằm cùng hàng ngang ở sát mép phải
-                if edit_text_cy is not None:
-                    return int(width * 0.935), edit_text_cy
+                # Nếu tìm thấy ô nhập EditText trên TikTok, nút tròn đỏ gửi nằm ngay dưới ô nhập sát mép phải
+                if is_tiktok and edit_text_bottom is not None:
+                    predicted_y = edit_text_bottom + int(height * 0.055)
+                    return int(width * 0.876), predicted_y
     except Exception:
         pass
     finally:
@@ -978,11 +1063,10 @@ def find_send_button_coords(
             except Exception:
                 pass
 
-    clean_p = (platform or "").strip().casefold()
-    if "tiktok" in clean_p:
-        # Tọa độ nút tròn đỏ mũi tên gửi TikTok:
-        # Khi đang nhập cmt, thanh công cụ chứa nút tròn đỏ mũi tên nằm ở độ cao 61.3%, sát mép phải x=93.5%
-        return int(width * 0.935), int(height * 0.613)
+    if is_tiktok:
+        # Tọa độ nút tròn đỏ mũi tên gửi TikTok hiệu chuẩn thực tế:
+        # x = 87.6% (tâm nút tròn đỏ), y = 62.4% (nằm dưới ô nhập ở góc phải)
+        return int(width * 0.876), int(height * 0.624)
     else:
         # Tọa độ nút gửi Facebook: x=90.5%, y=96.0%
         return int(width * 0.905), int(height * 0.960)

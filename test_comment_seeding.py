@@ -383,8 +383,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "") # fail dump to trigger calibrated
         x, y = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.935))
-        self.assertEqual(y, int(1920 * 0.613))
+        self.assertEqual(x, int(1080 * 0.876))
+        self.assertEqual(y, int(1920 * 0.624))
 
         x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
         self.assertEqual(x_fb, int(1080 * 0.905))
@@ -406,8 +406,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.50))
-        self.assertEqual(y, int(1920 * 0.920))
+        self.assertEqual(x, int(1080 * 0.450))
+        self.assertEqual(y, int(1920 * 0.962))
 
     def test_find_tiktok_comment_icon_coords_calibrated(self):
         adb_mock = MagicMock()
