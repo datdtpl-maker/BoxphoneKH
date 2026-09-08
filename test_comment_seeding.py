@@ -340,6 +340,25 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         # Never mix platforms
         self.assertTrue(all(t.platform == "Facebook" for t in exec_fb))
 
+    def test_get_campaign_options(self):
+        tasks = [
+            notion_comment_sync.NotionCommentTask(page_id="p1", campaign_title="Video 1", url="https://tiktok.com/v1", platform="TikTok", content="c1"),
+            notion_comment_sync.NotionCommentTask(page_id="p1", campaign_title="Video 1", url="https://tiktok.com/v1", platform="TikTok", content="c2"),
+            notion_comment_sync.NotionCommentTask(page_id="p2", campaign_title="Video 2", url="https://tiktok.com/v2", platform="TikTok", content="c3"),
+            notion_comment_sync.NotionCommentTask(page_id="p3", campaign_title="Bài FB 1", url="https://fb.com/p1", platform="Facebook", content="fb1"),
+        ]
+        camps_tt = comment_controller.get_campaign_options(tasks, "TikTok")
+        self.assertEqual(len(camps_tt), 2)
+        self.assertEqual(camps_tt[0]["title"], "Video 1")
+        self.assertEqual(len(camps_tt[0]["tasks"]), 2)
+        self.assertEqual(camps_tt[1]["title"], "Video 2")
+        self.assertEqual(len(camps_tt[1]["tasks"]), 1)
+
+        camps_fb = comment_controller.get_campaign_options(tasks, "Facebook")
+        self.assertEqual(len(camps_fb), 1)
+        self.assertEqual(camps_fb[0]["title"], "Bài FB 1")
+        self.assertEqual(len(camps_fb[0]["tasks"]), 1)
+
     def test_parse_comment_devices(self):
         devices = ["dev1", "dev2", "dev3", "dev4", "dev5"]
 
@@ -362,8 +381,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "") # fail dump to trigger calibrated
         x, y = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.90))
-        self.assertEqual(y, int(1920 * 0.960))
+        self.assertEqual(x, int(1080 * 0.935))
+        self.assertEqual(y, int(1920 * 0.613))
 
         x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
         self.assertEqual(x_fb, int(1080 * 0.905))

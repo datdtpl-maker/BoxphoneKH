@@ -462,7 +462,12 @@ def post_tiktok_comment(
     # Kích hoạt phím Enter / Action Send
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(0.4)
+    # Chạm lại nút tròn đỏ mũi tên gửi một lần nữa để đảm bảo nhận touch event
     adb.tap(device_id, send_x, send_y)
+    time.sleep(0.4)
+    # Fallback chạm thêm vị trí đáy màn hình (x=90.0%, y=96.0%) nếu giao diện ở chế độ thu gọn
+    bottom_x, bottom_y = int(width * 0.900), int(height * 0.960)
+    adb.tap(device_id, bottom_x, bottom_y)
     time.sleep(random.uniform(2.5, 3.2))
 
     # 8. Đóng khung comment để giữ màn hình an toàn (Phím Back an toàn)
@@ -623,8 +628,9 @@ def find_send_button_coords(
 
     clean_p = (platform or "").strip().casefold()
     if "tiktok" in clean_p:
-        # Tọa độ nút tròn đỏ gửi TikTok: x=90.0%, y=96.0% (calibrated chính xác đáy thanh cmt)
-        return int(width * 0.90), int(height * 0.960)
+        # Tọa độ nút tròn đỏ mũi tên gửi TikTok:
+        # Khi đang nhập cmt, thanh công cụ chứa nút tròn đỏ mũi tên nằm ở độ cao 61.3%, sát mép phải x=93.5%
+        return int(width * 0.935), int(height * 0.613)
     else:
         # Tọa độ nút gửi Facebook: x=90.5%, y=96.0%
         return int(width * 0.905), int(height * 0.960)

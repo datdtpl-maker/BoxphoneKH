@@ -1246,6 +1246,20 @@ class GUIApp(ctk.CTk):
         )
         self.ent_comment_selection.pack(fill="x")
 
+        # Campaign / Post selector from Notion
+        camp_box = ctk.CTkFrame(self.comment_target_card, fg_color="transparent")
+        camp_box.pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkLabel(camp_box, text="Chọn bài viết / Video mục tiêu từ Notion:", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        self.comment_campaign_combo = ctk.CTkComboBox(
+            camp_box,
+            values=["-- Quét dữ liệu Notion để chọn bài viết --"],
+            command=self._on_comment_campaign_changed,
+            font=body_font,
+            height=36,
+            corner_radius=10,
+        )
+        self.comment_campaign_combo.pack(fill="x")
+
         # URL Input
         ctk.CTkLabel(self.comment_target_card, text="Link bài viết / video / Reel:", font=label_font, text_color=text).pack(fill="x", padx=14, pady=(4, 2))
         self.comment_url_entry = ctk.CTkEntry(
@@ -4061,6 +4075,45 @@ class GUIApp(ctk.CTk):
         """Khi người dùng chuyển đổi nền tảng trong combobox."""
         self._sync_comment_ui_for_platform(choice, update_url=True)
 
+    def _on_comment_campaign_changed(self, choice):
+        """Khi người dùng chọn một bài viết cụ thể từ dropdown danh sách bài đã quét."""
+        camps = getattr(self, "current_platform_campaigns", [])
+        for i, c in enumerate(camps):
+            label = f"[{i+1}] {c['title']} ({len(c['tasks'])} câu)"
+            if choice == label or choice.startswith(f"[{i+1}]"):
+                self._apply_selected_campaign(c, update_url=True)
+                break
+
+    def _apply_selected_campaign(self, camp, update_url=True):
+        """Cập nhật URL và danh sách bình luận cho bài viết được chọn."""
+        tasks = camp.get("tasks", [])
+        camp_url = camp.get("url", "")
+        camp_title = camp.get("title", "")
+        plat = camp.get("platform", "")
+
+        if update_url and camp_url:
+            self.comment_url_entry.delete(0, "end")
+            self.comment_url_entry.insert(0, camp_url)
+
+        # Cập nhật danh sách bình luận CHỈ của bài viết này vào Mục 3
+        self.comment_text_box.delete("1.0", "end")
+        lines_content = [t.content for t in tasks if t.content.strip()]
+        self.comment_text_box.insert("1.0", "\n".join(lines_content))
+
+        # Thông báo trạng thái rõ ràng
+        camp_info = f" • Bài: {camp_title}" if camp_title else ""
+        self.comment_scan_info_lbl.configure(
+            text=f"Đã chọn [{plat}]{camp_info} • {len(tasks)} câu Chưa comment từ Notion."
+        )
+
+        # Cập nhật khung xem trước chi tiết
+        self.comment_task_preview.delete("1.0", "end")
+        preview_lines = [
+            f"[STT {t.stt}] [{t.platform}] {t.content}\n    Link: {t.url}"
+            for t in tasks
+        ]
+        self.comment_task_preview.insert("1.0", "\n\n".join(preview_lines))
+
     def _on_comment_url_modified(self, event=None):
         """Tự động nhận diện nền tảng khi người dùng dán hoặc nhập link mới."""
         raw_url = self.comment_url_entry.get().strip()
@@ -4075,32 +4128,20 @@ class GUIApp(ctk.CTk):
         """Đồng bộ link và danh sách bình luận theo đúng nền tảng được chọn."""
         plat = (platform_name or "").strip()
         all_tasks = getattr(self, "comment_notion_tasks", [])
-        matched = comment_controller.filter_tasks_for_platform(all_tasks, plat)
+        camps = comment_controller.get_campaign_options(all_tasks, plat)
+        self.current_platform_campaigns = camps
 
-        if matched:
-            if update_url and matched[0].url:
-                self.comment_url_entry.delete(0, "end")
-                self.comment_url_entry.insert(0, matched[0].url)
-
-            # Cập nhật danh sách bình luận CHỈ của nền tảng này vào Mục 3
-            self.comment_text_box.delete("1.0", "end")
-            lines_content = [t.content for t in matched if t.content.strip()]
-            self.comment_text_box.insert("1.0", "\n".join(lines_content))
-
-            # Thông báo trạng thái rõ ràng
-            camp_info = f" • Bài: {matched[0].campaign_title}" if matched[0].campaign_title else ""
-            self.comment_scan_info_lbl.configure(
-                text=f"Đã chọn [{plat}]{camp_info} • {len(matched)} câu Chưa comment từ Notion."
-            )
-
-            # Cập nhật khung xem trước chi tiết
-            self.comment_task_preview.delete("1.0", "end")
-            preview_lines = [
-                f"[STT {t.stt}] [{t.platform}] {t.content}\n    Link: {t.url}"
-                for t in matched
+        if camps:
+            camp_labels = [
+                f"[{i+1}] {c['title']} ({len(c['tasks'])} câu)"
+                for i, c in enumerate(camps)
             ]
-            self.comment_task_preview.insert("1.0", "\n\n".join(preview_lines))
+            self.comment_campaign_combo.configure(values=camp_labels)
+            self.comment_campaign_combo.set(camp_labels[0])
+            self._apply_selected_campaign(camps[0], update_url=update_url)
         else:
+            self.comment_campaign_combo.configure(values=["Không có bài viết nào"])
+            self.comment_campaign_combo.set("Không có bài viết nào")
             if update_url:
                 self.comment_url_entry.delete(0, "end")
             self.comment_text_box.delete("1.0", "end")
