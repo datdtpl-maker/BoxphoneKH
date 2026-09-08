@@ -105,6 +105,10 @@ def open_url_via_intent(
     clean_url = clean_platform_url(canonical_url, platform)
 
     if "tiktok" in clean_platform:
+        # Thoát khỏi màn hình Live stream / modal nếu đang mở
+        adb.keyevent(device_id, 4)
+        time.sleep(0.5)
+
         # Đảm bảo TikTok đã khởi động nếu đang tắt
         if hasattr(adb, "is_tiktok_in_foreground") and not adb.is_tiktok_in_foreground(device_id):
             if hasattr(adb, "launch_tiktok"):
@@ -114,12 +118,13 @@ def open_url_via_intent(
                 except Exception:
                     pass
 
-        # Thử mở bằng package TikTok chính với URL bọc nháy kép chống ngắt lệnh shell
+        # 1. Primary VIEW intent với URL sạch và package TikTok chính
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", f'"{clean_url}"',
+            "-d", clean_url,
             "-p", TIKTOK_PRIMARY_PACKAGE,
+            "-f", "0x14000000",
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
         code, stdout, _ = adb.execute_adb(device_id, cmd)
@@ -128,8 +133,9 @@ def open_url_via_intent(
             cmd_alt = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
-                "-d", f'"{clean_url}"',
+                "-d", clean_url,
                 "-p", TIKTOK_ALT_PACKAGE,
+                "-f", "0x14000000",
                 "--es", "android.intent.extra.REFERRER_NAME", referrer,
             ]
             code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
@@ -138,21 +144,25 @@ def open_url_via_intent(
                 cmd_fallback = [
                     "shell", "am", "start",
                     "-a", "android.intent.action.VIEW",
-                    "-d", f'"{clean_url}"',
+                    "-d", clean_url,
+                    "-f", "0x14000000",
                 ]
                 code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
                 return code_fb == 0
 
-        # Nếu có video_id cụ thể, kích hoạt thêm deep link nội bộ để TikTok nhảy thẳng vào video
+        # Nếu có video_id cụ thể, kích hoạt thêm deep link native nội bộ TikTok
         video_id = extract_tiktok_video_id(clean_url)
         if video_id:
-            cmd_deep = [
-                "shell", "am", "start",
-                "-a", "android.intent.action.VIEW",
-                "-d", f"snssdk1180://aweme/detail/{video_id}",
-                "-p", TIKTOK_PRIMARY_PACKAGE,
-            ]
-            adb.execute_adb(device_id, cmd_deep)
+            for scheme in ("snssdk1233", "snssdk1180"):
+                cmd_deep = [
+                    "shell", "am", "start",
+                    "-a", "android.intent.action.VIEW",
+                    "-d", f"{scheme}://aweme/detail/{video_id}",
+                    "-f", "0x14000000",
+                ]
+                code_d, out_d, _ = adb.execute_adb(device_id, cmd_deep)
+                if code_d == 0 and "Error" not in (out_d or ""):
+                    break
 
         return True
 
@@ -160,8 +170,9 @@ def open_url_via_intent(
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", f'"{clean_url}"',
+            "-d", clean_url,
             "-p", FACEBOOK_PACKAGE,
+            "-f", "0x14000000",
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
         code, _, _ = adb.execute_adb(device_id, cmd)
@@ -169,7 +180,8 @@ def open_url_via_intent(
             cmd_fallback = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
-                "-d", f'"{clean_url}"',
+                "-d", clean_url,
+                "-f", "0x14000000",
             ]
             code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
             return code_fb == 0
@@ -179,7 +191,8 @@ def open_url_via_intent(
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", f'"{clean_url}"',
+            "-d", clean_url,
+            "-f", "0x14000000",
         ]
         code, _, _ = adb.execute_adb(device_id, cmd)
         return code == 0
@@ -191,6 +204,7 @@ def wait_for_tiktok_video_ready(
     timeout: int = 10,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
+    clean_url: str = "",
 ) -> bool:
     """Chờ TikTok mở hoàn tất màn hình xem video và sẵn sàng tương tác."""
     def log(msg: str):
@@ -216,22 +230,37 @@ def wait_for_tiktok_video_ready(
             except Exception:
                 pass
 
-        # Kiểm tra ứng dụng TikTok có đang ở foreground không
-        is_fg = True
-        if hasattr(adb, "is_tiktok_in_foreground"):
+        # Kiểm tra xem có bị kẹt ở Live stream không
+        if hasattr(adb, "get_tiktok_foreground_activity"):
             try:
-                is_fg = adb.is_tiktok_in_foreground(device_id)
+                act = (adb.get_tiktok_foreground_activity(device_id) or "").casefold()
+                if "live" in act:
+                    log("Đang thoát màn hình Live để mở video đích...")
+                    adb.keyevent(device_id, 4)
+                    time.sleep(1.0)
+                    vid = extract_tiktok_video_id(clean_url)
+                    if vid:
+                        adb.execute_adb(
+                            device_id,
+                            [
+                                "shell", "am", "start",
+                                "-a", "android.intent.action.VIEW",
+                                "-d", f"snssdk1233://aweme/detail/{vid}",
+                                "-f", "0x14000000",
+                            ],
+                        )
             except Exception:
-                is_fg = True
+                pass
 
-        if is_fg and elapsed >= 2:
-            time.sleep(1.0)
+        # Cho video ổn định ít nhất 3s
+        if elapsed >= 3:
+            time.sleep(0.5)
             log("✅ Giao diện video TikTok đã sẵn sàng!")
             return True
 
         time.sleep(1.0)
 
-    log("Đã hết thời gian chờ video, tiếp tục tiến trình...")
+    log("Đã hoàn tất thời gian chuẩn bị video.")
     return True
 
 
@@ -342,7 +371,7 @@ def post_tiktok_comment(
 
     # 2. Chờ TikTok tải xong giao diện video
     wait_for_tiktok_video_ready(
-        adb, device_id, timeout=10, status_callback=status_callback, is_cancelled=is_cancelled
+        adb, device_id, timeout=10, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
     )
     if is_cancelled and is_cancelled():
         return False

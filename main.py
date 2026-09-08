@@ -511,10 +511,17 @@ def get_device_name(serial):
             except Exception:
                 pass
                 
+    # 1. Đánh số chuẩn 100% theo thứ tự trong [1] -> S1, [2] -> S2, ..., [40] -> S40
+    if _ordered_devices_cache and serial in _ordered_devices_cache:
+        idx = _ordered_devices_cache.index(serial) + 1
+        return f"S{idx}"
+
+    # 2. Nếu serial chưa có trong cache danh sách, kiểm tra mapping leveldb
     name = cached_mapping.get(serial, "")
-    if name:
-        if name.lower().startswith("s") and name[1:].isdigit():
-            return f"S{name[1:]}"
+    if name and name.lower() not in ['c', 'name', 'onlyserial', 'serial', 'sort']:
+        m = re.match(r'^[sS](\d+)$', name)
+        if m:
+            return f"S{m.group(1)}"
         return name
         
     if ":" in serial:
