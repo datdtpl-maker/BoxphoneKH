@@ -369,6 +369,25 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertEqual(x_fb, int(1080 * 0.905))
         self.assertEqual(y_fb, int(1920 * 0.928))
 
+    def test_clean_platform_url_and_extract_video_id(self):
+        raw_tiktok = "https://www.tiktok.com/@khaihoanskincare/video/7682027295724490004?is_from_webapp=1&sender_device=pc"
+        clean = comment_controller.clean_platform_url(raw_tiktok, "TikTok")
+        self.assertEqual(clean, "https://www.tiktok.com/@khaihoanskincare/video/7682027295724490004")
+
+        vid = comment_controller.extract_tiktok_video_id(clean)
+        self.assertEqual(vid, "7682027295724490004")
+
+        raw_fb = "https://www.facebook.com/reel/123456789?fbclid=IwAR0xyz"
+        clean_fb = comment_controller.clean_platform_url(raw_fb, "Facebook")
+        self.assertEqual(clean_fb, "https://www.facebook.com/reel/123456789")
+
+    def test_find_comment_input_coords_calibrated(self):
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (1, "", "")
+        x, y = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
+        self.assertEqual(x, int(1080 * 0.40))
+        self.assertEqual(y, int(1920 * 0.915))
+
 
 if __name__ == "__main__":
     unittest.main()

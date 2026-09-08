@@ -51,6 +51,47 @@ def resolve_canonical_url(url: str, timeout: float = 8.0) -> str:
     return clean_url
 
 
+def clean_platform_url(url: str, platform: str) -> str:
+    """Làm sạch URL, loại bỏ các query parameters web-only hoặc tracking gây lỗi Intent."""
+    if not url:
+        return ""
+    clean_url = url.strip()
+    clean_p = (platform or "").strip().casefold()
+
+    if "tiktok" in clean_p:
+        # Dạng https://www.tiktok.com/@user/video/1234567890
+        m = re.search(
+            r"(https?://(?:www\.|m\.|vm\.|vt\.)?tiktok\.com/@[^/?#]+/video/\d+)",
+            clean_url,
+        )
+        if m:
+            return m.group(1)
+        # Dạng rút gọn vt.tiktok.com / vm.tiktok.com
+        m_short = re.search(
+            r"(https?://(?:vt|vm)\.tiktok\.com/[a-zA-Z0-9_\-]+)", clean_url
+        )
+        if m_short:
+            return m_short.group(1)
+    elif "facebook" in clean_p:
+        # Loại bỏ tracking fbclid, ref, etc.
+        if "?" in clean_url and any(
+            k in clean_url for k in ("fbclid", "ref=", "__cft__", "__tn__")
+        ):
+            parts = clean_url.split("?", 1)
+            if "reel" in parts[0] or "watch" in parts[0]:
+                return parts[0]
+
+    return clean_url
+
+
+def extract_tiktok_video_id(url: str) -> Optional[str]:
+    """Trích xuất video ID số từ link TikTok."""
+    if not url:
+        return None
+    m = re.search(r"(?:video|v)/(\d+)", url)
+    return m.group(1) if m else None
+
+
 def open_url_via_intent(
     adb,
     device_id: str,
@@ -61,43 +102,65 @@ def open_url_via_intent(
     """Mở link bài viết/video bằng Android Intent kèm cờ Referrer tàng hình."""
     canonical_url = resolve_canonical_url(url)
     clean_platform = (platform or "").strip().casefold()
+    clean_url = clean_platform_url(canonical_url, platform)
 
     if "tiktok" in clean_platform:
-        # Thử mở bằng package TikTok chính
+        # Đảm bảo TikTok đã khởi động nếu đang tắt
+        if hasattr(adb, "is_tiktok_in_foreground") and not adb.is_tiktok_in_foreground(device_id):
+            if hasattr(adb, "launch_tiktok"):
+                try:
+                    adb.launch_tiktok(device_id)
+                    time.sleep(1.5)
+                except Exception:
+                    pass
+
+        # Thử mở bằng package TikTok chính với URL bọc nháy kép chống ngắt lệnh shell
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", canonical_url,
+            "-d", f'"{clean_url}"',
             "-p", TIKTOK_PRIMARY_PACKAGE,
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
-        code, _, _ = adb.execute_adb(device_id, cmd)
-        if code != 0:
+        code, stdout, _ = adb.execute_adb(device_id, cmd)
+        if code != 0 or "Error" in (stdout or ""):
             # Thử mở bằng package TikTok alt
             cmd_alt = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
-                "-d", canonical_url,
+                "-d", f'"{clean_url}"',
                 "-p", TIKTOK_ALT_PACKAGE,
                 "--es", "android.intent.extra.REFERRER_NAME", referrer,
             ]
-            code_alt, _, _ = adb.execute_adb(device_id, cmd_alt)
-            if code_alt != 0:
+            code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
+            if code_alt != 0 or "Error" in (stdout_alt or ""):
                 # Fallback Intent không gắn cố định package
                 cmd_fallback = [
                     "shell", "am", "start",
                     "-a", "android.intent.action.VIEW",
-                    "-d", canonical_url,
+                    "-d", f'"{clean_url}"',
                 ]
                 code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
                 return code_fb == 0
+
+        # Nếu có video_id cụ thể, kích hoạt thêm deep link nội bộ để TikTok nhảy thẳng vào video
+        video_id = extract_tiktok_video_id(clean_url)
+        if video_id:
+            cmd_deep = [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", f"snssdk1180://aweme/detail/{video_id}",
+                "-p", TIKTOK_PRIMARY_PACKAGE,
+            ]
+            adb.execute_adb(device_id, cmd_deep)
+
         return True
 
     elif "facebook" in clean_platform:
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", canonical_url,
+            "-d", f'"{clean_url}"',
             "-p", FACEBOOK_PACKAGE,
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
@@ -106,7 +169,7 @@ def open_url_via_intent(
             cmd_fallback = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
-                "-d", canonical_url,
+                "-d", f'"{clean_url}"',
             ]
             code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
             return code_fb == 0
@@ -116,10 +179,138 @@ def open_url_via_intent(
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", canonical_url,
+            "-d", f'"{clean_url}"',
         ]
         code, _, _ = adb.execute_adb(device_id, cmd)
         return code == 0
+
+
+def wait_for_tiktok_video_ready(
+    adb,
+    device_id: str,
+    timeout: int = 10,
+    status_callback: Optional[Callable[[str], None]] = None,
+    is_cancelled: Optional[Callable[[], bool]] = None,
+) -> bool:
+    """Chờ TikTok mở hoàn tất màn hình xem video và sẵn sàng tương tác."""
+    def log(msg: str):
+        if status_callback:
+            status_callback(f"[Device {device_id}][TikTok Seeding] {msg}")
+
+    log("Đang chờ TikTok tải xong giao diện video...")
+    for elapsed in range(max(1, timeout)):
+        if is_cancelled and is_cancelled():
+            return False
+
+        # Đóng các popup cản trở nếu xuất hiện
+        if hasattr(adb, "dismiss_tiktok_blocking_popup"):
+            try:
+                adb.dismiss_tiktok_blocking_popup(device_id)
+            except Exception:
+                pass
+
+        # Khóa dọc giữ màn hình ổn định
+        if hasattr(adb, "lock_portrait"):
+            try:
+                adb.lock_portrait(device_id, retries=1)
+            except Exception:
+                pass
+
+        # Kiểm tra ứng dụng TikTok có đang ở foreground không
+        is_fg = True
+        if hasattr(adb, "is_tiktok_in_foreground"):
+            try:
+                is_fg = adb.is_tiktok_in_foreground(device_id)
+            except Exception:
+                is_fg = True
+
+        if is_fg and elapsed >= 2:
+            time.sleep(1.0)
+            log("✅ Giao diện video TikTok đã sẵn sàng!")
+            return True
+
+        time.sleep(1.0)
+
+    log("Đã hết thời gian chờ video, tiếp tục tiến trình...")
+    return True
+
+
+def find_comment_input_coords(
+    adb, device_id: str, platform: str, width: int, height: int
+) -> tuple[int, int]:
+    """Tìm tọa độ ô nhập bình luận bằng UI dump hoặc tọa độ hiệu chuẩn thực tế."""
+    xml_file = f"/sdcard/dump_in_{device_id}.xml"
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_in_{safe_dev}.xml")
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", xml_file]
+        )
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml])
+            if os.path.exists(local_xml):
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    if not m:
+                        continue
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    # Ô nhập luôn nằm ở nửa dưới màn hình
+                    if cy < height * 0.60:
+                        continue
+
+                    cls_name = (elem.get("class") or "").casefold()
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+
+                    is_input = (
+                        "edittext" in cls_name
+                        or any(
+                            kw in desc or kw in txt or kw in rid
+                            for kw in (
+                                "add comment", "thêm bình luận", "để lại bình luận",
+                                "viết bình luận", "nhập bình luận", "comment_edit_text",
+                                "c0e", "et_comment"
+                            )
+                        )
+                    )
+                    if is_input:
+                        return cx, cy
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    clean_p = (platform or "").strip().casefold()
+    if "tiktok" in clean_p:
+        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=40%, y=91.5%
+        return int(width * 0.40), int(height * 0.915)
+    else:
+        # Tọa độ ô nhập Facebook: x=40%, y=91.5%
+        return int(width * 0.40), int(height * 0.915)
+
+
+def ensure_comment_input_ready(
+    adb, device_id: str, input_x: int, input_y: int, status_callback=None
+) -> bool:
+    """Chạm vào ô nhập và kích hoạt bàn phím sẵn sàng nhập liệu."""
+    adb.tap(device_id, input_x, input_y)
+    time.sleep(0.8)
+    code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
+    is_shown = "minputshown=true" in (out or "").casefold()
+    if not is_shown:
+        adb.tap(device_id, input_x, input_y)
+        time.sleep(0.8)
+    return True
 
 
 def post_tiktok_comment(
@@ -141,22 +332,33 @@ def post_tiktok_comment(
         return False
 
     width, height = adb.get_effective_screen_size(device_id)
+
+    # 1. Mở link video
     log("Đang mở link video qua Intent Zalo Referrer...")
     success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
     if not success:
         log("Lỗi không thể mở link video.")
         return False
 
-    # Dwell time: Xem video tự nhiên 10-25s
-    dwell_target = max(8, int(dwell_time)) + random.randint(-2, 3)
+    # 2. Chờ TikTok tải xong giao diện video
+    wait_for_tiktok_video_ready(
+        adb, device_id, timeout=10, status_callback=status_callback, is_cancelled=is_cancelled
+    )
+    if is_cancelled and is_cancelled():
+        return False
+
+    # 3. Dwell time: Xem video tự nhiên
+    dwell_target = max(6, int(dwell_time)) + random.randint(-1, 2)
     log(f"Đang xem video tự nhiên trong {dwell_target}s trước khi bình luận...")
-    for elapsed in range(dwell_target):
+    for remaining in range(dwell_target, 0, -1):
         if is_cancelled and is_cancelled():
             log("Dừng xem do người dùng yêu cầu.")
             return False
+        if remaining % 4 == 0 or remaining <= 3:
+            log(f"Đang xem video ({remaining}s còn lại)...")
         time.sleep(1.0)
 
-    # 1. Bấm nút Mở khung bình luận
+    # 4. Bấm nút Mở khung bình luận
     log("Mở khung bình luận...")
     comment_coords = None
     try:
@@ -176,22 +378,26 @@ def post_tiktok_comment(
     if is_cancelled and is_cancelled():
         return False
 
-    # 2. Chạm vào ô nhập bình luận
+    # 5. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
-    input_x = int(width * 0.40)
-    input_y = int(height * 0.95)
-    adb.tap(device_id, input_x, input_y)
-    time.sleep(random.uniform(1.0, 1.5))
+    input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
+    ensure_comment_input_ready(adb, device_id, input_x, input_y, status_callback=status_callback)
+    time.sleep(random.uniform(0.8, 1.2))
 
-    # 3. Gõ nội dung bình luận (Unicode Tiếng Việt qua XwIME)
+    # 6. Gõ nội dung bình luận (Unicode Tiếng Việt qua XwIME)
     log(f"Đang nhập nội dung: '{comment_text}'...")
+    if hasattr(adb, "ensure_ime"):
+        try:
+            adb.ensure_ime(device_id)
+        except Exception:
+            pass
     adb.input_text(device_id, comment_text)
     time.sleep(random.uniform(1.2, 1.8))
 
     if is_cancelled and is_cancelled():
         return False
 
-    # 4. Bấm nút Gửi
+    # 7. Bấm nút Gửi
     log("Tìm nút Gửi bình luận...")
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
     log(f"Chạm nút Gửi TikTok tại ({send_x}, {send_y})...")
@@ -203,7 +409,7 @@ def post_tiktok_comment(
     adb.tap(device_id, send_x, send_y)
     time.sleep(random.uniform(2.5, 3.2))
 
-    # 5. Đóng khung comment để giữ màn hình an toàn (Phím Back an toàn)
+    # 8. Đóng khung comment để giữ màn hình an toàn (Phím Back an toàn)
     log("Đóng khung bình luận...")
     adb.keyevent(device_id, 4)
     time.sleep(1.0)
@@ -237,9 +443,9 @@ def post_facebook_comment(
         log("Lỗi không thể mở link Facebook.")
         return False
 
-    dwell_target = max(8, int(dwell_time)) + random.randint(-2, 3)
+    dwell_target = max(6, int(dwell_time)) + random.randint(-1, 2)
     log(f"Đang đọc bài/xem Reel trong {dwell_target}s trước khi bình luận...")
-    for elapsed in range(dwell_target):
+    for remaining in range(dwell_target, 0, -1):
         if is_cancelled and is_cancelled():
             log("Dừng xem do người dùng yêu cầu.")
             return False
@@ -273,13 +479,17 @@ def post_facebook_comment(
 
     # 2. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
-    input_x = int(width * 0.35)
-    input_y = int(height * 0.95)
-    adb.tap(device_id, input_x, input_y)
-    time.sleep(random.uniform(1.0, 1.5))
+    input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
+    ensure_comment_input_ready(adb, device_id, input_x, input_y, status_callback=status_callback)
+    time.sleep(random.uniform(0.8, 1.2))
 
     # 3. Gõ nội dung bình luận
     log(f"Đang nhập nội dung: '{comment_text}'...")
+    if hasattr(adb, "ensure_ime"):
+        try:
+            adb.ensure_ime(device_id)
+        except Exception:
+            pass
     adb.input_text(device_id, comment_text)
     time.sleep(random.uniform(1.2, 1.8))
 
