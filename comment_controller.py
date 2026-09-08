@@ -185,7 +185,7 @@ def open_url_via_intent(
 def wait_for_tiktok_video_ready(
     adb,
     device_id: str,
-    timeout: int = 5,
+    timeout: int = 12,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
     clean_url: str = "",
@@ -207,8 +207,8 @@ def wait_for_tiktok_video_ready(
             except Exception:
                 pass
 
-        # Cho video ổn định ít nhất 3s
-        if elapsed >= 3:
+        # Cho video ổn định ít nhất 5s để các máy cấu hình thấp load xong
+        if elapsed >= 5:
             time.sleep(0.5)
             log("✅ Giao diện video TikTok đã sẵn sàng!")
             return True
@@ -371,12 +371,12 @@ def find_comment_input_coords(
 
     clean_p = (platform or "").strip().casefold()
     if "tiktok" in clean_p:
-        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=35%, y=96.2%
-        # Tránh hàng emoji gợi ý ở y=88-91%, rơi chuẩn vào ô Add comment... ở đáy màn hình
-        return int(width * 0.35), int(height * 0.962)
+        # Tọa độ ô nhập TikTok trên thanh bottom sheet: x=50%, y=92.0%
+        # Tránh hàng tab Trang chủ - Cửa hàng ở y=96% và tránh nút Shop ở x=35%
+        return int(width * 0.50), int(height * 0.920)
     else:
-        # Tọa độ ô nhập Facebook: x=35%, y=96.2%
-        return int(width * 0.35), int(height * 0.962)
+        # Tọa độ ô nhập Facebook: x=50%, y=92.0%
+        return int(width * 0.50), int(height * 0.920)
 
 
 def ensure_comment_input_ready(
@@ -432,6 +432,18 @@ def post_tiktok_comment(
 
     width, height = adb.get_effective_screen_size(device_id)
 
+    # 0. Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm
+    log("Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm...")
+    try:
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
+        if hasattr(adb, "clear_recent_apps"):
+            adb.clear_recent_apps(device_id)
+        adb.keyevent(device_id, 3)
+        time.sleep(0.8)
+    except Exception:
+        pass
+
     # 1. Mở link video
     log("Đang mở link video qua Intent Zalo Referrer...")
     success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
@@ -441,7 +453,7 @@ def post_tiktok_comment(
 
     # 2. Chờ TikTok tải xong giao diện video
     wait_for_tiktok_video_ready(
-        adb, device_id, timeout=10, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
+        adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
     )
     if is_cancelled and is_cancelled():
         return False
@@ -462,8 +474,7 @@ def post_tiktok_comment(
     comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
     log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
     adb.tap(device_id, comment_x, comment_y)
-
-    time.sleep(random.uniform(1.8, 2.5))
+    time.sleep(random.uniform(2.0, 2.5))
     if is_cancelled and is_cancelled():
         return False
 
@@ -503,12 +514,21 @@ def post_tiktok_comment(
     adb.tap(device_id, bottom_x, bottom_y)
     time.sleep(random.uniform(2.5, 3.2))
 
-    # 8. Đóng khung comment để giữ màn hình an toàn (Phím Back an toàn)
-    log("Đóng khung bình luận...")
-    adb.keyevent(device_id, 4)
-    time.sleep(1.0)
+    # 8. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm như module Facebook/TikTok
+    log("Đã đăng bình luận TikTok thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
+    try:
+        adb.keyevent(device_id, 4)
+        time.sleep(0.5)
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
+        if hasattr(adb, "clear_recent_apps"):
+            adb.clear_recent_apps(device_id)
+        adb.keyevent(device_id, 3)
+        time.sleep(0.8)
+    except Exception as e:
+        log(f"Cảnh báo dọn dẹp: {e}")
 
-    log("Đã đăng bình luận TikTok thành công!")
+    log("Đã hoàn tất dọn dẹp thiết bị!")
     return True
 
 
@@ -531,6 +551,18 @@ def post_facebook_comment(
         return False
 
     width, height = adb.get_effective_screen_size(device_id)
+
+    # 0. Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm
+    log("Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm...")
+    try:
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
+        if hasattr(adb, "clear_recent_apps"):
+            adb.clear_recent_apps(device_id)
+        adb.keyevent(device_id, 3)
+        time.sleep(0.8)
+    except Exception:
+        pass
+
     log("Đang mở link bài viết/Reel qua Intent Zalo Referrer...")
     success = open_url_via_intent(adb, device_id, url, PLATFORM_FACEBOOK)
     if not success:
@@ -601,12 +633,20 @@ def post_facebook_comment(
     adb.tap(device_id, send_x, send_y)
     time.sleep(random.uniform(2.5, 3.2))
 
-    # 5. Thoát khung bình luận (phím Back an toàn)
-    log("Thoát khung bình luận...")
-    adb.keyevent(device_id, 4)
-    time.sleep(1.0)
+    # 5. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm
+    log("Đã đăng bình luận Facebook thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
+    try:
+        adb.keyevent(device_id, 4)
+        time.sleep(0.5)
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
+        if hasattr(adb, "clear_recent_apps"):
+            adb.clear_recent_apps(device_id)
+        adb.keyevent(device_id, 3)
+        time.sleep(1.0)
+    except Exception as e:
+        log(f"Cảnh báo dọn dẹp: {e}")
 
-    log("Đã đăng bình luận Facebook thành công!")
+    log("Đã hoàn tất dọn dẹp thiết bị!")
     return True
 
 

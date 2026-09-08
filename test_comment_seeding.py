@@ -3,7 +3,7 @@
 import io
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 import comment_controller
 import notion_comment_sync
@@ -86,7 +86,8 @@ class TestCommentController(unittest.TestCase):
         )
         self.assertTrue(res)
         self.adb.input_text.assert_called_with(self.device_id, "Tư vấn cho mình với nha!")
-        self.adb.keyevent.assert_called_with(self.device_id, 4)
+        self.assertIn(call(self.device_id, 4), self.adb.keyevent.call_args_list)
+        self.assertIn(call(self.device_id, 3), self.adb.keyevent.call_args_list)
 
     @patch("time.sleep", return_value=None)
     def test_comment_cancelled_early(self, _mock_sleep):
@@ -404,8 +405,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.35))
-        self.assertEqual(y, int(1920 * 0.962))
+        self.assertEqual(x, int(1080 * 0.50))
+        self.assertEqual(y, int(1920 * 0.920))
 
     def test_find_tiktok_comment_icon_coords_calibrated(self):
         adb_mock = MagicMock()

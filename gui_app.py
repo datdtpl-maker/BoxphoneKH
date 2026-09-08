@@ -1571,8 +1571,8 @@ class GUIApp(ctk.CTk):
         self.after(5200, self._reset_operation_scrolls)
         self.after_idle(self._finish_module_ui_setup)
 
-        # Quét thiết bị khi vừa khởi động
-        self.refresh_devices_action()
+        # Quét thiết bị khi vừa khởi động (chạy sau khi mainloop đã sẵn sàng)
+        self.after(800, self.refresh_devices_action)
         # Thiết bị Box Phone có thể kết nối muộn hoặc tự bật lại cảm biến xoay.
         # Kiểm tra định kỳ để các app social luôn giữ hướng dọc.
         self.after(15000, self._portrait_guard_tick)
@@ -2059,12 +2059,17 @@ class GUIApp(ctk.CTk):
             try:
                 print("[Hệ thống] Đang quét cổng thiết bị USB/ADB...")
                 devices = main.get_ordered_devices()
-                self.after(
-                    0,
-                    lambda count=len(devices): self._set_device_status_badge(
-                        count
-                    ),
-                )
+                count = len(devices)
+                for _ in range(15):
+                    try:
+                        self.after(
+                            0,
+                            lambda c=count: self._set_device_status_badge(c),
+                        )
+                        break
+                    except Exception:
+                        time.sleep(0.2)
+
                 if devices:
                     print(f"[Hệ thống] ✅ Đã kết nối {len(devices)} thiết bị điện thoại Box Phone:")
                     for idx, dev in enumerate(devices):
@@ -2074,12 +2079,17 @@ class GUIApp(ctk.CTk):
                     print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
             finally:
                 if "btn_refresh" in self.__dict__:
-                    self.after(
-                        0,
-                        lambda: self.btn_refresh.configure(
-                            state="normal", text="Quét thiết bị"
-                        ),
-                    )
+                    for _ in range(15):
+                        try:
+                            self.after(
+                                0,
+                                lambda: self.btn_refresh.configure(
+                                    state="normal", text="Quét thiết bị"
+                                ),
+                            )
+                            break
+                        except Exception:
+                            time.sleep(0.2)
         self.run_in_thread(action)
 
     def _set_device_status_badge(self, count):
