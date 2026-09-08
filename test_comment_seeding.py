@@ -58,8 +58,9 @@ class TestCommentController(unittest.TestCase):
         first_cmd = calls[0][0][1]
         self.assertIn("com.facebook.katana", first_cmd)
 
+    @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_tiktok_comment_flow(self, _mock_sleep):
+    def test_post_tiktok_comment_flow(self, _mock_sleep, _mock_open):
         status_msgs = []
         res = comment_controller.post_tiktok_comment(
             self.adb,
@@ -413,7 +414,7 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
         self.assertEqual(x, int(1080 * 0.925))
-        self.assertEqual(y, int(1920 * 0.640))
+        self.assertEqual(y, int(1920 * 0.575))
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")

@@ -274,12 +274,46 @@ def wait_for_tiktok_video_ready(
     return True
 
 
-def find_tiktok_comment_icon_via_template(
-    adb, device_id: str, width: int, height: int
-) -> Optional[tuple[int, int]]:
-    """Dùng OpenCV đa tỉ lệ để nhận diện quả bóng chat 3 chấm trực tiếp từ màn hình thiết bị."""
+def capture_screen_fast(adb, device_id: str) -> Optional[np.ndarray]:
+    """Chụp màn hình siêu tốc không qua ổ đĩa bằng adb exec-out screencap -p."""
     if not CV2_AVAILABLE:
         return None
+    try:
+        adb_path = getattr(adb, "adb_path", None)
+        if not adb_path or not os.path.exists(adb_path):
+            import config
+            adb_path = config.ADB_PATH
+
+        startupinfo = None
+        if os.name == 'nt':
+            import subprocess
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0
+
+        import subprocess
+        cmd = [adb_path, "-s", device_id, "exec-out", "screencap", "-p"]
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=8,
+            startupinfo=startupinfo,
+        )
+        if proc.returncode == 0 and len(proc.stdout) > 5000:
+            raw = proc.stdout
+            if b"\r\r\n" in raw:
+                raw = raw.replace(b"\r\r\n", b"\n")
+            elif b"\r\n" in raw:
+                raw = raw.replace(b"\r\n", b"\n")
+            arr = np.frombuffer(raw, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                return img
+    except Exception:
+        pass
+
+    # Fallback chụp qua file tạm trên sdcard nếu exec-out không hỗ trợ
     remote_png = f"/sdcard/sc_cmt_{device_id}.png"
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
     local_png = os.path.join(tempfile.gettempdir(), f"sc_cmt_{safe_dev}.png")
@@ -289,40 +323,8 @@ def find_tiktok_comment_icon_via_template(
         if code == 0:
             adb.execute_adb(device_id, ["pull", remote_png, local_png])
             if os.path.exists(local_png) and os.path.getsize(local_png) > 1000:
-                screen = cv2.imread(local_png)
-                if screen is not None:
-                    sh, sw = screen.shape[:2]
-                    tpl_bytes = base64.b64decode(TIKTOK_COMMENT_BUBBLE_B64)
-                    tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-                    if tpl is not None:
-                        gray_screen = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
-                        gray_tpl = cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY)
-                        rx1, rx2 = int(sw * 0.70), sw
-                        ry1, ry2 = int(sh * 0.35), int(sh * 0.85)
-                        roi = gray_screen[ry1:ry2, rx1:rx2]
-
-                        best_val = -1
-                        best_pt = None
-                        for scale in np.linspace(0.35, 3.2, 35):
-                            tw = int(gray_tpl.shape[1] * scale)
-                            th = int(gray_tpl.shape[0] * scale)
-                            if tw < 10 or th < 10 or tw >= roi.shape[1] or th >= roi.shape[0]:
-                                continue
-                            resized = cv2.resize(
-                                gray_tpl,
-                                (tw, th),
-                                interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR,
-                            )
-                            res = cv2.matchTemplate(roi, resized, cv2.TM_CCOEFF_NORMED)
-                            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                            if max_val > best_val:
-                                best_val = max_val
-                                best_pt = (rx1 + max_loc[0] + tw // 2, ry1 + max_loc[1] + th // 2)
-
-                        if best_val >= 0.70 and best_pt is not None:
-                            scale_x = width / float(sw)
-                            scale_y = height / float(sh)
-                            return int(best_pt[0] * scale_x), int(best_pt[1] * scale_y)
+                img = cv2.imread(local_png)
+                return img
     except Exception:
         pass
     finally:
@@ -331,6 +333,55 @@ def find_tiktok_comment_icon_via_template(
                 os.remove(local_png)
             except Exception:
                 pass
+    return None
+
+
+def find_tiktok_comment_icon_via_template(
+    adb, device_id: str, width: int, height: int
+) -> Optional[tuple[int, int]]:
+    """Dùng OpenCV đa tỉ lệ để nhận diện quả bóng chat 3 chấm trực tiếp từ màn hình thiết bị."""
+    if not CV2_AVAILABLE:
+        return None
+    screen = capture_screen_fast(adb, device_id)
+    if screen is None:
+        return None
+    try:
+        sh, sw = screen.shape[:2]
+        tpl_bytes = base64.b64decode(TIKTOK_COMMENT_BUBBLE_B64)
+        tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl is None:
+            return None
+
+        gray_screen = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+        gray_tpl = cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY)
+        rx1, rx2 = int(sw * 0.70), sw
+        ry1, ry2 = int(sh * 0.35), int(sh * 0.85)
+        roi = gray_screen[ry1:ry2, rx1:rx2]
+
+        best_val = -1
+        best_pt = None
+        for scale in np.linspace(0.20, 3.5, 45):
+            tw = int(gray_tpl.shape[1] * scale)
+            th = int(gray_tpl.shape[0] * scale)
+            if tw < 8 or th < 8 or tw >= roi.shape[1] or th >= roi.shape[0]:
+                continue
+            resized = cv2.resize(
+                gray_tpl,
+                (tw, th),
+                interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR,
+            )
+            res = cv2.matchTemplate(roi, resized, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if max_val > best_val:
+                best_val = max_val
+                best_pt = (rx1 + max_loc[0] + tw // 2, ry1 + max_loc[1] + th // 2)
+
+        if best_val >= 0.65 and best_pt is not None:
+            scale_x = width / float(sw)
+            scale_y = height / float(sh)
+            return int(best_pt[0] * scale_x), int(best_pt[1] * scale_y)
+    except Exception:
+        pass
     return None
 
 
@@ -350,8 +401,12 @@ def find_tiktok_comment_icon_coords(
     try:
         adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
         code, _, _ = adb.execute_adb(
-            device_id, ["shell", "uiautomator", "dump", xml_file]
+            device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file]
         )
+        if code != 0:
+            code, _, _ = adb.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file]
+            )
         if code == 0:
             adb.execute_adb(device_id, ["pull", xml_file, local_xml])
             if os.path.exists(local_xml):
@@ -402,14 +457,24 @@ def find_tiktok_comment_icon_coords(
                     if any(k in desc or k in txt or k in rid for k in ("bookmark", "lưu", "favorite", "collect", "save")):
                         bookmark_cy = cy
 
-                    # Thu thập các phần tử ở dải độ cao đặc trưng của nút bình luận (55% - 68% chiều cao màn hình)
-                    if 0.55 * height <= cy <= 0.68 * height and elem.get("clickable", "false") == "true":
+                    # Thu thập các phần tử ở dải độ cao đặc trưng của nút bình luận (50% - 68% chiều cao màn hình)
+                    if 0.50 * height <= cy <= 0.68 * height and elem.get("clickable", "false") == "true":
                         right_rail_elements.append((cx, cy))
 
-                # Nếu không bắt được nhãn text nhưng bắt được nút Like và Bookmark: icon bình luận luôn nằm chính giữa
+                # Nếu bắt được cả nút Like và Bookmark: icon bình luận luôn nằm chính giữa hai nút
                 if like_cy is not None and bookmark_cy is not None and bookmark_cy > like_cy:
                     mid_y = (like_cy + bookmark_cy) // 2
                     return int(width * 0.925), mid_y
+
+                # Nếu chỉ bắt được nút Bookmark: nút Bình luận LUÔN nằm ngay trên Bookmark khoảng 7.5% chiều cao màn hình!
+                if bookmark_cy is not None:
+                    predicted_y = bookmark_cy - int(height * 0.075)
+                    return int(width * 0.925), predicted_y
+
+                # Nếu chỉ bắt được nút Like: nút Bình luận LUÔN nằm ngay dưới Like khoảng 7.5% chiều cao màn hình!
+                if like_cy is not None:
+                    predicted_y = like_cy + int(height * 0.075)
+                    return int(width * 0.925), predicted_y
 
                 # Nếu phát hiện phần tử tương tác ở dải độ cao đặc trưng của bình luận
                 if right_rail_elements:
@@ -423,9 +488,9 @@ def find_tiktok_comment_icon_coords(
             except Exception:
                 pass
 
-    # 3. Tọa độ chuẩn hiệu chuẩn thực tế (tâm quả bóng chat bình luận 3 chấm):
-    # x = 92.5%, y = 64.0% (nằm ngay tâm quả bóng chat, dưới nút Tim và trên nút Bookmark)
-    return int(width * 0.925), int(height * 0.640)
+    # 3. Tọa độ chuẩn hiệu chuẩn thực tế:
+    # Mặc định ưu tiên Layout B (y = 57.5%, tương ứng máy S5) để không bao giờ chạm vào nút Bookmark ở 64%!
+    return int(width * 0.925), int(height * 0.575)
 
 
 def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
@@ -435,7 +500,9 @@ def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
     local_xml = os.path.join(tempfile.gettempdir(), f"chk_cmt_{safe_dev}.xml")
     try:
         adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
-        code, _, _ = adb.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        code, _, _ = adb.execute_adb(device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file])
+        if code != 0:
+            code, _, _ = adb.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
         if code == 0:
             adb.execute_adb(device_id, ["pull", xml_file, local_xml])
             if os.path.exists(local_xml) and os.path.getsize(local_xml) > 100:
@@ -450,13 +517,14 @@ def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
                     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
                     cy = (int(m.group(2)) + int(m.group(4))) // 2 if m else 0
 
-                    if "edittext" in cls_name and cy >= height * 0.50:
+                    if "edittext" in cls_name and cy >= height * 0.40:
                         return True
                     if any(
                         kw in txt or kw in desc or kw in rid
                         for kw in (
                             "thêm bình luận", "add comment", "comment_edit_text",
-                            "comment_list", "et_comment", "c0e", "desc_comment"
+                            "comment_list", "et_comment", "c0e", "desc_comment",
+                            "đóng", "close", "viết bình luận"
                         )
                     ):
                         return True
@@ -470,8 +538,17 @@ def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
                 os.remove(local_xml)
             except Exception:
                 pass
-    # Nếu uiautomator dump không trích xuất được hoặc môi trường test mock không tạo file
-    return True
+
+    # Nếu uiautomator dump không trích xuất được: kiểm tra qua dumpsys window focus
+    try:
+        _, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
+        lowered = (out or "").casefold()
+        if any(w in lowered for w in ("comment", "bottomsheet", "dialog", "inputmethod")):
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def find_comment_input_coords(
@@ -649,10 +726,10 @@ def post_tiktok_comment(
         if attempt == 1:
             target_x, target_y = comment_x, comment_y
         elif attempt == 2:
-            target_x, target_y = int(width * 0.925), int(height * 0.640)
-            log(f"Thử lại mở khung bình luận lần 2 tại ({target_x}, {target_y})...")
+            target_x, target_y = int(width * 0.925), int(height * 0.635)
+            log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout A ({target_x}, {target_y})...")
         else:
-            target_x, target_y = int(width * 0.925), int(height * 0.655)
+            target_x, target_y = int(width * 0.925), int(height * 0.550)
             log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
 
         adb.tap(device_id, target_x, target_y)
