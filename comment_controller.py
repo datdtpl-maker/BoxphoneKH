@@ -628,8 +628,9 @@ def find_comment_input_coords(
         # y = 96.2% (tâm thanh input bar sát đáy màn hình của comment sheet)
         return int(width * 0.450), int(height * 0.962)
     else:
-        # Tọa độ ô nhập Facebook: x=50%, y=92.0%
-        return int(width * 0.500), int(height * 0.920)
+        # Tọa độ ô nhập Facebook (Image 3: "Bình luận dưới tên..."):
+        # x = 40.0%, y = 92.7% (ở giữa thanh nhập, ngay trên bàn phím)
+        return int(width * 0.400), int(height * 0.927)
 
 
 def ensure_comment_input_ready(
@@ -651,9 +652,9 @@ def ensure_comment_input_ready(
     # Danh sách các điểm chạm ưu tiên trên thanh ô nhập để kích hoạt bàn phím chắc chắn 100%
     candidates = [
         (input_x, input_y),
+        (input_x, int(input_y - height * 0.012)),
+        (input_x, int(input_y + height * 0.012)),
         (int(width * 0.450), int(height * 0.962)),
-        (int(width * 0.450), int(height * 0.950)),
-        (int(width * 0.400), int(height * 0.970)),
     ]
 
     for idx, (tx, ty) in enumerate(candidates):
@@ -834,6 +835,154 @@ def post_tiktok_comment(
     return True
 
 
+def find_facebook_comment_icon_coords(
+    adb, device_id: str, width: int, height: int
+) -> tuple[int, int]:
+    """Tìm tọa độ icon Bình luận Facebook bằng UI dump, Geometric Landmark Tracking (giữa Like và Share) hoặc tọa độ hiệu chuẩn."""
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    xml_file = f"/sdcard/dump_fb_{safe_dev}.xml"
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_fb_{safe_dev}.xml")
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file]
+        )
+        if code != 0:
+            code, _, _ = adb.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file]
+            )
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml])
+            if os.path.exists(local_xml):
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                like_node = None
+                share_node = None
+                comment_node = None
+
+                for elem in root.iter():
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    if not m:
+                        continue
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    # Nút tương tác Facebook luôn nằm ở nửa dưới màn hình
+                    if cy < height * 0.60:
+                        continue
+
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+                    combined = desc + " " + txt + " " + rid
+
+                    is_btn = (
+                        elem.get("clickable") == "true"
+                        or "button" in (elem.get("class") or "").casefold()
+                        or elem.get("clickable") is None
+                    )
+                    if not is_btn:
+                        continue
+
+                    # 1. Nhận diện nút Bình luận trực tiếp
+                    if any(k in combined for k in ("bình luận", "comment", "viết bình luận", "phản hồi")):
+                        comment_node = (cx, cy)
+
+                    # 2. Nhận diện nút Like / Thích
+                    if any(k in combined for k in ("thích", "like", "bày tỏ cảm xúc", "react")):
+                        like_node = (cx, cy)
+
+                    # 3. Nhận diện nút Share / Chia sẻ
+                    if any(k in combined for k in ("chia sẻ", "share", "gửi bài")):
+                        share_node = (cx, cy)
+
+                # Nếu tìm thấy trực tiếp nút Comment
+                if comment_node is not None:
+                    return comment_node
+
+                # Geometric Landmark Tracking: Icon bình luận LUÔN NẰM CHÍNH GIỮA Like và Share trên cùng hàng
+                if like_node is not None and share_node is not None and abs(like_node[1] - share_node[1]) < height * 0.08:
+                    mid_x = (like_node[0] + share_node[0]) // 2
+                    mid_y = (like_node[1] + share_node[1]) // 2
+                    return mid_x, mid_y
+
+                # Nếu chỉ tìm thấy nút Like: nút Bình luận nằm cùng hàng ngang ngay bên phải nút Like
+                if like_node is not None:
+                    return like_node[0] + int(width * 0.13), like_node[1]
+
+                # Nếu chỉ tìm thấy nút Share: nút Bình luận nằm cùng hàng ngang ngay bên trái nút Share
+                if share_node is not None:
+                    return share_node[0] - int(width * 0.13), share_node[1]
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    # Tọa độ hiệu chuẩn thực tế (Mặc định Case 1: Bài viết 1 ảnh trên Feed):
+    # x = 21.4%, y = 92.4% (nằm ngay tâm quả bóng chat bình luận giữa nút Thích và Chia sẻ)
+    return int(width * 0.214), int(height * 0.924)
+
+
+def is_facebook_comment_sheet_open(adb, device_id: str, height: int) -> bool:
+    """Kiểm tra xem khung bình luận Facebook đã mở thành công hay chưa."""
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    xml_file = f"/sdcard/chk_fb_{safe_dev}.xml"
+    local_xml = os.path.join(tempfile.gettempdir(), f"chk_fb_{safe_dev}.xml")
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file])
+        if code != 0:
+            code, _, _ = adb.execute_adb(device_id, ["shell", "uiautomator", "dump", xml_file])
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml])
+            if os.path.exists(local_xml) and os.path.getsize(local_xml) > 100:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+                for elem in root.iter():
+                    cls_name = (elem.get("class") or "").casefold()
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    cy = (int(m.group(2)) + int(m.group(4))) // 2 if m else 0
+
+                    if "edittext" in cls_name and cy >= height * 0.50:
+                        return True
+                    if any(
+                        kw in txt or kw in desc or kw in rid
+                        for kw in (
+                            "bình luận dưới tên", "viết bình luận", "không gian này là của bạn",
+                            "hãy là người đầu tiên", "chia sẻ suy nghĩ", "write a comment",
+                            "comment as", "comment_edit_text", "comment_box"
+                        )
+                    ):
+                        return True
+                return False
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    try:
+        _, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
+        lowered = (out or "").casefold()
+        if any(w in lowered for w in ("comment", "bottomsheet", "dialog", "inputmethod", "flyout")):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def post_facebook_comment(
     adb,
     device_id: str,
@@ -879,59 +1028,78 @@ def post_facebook_comment(
             return False
         time.sleep(1.0)
 
-    # 1. Bấm nút Mở khung bình luận
+    # 1. Bấm nút Mở khung bình luận (3 lần thử thích ứng đa giao diện)
     log("Mở khung bình luận Facebook...")
-    coords = None
-    try:
-        coords = adb.find_element_coords_by_text(device_id, "bình luận")
-    except Exception:
-        coords = None
+    comment_x, comment_y = find_facebook_comment_icon_coords(adb, device_id, width, height)
+    log(f"Chạm icon Bình luận Facebook tại ({comment_x}, {comment_y})...")
 
-    if coords:
-        adb.tap(device_id, coords[0], coords[1])
-    else:
-        # Nếu là Reels, icon bình luận nằm bên phải tương tự TikTok
-        # Nếu là post thường, nút bình luận nằm ở 80-85% chiều cao màn hình
-        is_reel = "reel" in url.casefold() or "watch" in url.casefold()
-        if is_reel:
-            btn_x = int(width * 0.92)
-            btn_y = int(height * 0.60)
+    sheet_opened = False
+    for attempt in range(1, 4):
+        if is_cancelled and is_cancelled():
+            return False
+
+        if attempt == 1:
+            target_x, target_y = comment_x, comment_y
+        elif attempt == 2:
+            # Biến thể xem chi tiết ảnh / Video / Thước phim (Image 2 & Image 5): x = 22.0%, y = 96.0%
+            target_x, target_y = int(width * 0.220), int(height * 0.960)
+            log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ thanh chi tiết ({target_x}, {target_y})...")
         else:
-            btn_x = int(width * 0.50)
-            btn_y = int(height * 0.82)
-        adb.tap(device_id, btn_x, btn_y)
+            # Chạm vào giữa ảnh để kích hoạt thanh công cụ rồi tap nút comment
+            log("Lần 2 chưa mở được, chạm kích hoạt màn hình và thử lại...")
+            adb.tap(device_id, int(width * 0.50), int(height * 0.50))
+            time.sleep(0.5)
+            target_x, target_y = int(width * 0.172), int(height * 0.960)
 
-    time.sleep(random.uniform(1.8, 2.5))
-    if is_cancelled and is_cancelled():
+        adb.tap(device_id, target_x, target_y)
+        time.sleep(random.uniform(1.8, 2.2))
+
+        if is_facebook_comment_sheet_open(adb, device_id, height):
+            sheet_opened = True
+            log("Đã mở khung bình luận Facebook thành công!")
+            break
+
+    if not sheet_opened:
+        log("CẢNH BÁO: Không mở được khung bình luận Facebook! Hủy tác vụ an toàn.")
+        try:
+            adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
+            if hasattr(adb, "clear_recent_apps"):
+                adb.clear_recent_apps(device_id)
+            adb.keyevent(device_id, 3)
+        except Exception:
+            pass
         return False
 
     # 2. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
     input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
-    ensure_comment_input_ready(adb, device_id, input_x, input_y, status_callback=status_callback)
+    ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
     time.sleep(random.uniform(0.8, 1.2))
 
-    # 3. Gõ nội dung bình luận
-    log(f"Đang nhập nội dung: '{comment_text}'...")
+    # 3. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
+    log(f"Đang nhập nội dung từ Notion: '{comment_text}'...")
     if hasattr(adb, "ensure_ime"):
         try:
             adb.ensure_ime(device_id)
         except Exception:
             pass
     adb.input_text(device_id, comment_text)
-    time.sleep(random.uniform(1.2, 1.8))
+    time.sleep(random.uniform(1.2, 1.6))
 
     if is_cancelled and is_cancelled():
         return False
 
-    # 4. Bấm nút Gửi bình luận
-    log("Tìm nút Gửi bình luận...")
+    # 4. Bấm đúng vào icon màu xanh để gửi bình luận
+    log("Tìm nút gửi bình luận màu xanh...")
+    time.sleep(0.8)
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
-    log(f"Chạm nút Gửi Facebook tại ({send_x}, {send_y})...")
+    log(f"Chạm nút gửi màu xanh Facebook tại ({send_x}, {send_y})...")
     adb.tap(device_id, send_x, send_y)
     time.sleep(0.4)
+    # Kích hoạt phím Enter / Action Send dự phòng
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(0.4)
+    # Chạm lại nút gửi màu xanh một lần nữa để đảm bảo nhận touch event 100%
     adb.tap(device_id, send_x, send_y)
     time.sleep(random.uniform(2.5, 3.2))
 
@@ -940,11 +1108,11 @@ def post_facebook_comment(
     try:
         adb.keyevent(device_id, 4)
         time.sleep(0.5)
-        adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
         if hasattr(adb, "clear_recent_apps"):
             adb.clear_recent_apps(device_id)
+        adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
         adb.keyevent(device_id, 3)
-        time.sleep(1.0)
+        time.sleep(0.8)
     except Exception as e:
         log(f"Cảnh báo dọn dẹp: {e}")
 
@@ -990,6 +1158,44 @@ def find_tiktok_send_button_via_cv(
     return None
 
 
+def find_facebook_send_button_via_cv(
+    adb, device_id: str, width: int, height: int
+) -> Optional[tuple[int, int]]:
+    """Tìm tọa độ nút gửi máy bay giấy màu xanh Facebook bằng OpenCV Color Blob Detection."""
+    screen = capture_screen_fast(adb, device_id)
+    if screen is None:
+        return None
+    try:
+        sh, sw = screen.shape[:2]
+        # Vùng chứa nút gửi Facebook: góc dưới bên phải (x >= 70%, y >= 80%)
+        rx1, rx2 = int(sw * 0.70), sw
+        ry1, ry2 = int(sh * 0.80), sh
+        roi = screen[ry1:ry2, rx1:rx2]
+
+        # Lọc màu xanh Facebook đặc trưng (BGR: B > 160, R < 100, G < 160)
+        mask = (roi[:, :, 0] > 160) & (roi[:, :, 2] < 100) & (roi[:, :, 1] < 160)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask.astype(np.uint8))
+        if num_labels > 1:
+            best_idx = 1
+            max_area = 0
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area > max_area:
+                    max_area = area
+                    best_idx = i
+            # Nút gửi máy bay giấy xanh có diện tích đáng kể (thường > 100 pixel trên Full HD, > 25 trên màn hình nhỏ)
+            if max_area >= 25:
+                cx_roi, cy_roi = centroids[best_idx]
+                abs_x = rx1 + cx_roi
+                abs_y = ry1 + cy_roi
+                scale_x = width / float(sw)
+                scale_y = height / float(sh)
+                return int(abs_x * scale_x), int(abs_y * scale_y)
+    except Exception:
+        pass
+    return None
+
+
 def find_send_button_coords(
     adb, device_id: str, platform: str, width: int, height: int
 ) -> tuple[int, int]:
@@ -997,9 +1203,15 @@ def find_send_button_coords(
     clean_p = (platform or "").strip().casefold()
     is_tiktok = "tiktok" in clean_p
 
-    # 1. Với TikTok: Ưu tiên phát hiện bằng OpenCV trực tiếp nhận diện nút tròn đỏ mũi tên trắng
+    # 1. Ưu tiên phát hiện bằng OpenCV:
+    # - TikTok: nhận diện nút tròn đỏ mũi tên trắng
+    # - Facebook: nhận diện nút máy bay giấy màu xanh
     if is_tiktok:
         cv_coords = find_tiktok_send_button_via_cv(adb, device_id, width, height)
+        if cv_coords is not None:
+            return cv_coords
+    else:
+        cv_coords = find_facebook_send_button_via_cv(adb, device_id, width, height)
         if cv_coords is not None:
             return cv_coords
 
@@ -1068,8 +1280,9 @@ def find_send_button_coords(
         # x = 87.6% (tâm nút tròn đỏ), y = 62.4% (nằm dưới ô nhập ở góc phải)
         return int(width * 0.876), int(height * 0.624)
     else:
-        # Tọa độ nút gửi Facebook: x=90.5%, y=96.0%
-        return int(width * 0.905), int(height * 0.960)
+        # Tọa độ nút gửi máy bay giấy xanh Facebook hiệu chuẩn thực tế:
+        # x = 95.0% (sát lề phải), y = 93.4% (ngang ô soạn thảo)
+        return int(width * 0.950), int(height * 0.934)
 
 
 def parse_comment_devices(selection_text: str, total_tasks: int, all_devices: list) -> list:

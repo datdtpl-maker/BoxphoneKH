@@ -74,8 +74,9 @@ class TestCommentController(unittest.TestCase):
         self.adb.input_text.assert_called_with(self.device_id, "Sản phẩm rất tốt!")
         self.assertTrue(any("thành công" in msg for msg in status_msgs))
 
+    @patch("comment_controller.is_facebook_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_facebook_comment_flow(self, _mock_sleep):
+    def test_post_facebook_comment_flow(self, _mock_sleep, _mock_open):
         status_msgs = []
         res = comment_controller.post_facebook_comment(
             self.adb,
@@ -387,8 +388,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertEqual(y, int(1920 * 0.624))
 
         x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
-        self.assertEqual(x_fb, int(1080 * 0.905))
-        self.assertEqual(y_fb, int(1920 * 0.960))
+        self.assertEqual(x_fb, int(1080 * 0.950))
+        self.assertEqual(y_fb, int(1920 * 0.934))
 
     def test_clean_platform_url_and_extract_video_id(self):
         raw_tiktok = "https://www.tiktok.com/@khaihoanskincare/video/7682027295724490004?is_from_webapp=1&sender_device=pc"
@@ -537,6 +538,85 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock.execute_adb.return_value = (0, "", "")
         is_open = comment_controller.is_tiktok_comment_sheet_open(adb_mock, "dev1", 1920)
         self.assertFalse(is_open)
+
+    def test_find_facebook_comment_icon_coords_calibrated(self):
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (1, "", "")
+        x, y = comment_controller.find_facebook_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, int(1080 * 0.214))
+        self.assertEqual(y, int(1920 * 0.924))
+
+    @patch("os.path.exists", return_value=True)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_find_facebook_comment_icon_coords_landmark(self, _rm, mock_parse, _exists):
+        # Like button at cx=100, cy=1800; Share button at cx=500, cy=1800
+        # Comment icon should be at cx=(100+500)//2=300, cy=1800
+        xml_feed = """<hierarchy>
+          <node class='android.widget.Button' content-desc='Thích' bounds='[50,1750][150,1850]' />
+          <node class='android.widget.Button' content-desc='Chia sẻ' bounds='[450,1750][550,1850]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_feed)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        x, y = comment_controller.find_facebook_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, 300)
+        self.assertEqual(y, 1800)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.getsize", return_value=500)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_is_facebook_comment_sheet_open_true(self, _rm, mock_parse, _size, _exists):
+        xml_open = """<hierarchy>
+          <node class='android.widget.EditText' text='Bình luận dưới tên...' bounds='[50,1700][900,1850]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_open)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        is_open = comment_controller.is_facebook_comment_sheet_open(adb_mock, "dev1", 1920)
+        self.assertTrue(is_open)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.getsize", return_value=500)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_is_facebook_comment_sheet_open_false(self, _rm, mock_parse, _size, _exists):
+        xml_closed = """<hierarchy>
+          <node class='android.widget.TextView' text='Bảng feed' bounds='[10,1800][200,1900]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_closed)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        is_open = comment_controller.is_facebook_comment_sheet_open(adb_mock, "dev1", 1920)
+        self.assertFalse(is_open)
+
+    @patch("comment_controller.capture_screen_fast")
+    def test_find_facebook_send_button_via_cv(self, mock_capture):
+        import numpy as np
+        # Tạo ảnh giả lập 1080x1920 có nút xanh Facebook ở vùng ROI (x=950, y=1790)
+        img = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        # BGR: B=200, G=120, R=50
+        img[1780:1820, 930:970] = [200, 120, 50]
+        mock_capture.return_value = img
+
+        adb_mock = MagicMock()
+        coords = comment_controller.find_facebook_send_button_via_cv(adb_mock, "dev1", 1080, 1920)
+        self.assertIsNotNone(coords)
+        self.assertAlmostEqual(coords[0], 950, delta=15)
+        self.assertAlmostEqual(coords[1], 1800, delta=15)
 
 
 if __name__ == "__main__":
