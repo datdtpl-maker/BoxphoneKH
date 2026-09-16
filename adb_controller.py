@@ -2876,6 +2876,9 @@ class ADBController:
                 device_id, status_callback=status_callback
             ):
                 return False
+        self.recover_tiktok_if_blocked_by_captcha_or_link(
+            device_id, status_callback=status_callback
+        )
         if self.advance_tiktok_feed(device_id):
             return True
         if status_callback:
@@ -2883,6 +2886,9 @@ class ADBController:
                 device_id,
                 "[TikTok] Feed đứng • Back và mở lại TikTok để thử lại...",
             )
+        self.recover_tiktok_if_blocked_by_captcha_or_link(
+            device_id, status_callback=status_callback
+        )
         if not self.is_tiktok_in_foreground(device_id):
             return False
 
@@ -5137,10 +5143,25 @@ class ADBController:
             "turn on notifications",
             "dong bo danh ba",
             "sync contacts",
+            "verify to continue",
+            "drag the puzzle",
+            "puzzle piece",
+            "puzzle",
+            "xac minh de tiep tuc",
+            "keo manh ghep",
+            "keo thanh truot",
+            "xac minh",
+            "xac thuc",
+            "verification",
+            "dang tren tiktok",
+            "mo tiktok",
+            "kham pha them",
+            "www.tiktok.com",
+            "tiktok.com",
         )
         close_markers = {
             "close", "dong", "not now", "de sau", "later", "skip",
-            "bo qua", "cancel", "huy",
+            "bo qua", "cancel", "huy", "mo tiktok", "open tiktok",
         }
         popup_found = False
         close_coords = None
@@ -5179,6 +5200,209 @@ class ADBController:
         time.sleep(0.8)
         self.lock_portrait(device_id, retries=3)
         return True
+
+    def _safe_status_callback(self, callback, device_id, message):
+        """Gọi callback an toàn bất kể nhận 1 tham số (message) hay 2 tham số (device_id, message)."""
+        if not callback:
+            return
+        try:
+            callback(device_id, message)
+        except TypeError:
+            try:
+                callback(message)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def recover_tiktok_if_blocked_by_captcha_or_link(
+        self, device_id, status_callback=None
+    ):
+        """
+        Tự động phát hiện và thoát khỏi màn hình kẹt:
+        1. Captcha kéo mảnh ghép / Verify to continue: Bấm nút X, bấm Back hoặc force-stop mở lại TikTok.
+        2. Webview / Nhảy link ra ngoài (www.tiktok.com, browser, popup 'Mở TikTok', 'Để sau'):
+           Bấm 'Mở TikTok' / 'Để sau', bấm nút đóng X hoặc Back để quay lại màn hình chính TikTok.
+        """
+        # 1. Kiểm tra nếu app bị văng ra trình duyệt ngoài hoặc app khác
+        if not self.is_tiktok_in_foreground(device_id):
+            self._safe_status_callback(
+                status_callback,
+                device_id,
+                "[TikTok Recovery] Phát hiện bị nhảy link ra ngoài ứng dụng! Đang mở lại TikTok...",
+            )
+            self.keyevent(device_id, 4)
+            time.sleep(0.5)
+            self.launch_tiktok(device_id)
+            time.sleep(1.5)
+            self.ensure_tiktok_home_feed(device_id)
+            return True
+
+        # 2. Kiểm tra foreground activity (nếu đang ở Webview / CrossPlatformActivity)
+        activity = (self.get_tiktok_foreground_activity(device_id) or "").casefold()
+        is_webview = any(
+            kw in activity
+            for kw in (
+                "crossplatform",
+                "webview",
+                "browser",
+                "secshare",
+                "compliance",
+            )
+        )
+
+        # 3. Đọc UI hierarchy để tìm dấu hiệu Captcha hoặc Popup Webview
+        root = self._get_tiktok_ui_root(device_id, "tt_block_check")
+        has_captcha = False
+        has_webview_content = is_webview
+        close_node = None
+        open_tiktok_node = None
+        later_node = None
+
+        if root is not None:
+            captcha_markers = (
+                "verify to continue",
+                "drag the puzzle",
+                "puzzle piece",
+                "puzzle",
+                "xac minh de tiep tuc",
+                "keo manh ghep",
+                "keo thanh truot",
+                "xac minh",
+                "xac thuc",
+                "verification",
+            )
+            webview_markers = (
+                "www.tiktok.com",
+                "tiktok.com",
+                "dang tren tiktok",
+                "mo tiktok",
+                "kham pha them",
+                "de sau",
+            )
+
+            parent_map = {
+                child: parent for parent in root.iter() for child in parent
+            }
+
+            for node in root.iter():
+                text_raw = f"{node.get('text', '')} {node.get('content-desc', '')}"
+                label = self._normalize_tiktok_identity(text_raw)
+                resource_id = node.get("resource-id", "").casefold()
+
+                if any(marker in label for marker in captcha_markers) or "captcha" in resource_id:
+                    has_captcha = True
+
+                if any(marker in label for marker in webview_markers):
+                    has_webview_content = True
+
+                if "mo tiktok" in label and not open_tiktok_node:
+                    clickable = node
+                    while clickable is not None and clickable.get("clickable", "false") != "true":
+                        clickable = parent_map.get(clickable)
+                    open_tiktok_node = clickable if clickable is not None else node
+
+                if "de sau" in label and not later_node:
+                    clickable = node
+                    while clickable is not None and clickable.get("clickable", "false") != "true":
+                        clickable = parent_map.get(clickable)
+                    later_node = clickable if clickable is not None else node
+
+                is_close_label = any(
+                    c in label for c in ("close", "dong", "cancel", "huy", "skip", "bo qua")
+                )
+                is_close_id = any(
+                    c in resource_id for c in ("close", "btn_close", "cancel", "dismiss")
+                )
+                bounds = node.get("bounds", "")
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                if m:
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    node_w = x2 - x1
+                    node_h = y2 - y1
+                    if (is_close_label or is_close_id or label == "x") and node_w < 200 and node_h < 200:
+                        close_node = node
+
+        # 4. Xử lý thoát khi phát hiện Webview / Nhảy link
+        if has_webview_content:
+            self._safe_status_callback(
+                status_callback,
+                device_id,
+                "[TikTok Recovery] Phát hiện màn hình bị nhảy link/Webview! Đang bấm quay lại...",
+            )
+            if open_tiktok_node is not None:
+                coords = self._element_center(open_tiktok_node)
+                if coords:
+                    self.tap(device_id, coords[0], coords[1])
+                    time.sleep(1.2)
+            elif later_node is not None:
+                coords = self._element_center(later_node)
+                if coords:
+                    self.tap(device_id, coords[0], coords[1])
+                    time.sleep(0.8)
+            elif close_node is not None:
+                coords = self._element_center(close_node)
+                if coords:
+                    self.tap(device_id, coords[0], coords[1])
+                    time.sleep(0.8)
+
+            self.keyevent(device_id, 4)
+            time.sleep(0.8)
+            self.lock_portrait(device_id, retries=3)
+
+            new_activity = (self.get_tiktok_foreground_activity(device_id) or "").casefold()
+            if any(kw in new_activity for kw in ("crossplatform", "webview", "browser")) or not self.is_tiktok_in_foreground(device_id):
+                self.keyevent(device_id, 4)
+                time.sleep(0.8)
+                self.launch_tiktok(device_id)
+
+            self.ensure_tiktok_home_feed(device_id)
+            return True
+
+        # 5. Xử lý thoát khi dính Captcha (Verify to continue / Puzzle)
+        if has_captcha:
+            self._safe_status_callback(
+                status_callback,
+                device_id,
+                "[TikTok Recovery] Phát hiện dính Captcha xác minh (Puzzle/Verify)! Đang bấm thoát...",
+            )
+            if close_node is not None:
+                coords = self._element_center(close_node)
+                if coords:
+                    self.tap(device_id, coords[0], coords[1])
+                    time.sleep(0.8)
+
+            self.keyevent(device_id, 4)
+            time.sleep(1.0)
+            self.lock_portrait(device_id, retries=3)
+
+            root_after = self._get_tiktok_ui_root(device_id, "tt_captcha_recheck")
+            still_captcha = False
+            if root_after is not None:
+                for node in root_after.iter():
+                    label = self._normalize_tiktok_identity(
+                        f"{node.get('text', '')} {node.get('content-desc', '')}"
+                    )
+                    if any(marker in label for marker in ("verify to continue", "drag the puzzle", "puzzle")):
+                        still_captcha = True
+                        break
+
+            if still_captcha:
+                self._safe_status_callback(
+                    status_callback,
+                    device_id,
+                    "[TikTok Recovery] Captcha bắt buộc • Khởi động lại TikTok để làm mới clip...",
+                )
+                self.execute_adb(device_id, ["shell", "am", "force-stop", config.TIKTOK_PACKAGE])
+                self.execute_adb(device_id, ["shell", "am", "force-stop", config.TIKTOK_PACKAGE_ALT])
+                time.sleep(1.0)
+                self.launch_tiktok(device_id)
+                time.sleep(2.0)
+
+            self.ensure_tiktok_home_feed(device_id)
+            return True
+
+        return False
 
     def launch_tiktok(self, device_id):
         """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
@@ -5300,9 +5524,11 @@ class ADBController:
         return self.is_tiktok_in_foreground(device_id)
 
     def find_and_click_tiktok_search(self, device_id):
-        """Mở Search; nếu kẹt Search cũ thì Back đúng một lần rồi mở lại."""
+        """Mở Search; nếu kẹt Search cũ, Captcha hoặc Webview thì tự động thoát và mở lại."""
         for attempt in range(2):
             self.dismiss_tiktok_location_popup(device_id)
+            self.dismiss_tiktok_blocking_popup(device_id)
+            self.recover_tiktok_if_blocked_by_captcha_or_link(device_id)
 
             # Trên trang kết quả, ưu tiên focus đúng EditText; không chạm nút
             # ba chấm/Filters ở góc phải.
@@ -5345,6 +5571,7 @@ class ADBController:
                     return True
 
             if attempt == 0:
+                self.recover_tiktok_if_blocked_by_captcha_or_link(device_id)
                 if not self._recover_tiktok_search_with_one_back(device_id):
                     return False
                 continue
@@ -6029,6 +6256,7 @@ class ADBController:
             if any(
                 value in (
                     "người dùng", "users", "people", "xem tất cả", "see all",
+                    "top", "hàng đầu", "hang dau", "tổng hợp", "tong hop", "photos",
                 )
                 for value in text_values
             ):
@@ -6068,30 +6296,110 @@ class ADBController:
             and (has_profile_action or video_nodes >= 2)
         )
 
-    def _switch_to_tiktok_users_tab(self, device_id, root=None):
-        """Chuyển sang tab Người dùng / Tài khoản trong kết quả tìm kiếm TikTok."""
+    def ensure_tiktok_search_top_tab(self, device_id, root=None, force=False):
+        """
+        Đảm bảo kết quả tìm kiếm luôn ở tab 'Top' (hoặc 'Hàng đầu').
+        Tuyệt đối không để kẹt ở tab Photos, Videos, Users...
+        Nếu đang ở tab khác hoặc force=True, tự động bấm chuyển về tab Top.
+        Trả về True nếu vừa bấm chuyển sang tab Top, False nếu đã ở tab Top.
+        """
         if root is None:
-            root = self._get_tiktok_ui_root(device_id, "tt_users_tab")
+            root = self._get_tiktok_ui_root(device_id, "tt_top_tab")
         if root is None:
             return False
+
         screen_width, screen_height = self.get_effective_screen_size(device_id)
+        tab_y_min = int(screen_height * 0.05)
+        tab_y_max = int(screen_height * 0.20)
+
+        top_elem = None
+        top_selected = False
+        other_tab_selected = None
+        other_tab_name = ""
+
+        tab_names_other = (
+            "photos", "videos", "users", "sounds", "shop", "ask", "live",
+            "anh", "video", "nguoi dung", "tai khoan", "am thanh", "cua hang",
+        )
+
         for elem in root.iter():
-            raw_text = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
-            norm = self._normalize_facebook_text(raw_text.replace("đ", "d").replace("Đ", "d"))
-            if any(k in norm for k in ("nguoi dung", "tai khoan", "users", "accounts")):
-                bounds = elem.get("bounds", "")
-                m = re.findall(r"\d+", bounds)
-                if len(m) >= 4:
-                    x1, y1, x2, y2 = map(int, m[:4])
-                    if int(screen_height * 0.06) <= y1 <= int(screen_height * 0.18):
-                        print(
-                            f"[Device {device_id[:6]}] Chuyển sang tab "
-                            f"'{raw_text.strip()}' tại ({(x1+x2)//2}, {(y1+y2)//2})..."
-                        )
-                        self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
-                        time.sleep(1.5)
-                        return True
+            raw_text = f"{elem.get('text', '')} {elem.get('content-desc', '')}".strip()
+            norm = self._normalize_tiktok_identity(raw_text)
+            bounds = elem.get("bounds", "")
+            m = re.findall(r"\d+", bounds)
+            if len(m) < 4:
+                continue
+            x1, y1, x2, y2 = map(int, m[:4])
+            if not (tab_y_min <= y1 <= tab_y_max):
+                continue
+
+            selected = elem.get("selected", "").lower() == "true"
+            if norm in ("top", "hang dau", "tong hop"):
+                top_elem = elem
+                if selected:
+                    top_selected = True
+            elif selected and any(k == norm or norm.startswith(k) for k in tab_names_other):
+                other_tab_selected = elem
+                other_tab_name = raw_text
+
+        # 1. Nếu đã xác nhận tab Top đang selected và không bị yêu cầu force
+        if top_selected and not other_tab_selected and not force:
+            return False
+
+        # 2. Nếu tìm thấy tab Top trên màn hình (đang hiển thị)
+        if top_elem is not None:
+            bounds = top_elem.get("bounds", "")
+            m = re.findall(r"\d+", bounds)
+            if len(m) >= 4:
+                x1, y1, x2, y2 = map(int, m[:4])
+                tap_x = (x1 + x2) // 2
+                tap_y = (y1 + y2) // 2
+                reason = f"đang ở tab '{other_tab_name}'" if other_tab_selected is not None else "đảm bảo kết quả ở Top"
+                print(
+                    f"[Device {device_id[:6]}][TikTok] Bấm chọn tab 'Top' tại ({tap_x}, {tap_y}) "
+                    f"({reason})..."
+                )
+                self.tap(device_id, tap_x, tap_y)
+                time.sleep(1.5)
+                return True
+
+        # 3. Nếu tab Top bị cuộn khuất sang bên trái do tab bar cuộn ngang:
+        if other_tab_selected is not None or force:
+            tab_y = int(screen_height * 0.11)
+            print(
+                f"[Device {device_id[:6]}][TikTok] Cuộn thanh tab về bên trái để tìm tab 'Top'..."
+            )
+            self.swipe(
+                device_id,
+                int(screen_width * 0.20),
+                tab_y,
+                int(screen_width * 0.80),
+                tab_y,
+                duration=350,
+            )
+            time.sleep(1.0)
+            new_root = self._get_tiktok_ui_root(device_id, "tt_top_tab_scroll")
+            if new_root is not None:
+                for elem in new_root.iter():
+                    raw_text = f"{elem.get('text', '')} {elem.get('content-desc', '')}".strip()
+                    norm = self._normalize_tiktok_identity(raw_text)
+                    bounds = elem.get("bounds", "")
+                    m = re.findall(r"\d+", bounds)
+                    if len(m) >= 4:
+                        x1, y1, x2, y2 = map(int, m[:4])
+                        if tab_y_min <= y1 <= tab_y_max and norm in ("top", "hang dau", "tong hop"):
+                            print(
+                                f"[Device {device_id[:6]}][TikTok] Bấm chọn tab 'Top' tại ({(x1+x2)//2}, {(y1+y2)//2})..."
+                            )
+                            self.tap(device_id, (x1 + x2) // 2, (y1 + y2) // 2)
+                            time.sleep(1.5)
+                            return True
+
         return False
+
+    def _switch_to_tiktok_users_tab(self, device_id, root=None):
+        """Giữ tương thích ngược: chuyển/đảm bảo tab Top (không chuyển Users/Photos)."""
+        return self.ensure_tiktok_search_top_tab(device_id, root=root)
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
         """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
@@ -6117,6 +6425,16 @@ class ADBController:
                 device_id, channel_name, root=root
             ):
                 return True
+
+            # BẮT BUỘC: Đảm bảo kết quả tìm kiếm luôn ở tab 'Top' (không kẹt ở Photos, Videos, Users)
+            if attempt == 0 and self.ensure_tiktok_search_top_tab(device_id, root=root):
+                new_root = self._get_tiktok_ui_root(device_id, f"tt_channel_top_{attempt}")
+                if new_root is not None:
+                    root = new_root
+                    if self.is_on_tiktok_target_profile(
+                        device_id, channel_name, root=root
+                    ):
+                        return True
 
             parent_map = {child: parent for parent in root.iter() for child in parent}
             matches = []
@@ -6206,17 +6524,20 @@ class ADBController:
                     r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
                     target_elem.get("bounds", ""),
                 )
-                clickable_is_too_broad = bool(
-                    clickable_bounds
-                    and int(clickable_bounds.group(4))
-                    - int(clickable_bounds.group(2)) > 360
+                card_height = (
+                    int(clickable_bounds.group(4)) - int(clickable_bounds.group(2))
+                    if clickable_bounds else 0
                 )
+                compact_identity_card = bool(
+                    inferred_identity_coords or (clickable_bounds and card_height <= 360)
+                )
+                clickable_is_too_broad = bool(clickable_bounds and card_height > 360)
                 if (
                     identity_coords
-                    and nearby_profile_row_cue
                     and (
                         clickable_is_too_broad
                         or "search" in target_resource_id
+                        or (nearby_profile_row_cue and not compact_identity_card)
                     )
                 ):
                     target_elem = elem
@@ -6242,24 +6563,18 @@ class ADBController:
                     any(cue in value for cue in profile_row_cues)
                     for value in subtree_texts
                 )
-                bounds_match = re.match(
-                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
-                    target_elem.get("bounds", ""),
-                )
-                compact_identity_card = bool(
-                    inferred_identity_coords
-                    or (
-                        bounds_match
-                        and int(bounds_match.group(4))
-                        - int(bounds_match.group(2)) <= 360
-                    )
-                )
                 if (
                     coords
                     and coords[1] > search_bar_bottom
                     and "edittext" not in target_class
                     and "search" not in target_resource_id
-                    and (has_identity_resource or compact_identity_card)
+                    and (
+                        has_identity_resource
+                        or compact_identity_card
+                        or exact_identity
+                        or has_profile_row_cue
+                        or nearby_profile_row_cue
+                    )
                     # Text gộp như "Tên, @handle, Follow" chỉ được nhận khi
                     # card có dấu hiệu hàng tài khoản. Nhờ vậy caption video
                     # của kênh khác dù nhắc tên target vẫn bị loại.
@@ -6270,15 +6585,15 @@ class ADBController:
                         or has_profile_row_cue
                     )
                 ):
-                    score = 16 if (exact_identity or fuzzy_identity) else (14 if has_identity_resource else 10)
+                    score = 20 if exact_identity else (16 if fuzzy_identity else 10)
                     if has_profile_row_cue or nearby_profile_row_cue:
-                        score += 3
+                        score += 5
                     matches.append((score, coords, target))
 
             if not matches:
-                # Nếu chưa thấy card khớp ở lần đầu, thử chuyển sang tab "Người dùng" / "Tài khoản"
+                # Nếu chưa thấy card khớp ở lần đầu, bắt buộc kiểm tra và chuyển về tab Top
                 if attempt == 0:
-                    switched_tab = self._switch_to_tiktok_users_tab(device_id, root=root)
+                    switched_tab = self.ensure_tiktok_search_top_tab(device_id, root=root, force=True)
                     if switched_tab:
                         time.sleep(1.0)
                         continue
@@ -6795,6 +7110,9 @@ class ADBController:
             step1_video = 1
             while step1_elapsed < step1_total:
                 check_cancelled()
+                self.recover_tiktok_if_blocked_by_captcha_or_link(
+                    device_id, status_callback=status_callback
+                )
                 dwell = min(
                     random.randint(5, 12),
                     step1_total - step1_elapsed,
@@ -6821,6 +7139,9 @@ class ADBController:
             # ================= BƯỚC 2: TÌM TỪ KHÓA NHIỆM VỤ / MỒI KÊNH =================
             check_cancelled()
             self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
+            self.recover_tiktok_if_blocked_by_captcha_or_link(
+                device_id, status_callback=status_callback
+            )
             seed_kw = random.choice(seed_keywords)
             update_status(f"[TikTok B2] Mở Kính lúp & Tìm từ khóa mồi '{seed_kw}'...")
             if not self.ensure_tiktok_foreground_ready(
@@ -6848,6 +7169,9 @@ class ADBController:
                 )
             time.sleep(3.5)
             check_cancelled()
+            self.recover_tiktok_if_blocked_by_captcha_or_link(
+                device_id, status_callback=status_callback
+            )
             if not self.wait_for_tiktok_foreground(device_id):
                 raise RuntimeError(
                     "TikTok B2 mất foreground sau khi Enter từ khóa mồi"
@@ -6875,6 +7199,9 @@ class ADBController:
             result_index = 1
             while step2_elapsed < step2_total:
                 check_cancelled()
+                self.recover_tiktok_if_blocked_by_captcha_or_link(
+                    device_id, status_callback=status_callback
+                )
                 dwell = min(
                     random.randint(4, 8),
                     step2_total - step2_elapsed,
@@ -6904,6 +7231,9 @@ class ADBController:
             # ================= BƯỚC 3: TÌM & VÀO KÊNH MỤC TIÊU =================
             check_cancelled()
             self.collapse_statusbar_if_expanded(device_id, status_callback=status_callback)
+            self.recover_tiktok_if_blocked_by_captcha_or_link(
+                device_id, status_callback=status_callback
+            )
             if not seed_search_completed:
                 raise RuntimeError(
                     "TikTok B2 chưa hoàn tất; đã chặn chuyển sang B3"
@@ -6916,9 +7246,10 @@ class ADBController:
             
             # 1. Bấm vào Kính lúp / Ô tìm kiếm ở đầu trang
             if not self.focus_tiktok_existing_search_bar(device_id):
-                raise RuntimeError(
-                    "TikTok B3 không mở/focus được ô tìm kiếm trên kết quả B2"
-                )
+                if not self.find_and_click_tiktok_search(device_id):
+                    raise RuntimeError(
+                        "TikTok B3 không mở/focus được ô tìm kiếm trên kết quả B2"
+                    )
             check_cancelled()
 
             # 2-3. XÓA SẠCH từ khóa Bước 2 rồi mới nhập tên Kênh mục tiêu.
@@ -6933,6 +7264,7 @@ class ADBController:
                 )
             time.sleep(3.5)
             check_cancelled()
+            self.ensure_tiktok_search_top_tab(device_id)
 
             # Click vào card kênh mục tiêu đã cấu hình.
             update_status(f"[TikTok B3] Click vào Kênh '{target_channel}'...")
@@ -6963,6 +7295,20 @@ class ADBController:
             channel_video = 1
             while step3_elapsed < step3_total:
                 check_cancelled()
+                if self.recover_tiktok_if_blocked_by_captcha_or_link(
+                    device_id, status_callback=status_callback
+                ):
+                    update_status(
+                        f"[TikTok B3] Khôi phục sau Captcha/Link • Mở lại Kênh mục tiêu '{target_channel}'..."
+                    )
+                    if self.find_and_click_tiktok_search(device_id):
+                        if self.replace_tiktok_search_text(device_id, target_channel):
+                            if self.submit_tiktok_search(device_id):
+                                time.sleep(3.0)
+                                self.ensure_tiktok_search_top_tab(device_id)
+                                if self.find_and_click_tiktok_channel(device_id, target_channel):
+                                    self.click_random_tiktok_profile_video(device_id, target_channel)
+
                 watch_duration = min(
                     random.randint(
                         config.TIKTOK_STEP3_VIDEO_MIN,
@@ -7006,6 +7352,9 @@ class ADBController:
 
                 step3_elapsed += watch_duration
                 if step3_elapsed < step3_total:
+                    self.recover_tiktok_if_blocked_by_captcha_or_link(
+                        device_id, status_callback=status_callback
+                    )
                     if not self.wait_for_tiktok_foreground(device_id):
                         raise RuntimeError(
                             "TikTok B3 mất foreground; đã dừng trước khi đổi clip"
@@ -7051,6 +7400,10 @@ class ADBController:
                             duration=random.randint(450, 700),
                         )
                     channel_video += 1
+                    time.sleep(0.5)
+                    self.recover_tiktok_if_blocked_by_captcha_or_link(
+                        device_id, status_callback=status_callback
+                    )
 
             update_status("Hoàn thành tác vụ Bơm TikTok!")
             return True, "Thành công"

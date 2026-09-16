@@ -1879,6 +1879,151 @@ class TikTokSearchInputTests(unittest.TestCase):
             "Không được mở clip khi chưa xác minh đã vào đúng kênh target",
         )
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_recover_tiktok_detects_captcha_and_closes_it(self, _sleep):
+        """Phát hiện Captcha kéo mảnh ghép (Verify/Puzzle) và tự bấm thoát/Back."""
+        captcha_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="Verify to continue" bounds="[100,200][980,350]" />'
+            '<node text="Drag the puzzle piece into place" bounds="[100,360][980,450]" />'
+            '<node clickable="true" content-desc="Close" bounds="[920,220][1020,320]" />'
+            '</hierarchy>'
+        )
+        taps = []
+        keys = []
+        self.controller._get_tiktok_ui_root = lambda _device_id, prefix: (
+            captcha_root if "recheck" not in prefix else ET.fromstring('<hierarchy><node text="Home" /></hierarchy>')
+        )
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        self.controller.keyevent = lambda _device_id, key: keys.append(key)
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.ensure_tiktok_home_feed = lambda _device_id: True
+
+        status_logs = []
+        recovered = self.controller.recover_tiktok_if_blocked_by_captcha_or_link(
+            "device-captcha", status_callback=lambda _dev, msg: status_logs.append(msg)
+        )
+
+        self.assertTrue(recovered)
+        self.assertTrue(any("captcha" in log.lower() for log in status_logs))
+        self.assertEqual([(970, 270)], taps)
+        self.assertIn(4, keys)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_recover_tiktok_persistent_captcha_forces_app_restart(self, _sleep):
+        """Nếu Captcha bắt buộc không thể tắt bằng phím Back, buộc force-stop và khởi động lại TikTok."""
+        captcha_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="Verify to continue" bounds="[100,200][980,350]" />'
+            '<node text="Drag the puzzle piece" bounds="[100,360][980,450]" />'
+            '</hierarchy>'
+        )
+        relaunched = []
+        self.controller._get_tiktok_ui_root = lambda _device_id, _prefix: captcha_root
+        self.controller.launch_tiktok = lambda dev: relaunched.append(dev)
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.ensure_tiktok_home_feed = lambda _device_id: True
+
+        status_logs = []
+        recovered = self.controller.recover_tiktok_if_blocked_by_captcha_or_link(
+            "device-force", status_callback=lambda _dev, msg: status_logs.append(msg)
+        )
+
+        self.assertTrue(recovered)
+        self.assertEqual(["device-force"], relaunched)
+        force_stopped = any(
+            cmd[:3] == ["shell", "am", "force-stop"] for cmd in self.commands
+        )
+        self.assertTrue(force_stopped)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_recover_tiktok_webview_link_presses_open_tiktok(self, _sleep):
+        """Phát hiện Webview popup (www.tiktok.com, 'Đang trên TikTok') và bấm 'Mở TikTok' / Back."""
+        webview_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="www.tiktok.com" bounds="[100,50][800,120]" />'
+            '<node text="Đông Y Thầy Tùng đang trên TikTok" bounds="[100,800][980,950]" />'
+            '<node clickable="true" text="Mở TikTok" bounds="[200,1100][880,1220]" />'
+            '<node clickable="true" text="Để sau" bounds="[200,1250][880,1350]" />'
+            '</hierarchy>'
+        )
+        taps = []
+        keys = []
+        self.controller._get_tiktok_ui_root = lambda _device_id, _prefix: webview_root
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        self.controller.keyevent = lambda _device_id, key: keys.append(key)
+        self.controller.lock_portrait = lambda *_args, **_kwargs: True
+        self.controller.ensure_tiktok_home_feed = lambda _device_id: True
+
+        status_logs = []
+        recovered = self.controller.recover_tiktok_if_blocked_by_captcha_or_link(
+            "device-webview", status_callback=lambda _dev, msg: status_logs.append(msg)
+        )
+
+        self.assertTrue(recovered)
+        self.assertEqual([(540, 1160)], taps)  # Bấm trúng nút "Mở TikTok"
+        self.assertIn(4, keys)  # Đồng thời gửi phím Back (key 4)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_ensure_tiktok_search_top_tab_switches_when_on_photos_tab(self, _sleep):
+        """Khi đang bị ở tab Photos, tự động bấm chuyển về tab Top."""
+        tab_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="Ask" bounds="[40,160][160,220]" />'
+            '<node text="Top" bounds="[180,160][300,220]" />'
+            '<node text="Videos" bounds="[320,160][440,220]" />'
+            '<node text="Photos" selected="true" bounds="[460,160][600,220]" />'
+            '<node text="Users" bounds="[620,160][740,220]" />'
+            '</hierarchy>'
+        )
+        taps = []
+        self.controller._get_tiktok_ui_root = lambda _device_id, _prefix: tab_root
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+
+        switched = self.controller.ensure_tiktok_search_top_tab("device-tab")
+
+        self.assertTrue(switched)
+        self.assertEqual([(240, 190)], taps)  # Tọa độ tâm của tab 'Top' [180,160][300,220]
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_click_on_top_tab_clicks_exact_channel_title_on_broad_card(self, _sleep):
+        """Card kênh trên tab Top có đính kèm 3 video (chiều cao > 360px), click đúng vào tiêu đề tên kênh."""
+        search_top_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="Top" selected="true" bounds="[180,160][300,220]" />'
+            '<node class="android.widget.RelativeLayout" clickable="true" '
+            '      bounds="[0,260][1080,810]" resource-id="card_with_preview_videos">'
+            '  <node class="android.widget.TextView" clickable="false" '
+            '        bounds="[250,300][750,360]" text="Khải Hoàn Skincare PT" />'
+            '  <node class="android.widget.TextView" text="khaihoanskincare" />'
+            '  <node class="android.widget.Button" text="Following" bounds="[850,300][1040,360]" />'
+            '  <node text="Following" bounds="[40,400][340,780]" />'
+            '  <node text="Following" bounds="[370,400][670,780]" />'
+            '  <node text="Following" bounds="[700,400][1000,780]" />'
+            '</node>'
+            '</hierarchy>'
+        )
+        profile_root = ET.fromstring(
+            '<hierarchy>'
+            '<node class="android.widget.TextView" text="Khải Hoàn Skincare PT" />'
+            '<node class="android.widget.Button" text="Message" />'
+            '<node resource-id="com.ss.android.ugc.trill:id/user_video_view" />'
+            '</hierarchy>'
+        )
+        roots = iter([search_top_root, profile_root])
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots, profile_root)
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        taps = []
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+
+        success = self.controller.find_and_click_tiktok_channel(
+            "device-top-channel", "Khải Hoàn Skincare PT"
+        )
+
+        self.assertTrue(success)
+        self.assertEqual([(500, 330)], taps)  # Tọa độ tâm tên kênh [250,300][750,360]
+
 
 if __name__ == "__main__":
     unittest.main()
