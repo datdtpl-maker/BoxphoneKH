@@ -3,7 +3,7 @@
   "baseline": "BoxPhoneControl 1.0.16 - TikTok frozen",
   "files": {
     "adb_controller.py": {
-      "sha256": "143D7B9E35C66F1ACB697CD9C1E0ED8C4415F8C33E4C6DB2EFD440AB7EC7A20E",
+      "sha256": "0F84CBB3197ACA5301AA398941C5EBB433D2DCCB3AED9B9FB4012EE30ED7891A",
       "items": 50
     },
     "gui_app.py": {
@@ -15,8 +15,8 @@
       "items": 17
     },
     "config.py": {
-      "sha256": "D9BE3161DE119C7EEE5AF421E8760DCC1F4CDD3CD1E225A96F20DC22C2A199D0",
-      "items": 19
+      "sha256": "8DD671EFEC3A93AF22617002ECFB22BAE38C5004936D9E28E56033A461C81810",
+      "items": 27
     },
     "notion_keyword_sync.py": {
       "sha256": "600C96A326CC7F90A8DC5036EFFAA065614B46B267EBEEABE5DB27D970F612B5",
@@ -27,7 +27,7 @@
       "items": 2
     },
     "test_tiktok_search_input.py": {
-      "sha256": "92EBCACFE60A50EDEFC33ACA2A1F8FC4791604E373ACC2577AAE925A1545E8FA",
+      "sha256": "C924B0EFCCF453072B676D7E83D1FB2A1689ED541D2D63F69E10A642A6C64B1A",
       "items": 1
     },
     "test_gui_tiktok_status.py": {

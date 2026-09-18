@@ -2795,7 +2795,12 @@ class ADBController:
             remaining = max(0.0, deadline - time.monotonic())
             if remaining <= 0:
                 break
-            dwell = min(float(random.randint(6, 15)), remaining)
+            if label == "target_page":
+                d_min = getattr(config, "FACEBOOK_STEP3_POST_DWELL_MIN", 15)
+                d_max = getattr(config, "FACEBOOK_STEP3_POST_DWELL_MAX", 30)
+                dwell = min(float(random.randint(d_min, d_max)), remaining)
+            else:
+                dwell = min(float(random.randint(6, 15)), remaining)
             if status_callback:
                 status_callback(
                     device_id,
@@ -7856,7 +7861,7 @@ class ADBController:
             )
             update_status(
                 f"[TikTok B3] Ở lại Kênh {step3_total // 60} phút "
-                f"{step3_total % 60:02d} giây • đổi clip mỗi 15-30s..."
+                f"{step3_total % 60:02d} giây • đổi clip mỗi {config.TIKTOK_STEP3_VIDEO_MIN}-{config.TIKTOK_STEP3_VIDEO_MAX}s..."
             )
             step3_elapsed = 0
             channel_video = 1

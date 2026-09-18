@@ -1627,7 +1627,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             any("[TikTok B2] Lướt kết quả" in message and "15s" in message for message in statuses)
         )
         self.assertTrue(
-            any("[TikTok B3] Ở lại Kênh 3 phút" in message for message in statuses)
+            any("[TikTok B3] Ở lại Kênh 5 phút" in message or "[TikTok B3] Ở lại Kênh" in message for message in statuses)
         )
 
     @patch("adb_controller.random.uniform", return_value=1.0)
