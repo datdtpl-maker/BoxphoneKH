@@ -4291,16 +4291,29 @@ class GUIApp(ctk.CTk):
                 f"STT {task.stt}: '{task.content}'..."
             )
 
-            ok = comment_controller.execute_comment_task(
-                main.adb,
-                device_id,
-                platform=task.platform,
-                url=task.url,
-                comment_text=task.content,
-                dwell_time=dwell_time,
-                status_callback=dev_cb,
-                is_cancelled=lambda: self.comment_cancel_flag,
-            )
+            ok = False
+            for task_attempt in range(2):
+                if self.comment_cancel_flag:
+                    break
+                if task_attempt > 0:
+                    self.log_message(
+                        f"[Máy {device_name}] ⚠️ Lần 1 chưa hoàn tất bình luận • "
+                        f"Tự động chuẩn bị lại thiết bị và thử lại lần 2 cho STT {task.stt}..."
+                    )
+                    time.sleep(2.0)
+
+                ok = comment_controller.execute_comment_task(
+                    main.adb,
+                    device_id,
+                    platform=task.platform,
+                    url=task.url,
+                    comment_text=task.content,
+                    dwell_time=dwell_time,
+                    status_callback=dev_cb,
+                    is_cancelled=lambda: self.comment_cancel_flag,
+                )
+                if ok:
+                    break
 
             if ok:
                 success_count += 1

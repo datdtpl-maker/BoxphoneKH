@@ -720,60 +720,81 @@ def post_tiktok_comment(
     except Exception:
         pass
 
-    # 1. Mở link video
-    log("Đang mở link video qua Intent Zalo Referrer...")
-    success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
-    if not success:
-        log("Lỗi không thể mở link video.")
-        return False
-
-    # 2. Chờ TikTok tải xong giao diện video
-    wait_for_tiktok_video_ready(
-        adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
-    )
-    if is_cancelled and is_cancelled():
-        return False
-
-    # 3. Dwell time: Xem video tự nhiên
-    dwell_target = max(6, int(dwell_time)) + random.randint(-1, 2)
-    log(f"Đang xem video tự nhiên trong {dwell_target}s trước khi bình luận...")
-    for remaining in range(dwell_target, 0, -1):
-        if is_cancelled and is_cancelled():
-            log("Dừng xem do người dùng yêu cầu.")
-            return False
-        if remaining % 4 == 0 or remaining <= 3:
-            log(f"Đang xem video ({remaining}s còn lại)...")
-        time.sleep(1.0)
-
-    # 4. Bấm nút Mở khung bình luận (có cơ chế xác nhận và thử lại an toàn)
-    log("Mở khung bình luận...")
-    comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
-    log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
-
     sheet_opened = False
-    for attempt in range(1, 4):
+    for flow_attempt in range(1, 3):
         if is_cancelled and is_cancelled():
             return False
 
-        if attempt == 1:
-            target_x, target_y = comment_x, comment_y
-        elif attempt == 2:
-            target_x, target_y = int(width * 0.925), int(height * 0.635)
-            log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout A ({target_x}, {target_y})...")
-        else:
-            target_x, target_y = int(width * 0.925), int(height * 0.550)
-            log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
+        if flow_attempt > 1:
+            log("Lần 1 chưa mở được khung bình luận • Tự động dọn dẹp app và mở lại link video lần 2...")
+            try:
+                adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
+                adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
+                if hasattr(adb, "clear_recent_apps"):
+                    adb.clear_recent_apps(device_id)
+                adb.keyevent(device_id, 3)
+                time.sleep(1.0)
+            except Exception:
+                pass
 
-        adb.tap(device_id, target_x, target_y)
-        time.sleep(random.uniform(1.8, 2.2))
+        # 1. Mở link video
+        log(f"Đang mở link video qua Intent Zalo Referrer (lượt {flow_attempt}/2)...")
+        success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+        if not success:
+            log("Lỗi không thể mở link video.")
+            if flow_attempt == 2:
+                return False
+            continue
 
-        if is_tiktok_comment_sheet_open(adb, device_id, height):
-            sheet_opened = True
-            log("Đã mở khung bình luận thành công!")
+        # 2. Chờ TikTok tải xong giao diện video
+        wait_for_tiktok_video_ready(
+            adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
+        )
+        if is_cancelled and is_cancelled():
+            return False
+
+        # 3. Dwell time: Xem video tự nhiên
+        dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
+        log(f"Đang xem video tự nhiên trong {dwell_target}s trước khi bình luận...")
+        for remaining in range(dwell_target, 0, -1):
+            if is_cancelled and is_cancelled():
+                log("Dừng xem do người dùng yêu cầu.")
+                return False
+            if remaining % 4 == 0 or remaining <= 3:
+                log(f"Đang xem video ({remaining}s còn lại)...")
+            time.sleep(1.0)
+
+        # 4. Bấm nút Mở khung bình luận (có cơ chế xác nhận và thử lại an toàn)
+        log("Mở khung bình luận...")
+        comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
+        log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
+
+        for attempt in range(1, 4):
+            if is_cancelled and is_cancelled():
+                return False
+
+            if attempt == 1:
+                target_x, target_y = comment_x, comment_y
+            elif attempt == 2:
+                target_x, target_y = int(width * 0.925), int(height * 0.635)
+                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout A ({target_x}, {target_y})...")
+            else:
+                target_x, target_y = int(width * 0.925), int(height * 0.550)
+                log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
+
+            adb.tap(device_id, target_x, target_y)
+            time.sleep(random.uniform(1.8, 2.2))
+
+            if is_tiktok_comment_sheet_open(adb, device_id, height):
+                sheet_opened = True
+                log("Đã mở khung bình luận thành công!")
+                break
+
+        if sheet_opened:
             break
 
     if not sheet_opened:
-        log("CẢNH BÁO: Không mở được khung bình luận TikTok! Hủy tác vụ an toàn để không bấm nhầm vào các nút khác.")
+        log("CẢNH BÁO: Không mở được khung bình luận TikTok sau 2 lượt thử! Hủy tác vụ an toàn để không bấm nhầm vào các nút khác.")
         try:
             adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
             adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
@@ -1014,53 +1035,73 @@ def post_facebook_comment(
     except Exception:
         pass
 
-    log("Đang mở link bài viết/Reel qua Intent Zalo Referrer...")
-    success = open_url_via_intent(adb, device_id, url, PLATFORM_FACEBOOK)
-    if not success:
-        log("Lỗi không thể mở link Facebook.")
-        return False
-
-    dwell_target = max(6, int(dwell_time)) + random.randint(-1, 2)
-    log(f"Đang đọc bài/xem Reel trong {dwell_target}s trước khi bình luận...")
-    for remaining in range(dwell_target, 0, -1):
-        if is_cancelled and is_cancelled():
-            log("Dừng xem do người dùng yêu cầu.")
-            return False
-        time.sleep(1.0)
-
-    # 1. Bấm nút Mở khung bình luận (3 lần thử thích ứng đa giao diện)
-    log("Mở khung bình luận Facebook...")
-    comment_x, comment_y = find_facebook_comment_icon_coords(adb, device_id, width, height)
-    log(f"Chạm icon Bình luận Facebook tại ({comment_x}, {comment_y})...")
-
     sheet_opened = False
-    for attempt in range(1, 4):
+    for flow_attempt in range(1, 3):
         if is_cancelled and is_cancelled():
             return False
 
-        if attempt == 1:
-            target_x, target_y = comment_x, comment_y
-        elif attempt == 2:
-            # Biến thể xem chi tiết ảnh / Video / Thước phim (Image 2 & Image 5): x = 22.0%, y = 96.0%
-            target_x, target_y = int(width * 0.220), int(height * 0.960)
-            log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ thanh chi tiết ({target_x}, {target_y})...")
-        else:
-            # Chạm vào giữa ảnh để kích hoạt thanh công cụ rồi tap nút comment
-            log("Lần 2 chưa mở được, chạm kích hoạt màn hình và thử lại...")
-            adb.tap(device_id, int(width * 0.50), int(height * 0.50))
-            time.sleep(0.5)
-            target_x, target_y = int(width * 0.172), int(height * 0.960)
+        if flow_attempt > 1:
+            log("Lần 1 chưa mở được khung bình luận • Tự động dọn dẹp app và mở lại link Facebook lần 2...")
+            try:
+                adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
+                if hasattr(adb, "clear_recent_apps"):
+                    adb.clear_recent_apps(device_id)
+                adb.keyevent(device_id, 3)
+                time.sleep(1.0)
+            except Exception:
+                pass
 
-        adb.tap(device_id, target_x, target_y)
-        time.sleep(random.uniform(1.8, 2.2))
+        log(f"Đang mở link bài viết/Reel qua Intent Zalo Referrer (lượt {flow_attempt}/2)...")
+        success = open_url_via_intent(adb, device_id, url, PLATFORM_FACEBOOK)
+        if not success:
+            log("Lỗi không thể mở link Facebook.")
+            if flow_attempt == 2:
+                return False
+            continue
 
-        if is_facebook_comment_sheet_open(adb, device_id, height):
-            sheet_opened = True
-            log("Đã mở khung bình luận Facebook thành công!")
+        dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
+        log(f"Đang đọc bài/xem Reel trong {dwell_target}s trước khi bình luận...")
+        for remaining in range(dwell_target, 0, -1):
+            if is_cancelled and is_cancelled():
+                log("Dừng xem do người dùng yêu cầu.")
+                return False
+            time.sleep(1.0)
+
+        # 1. Bấm nút Mở khung bình luận (3 lần thử thích ứng đa giao diện)
+        log("Mở khung bình luận Facebook...")
+        comment_x, comment_y = find_facebook_comment_icon_coords(adb, device_id, width, height)
+        log(f"Chạm icon Bình luận Facebook tại ({comment_x}, {comment_y})...")
+
+        for attempt in range(1, 4):
+            if is_cancelled and is_cancelled():
+                return False
+
+            if attempt == 1:
+                target_x, target_y = comment_x, comment_y
+            elif attempt == 2:
+                # Biến thể xem chi tiết ảnh / Video / Thước phim (Image 2 & Image 5): x = 22.0%, y = 96.0%
+                target_x, target_y = int(width * 0.220), int(height * 0.960)
+                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ thanh chi tiết ({target_x}, {target_y})...")
+            else:
+                # Chạm vào giữa ảnh để kích hoạt thanh công cụ rồi tap nút comment
+                log("Lần 2 chưa mở được, chạm kích hoạt màn hình và thử lại...")
+                adb.tap(device_id, int(width * 0.50), int(height * 0.50))
+                time.sleep(0.5)
+                target_x, target_y = int(width * 0.172), int(height * 0.960)
+
+            adb.tap(device_id, target_x, target_y)
+            time.sleep(random.uniform(1.8, 2.2))
+
+            if is_facebook_comment_sheet_open(adb, device_id, height):
+                sheet_opened = True
+                log("Đã mở khung bình luận Facebook thành công!")
+                break
+
+        if sheet_opened:
             break
 
     if not sheet_opened:
-        log("CẢNH BÁO: Không mở được khung bình luận Facebook! Hủy tác vụ an toàn.")
+        log("CẢNH BÁO: Không mở được khung bình luận Facebook sau 2 lượt thử! Hủy tác vụ an toàn.")
         try:
             adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
             if hasattr(adb, "clear_recent_apps"):

@@ -2022,8 +2022,67 @@ class TikTokSearchInputTests(unittest.TestCase):
         )
 
         self.assertTrue(success)
-        self.assertEqual([(500, 330)], taps)  # Tọa độ tâm tên kênh [250,300][750,360]
+    @patch("adb_controller.time.sleep", return_value=None)
+    @patch("adb_controller.random.randint", return_value=10)
+    @patch("adb_controller.random.choice", side_effect=lambda seq: seq[0])
+    def test_workflow_retries_b3_channel_and_succeeds_on_second_attempt(
+        self, _choice, _randint, _sleep
+    ):
+        """B3 tìm kênh lần 1 không ra, tự động ép tab Top và thử lại lần 2 thành công."""
+        self.controller.get_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        self.controller.warmup_facebook_before_tiktok = lambda *_args, **_kwargs: True
+        self.controller.launch_tiktok = lambda _device_id: None
+        self.controller.ensure_tiktok_foreground_ready = lambda *_args, **_kwargs: True
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
+        self.controller.ensure_tiktok_feed_motion = lambda *_args, **_kwargs: True
+        self.controller.swipe = lambda *_args, **_kwargs: None
+        self.controller.find_and_click_tiktok_search = lambda _device_id: True
+        self.controller.replace_tiktok_search_text = lambda _device_id, _text: True
+        self.controller.submit_tiktok_search = lambda _device_id: True
+        self.controller.ensure_tiktok_search_top_tab = lambda *_args, **_kwargs: True
+        self.controller.focus_tiktok_existing_search_bar = lambda _device_id: True
+        self.controller.click_random_tiktok_profile_video = lambda *_args, **_kwargs: True
+
+        channel_attempts = []
+        def mock_click_channel(_dev, target):
+            channel_attempts.append(target)
+            return len(channel_attempts) >= 2  # Lần 1 fail, lần 2 success
+        self.controller.find_and_click_tiktok_channel = mock_click_channel
+
+        success, message = self.controller.tiktok_automation_workflow(
+            "device-retry",
+            seed_keywords=["nặn mụn"],
+            target_channel="Khải Hoàn Skincare PT",
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(len(channel_attempts), 2)
+        self.assertEqual("Thành công", message)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_ensure_tiktok_search_top_tab_switches_when_on_anh_tab_with_op_and_hoi(self, _sleep):
+        """Khi thanh tab hiển thị [Hỏi, op, Video, Ảnh, Người dùng] và tab Ảnh đang selected, tự động chuyển về Top."""
+        tab_root = ET.fromstring(
+            '<hierarchy>'
+            '<node text="Hỏi" bounds="[40,160][160,220]" />'
+            '<node text="op" bounds="[180,160][280,220]" />'
+            '<node text="Video" bounds="[300,160][420,220]" />'
+            '<node text="Ảnh" selected="true" bounds="[440,160][560,220]" />'
+            '<node text="Người dùng" bounds="[580,160][740,220]" />'
+            '</hierarchy>'
+        )
+        taps = []
+        self.controller._get_tiktok_ui_root = lambda _device_id, _prefix: tab_root
+        self.controller.tap = lambda _device_id, x, y: taps.append((x, y))
+        self.controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+
+        switched = self.controller.ensure_tiktok_search_top_tab("device-tab")
+
+        self.assertTrue(switched)
+        self.assertEqual([(230, 190)], taps)  # Tâm của tab 'op' (Top) [180,160][280,220]
 
 
 if __name__ == "__main__":
     unittest.main()
+

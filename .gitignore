@@ -13,6 +13,7 @@ debug/
 *.xml
 *.png
 *.log
+interaction_history.json
 
 # Exclude result text files
 parse_results.txt

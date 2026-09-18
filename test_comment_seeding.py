@@ -619,6 +619,50 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertAlmostEqual(coords[1], 1800, delta=15)
 
 
+    @patch("comment_controller.time.sleep", return_value=None)
+    @patch("comment_controller.open_url_via_intent", return_value=True)
+    @patch("comment_controller.wait_for_tiktok_video_ready", return_value=True)
+    @patch("comment_controller.find_tiktok_comment_icon_coords", return_value=(950, 1100))
+    @patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, False, False, True])
+    @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
+    @patch("comment_controller.ensure_comment_input_ready", return_value=True)
+    @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
+    def test_post_tiktok_comment_retries_intent_and_succeeds(
+        self, _send, _ready, _input, _sheet, _icon, _wait, mock_intent, _sleep
+    ):
+        """Nếu lần 1 chưa mở được sheet (3 attempt đầu False), tự động mở lại intent lần 2 và thành công."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (0, "", "")
+
+        success = comment_controller.post_tiktok_comment(
+            adb, "dev1", "https://www.tiktok.com/@test/video/123", "Nội dung cmt", dwell_time=5
+        )
+        self.assertTrue(success)
+        self.assertEqual(mock_intent.call_count, 2)
+
+    @patch("comment_controller.time.sleep", return_value=None)
+    @patch("comment_controller.open_url_via_intent", return_value=True)
+    @patch("comment_controller.find_facebook_comment_icon_coords", return_value=(500, 1850))
+    @patch("comment_controller.is_facebook_comment_sheet_open", side_effect=[False, False, False, True])
+    @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
+    @patch("comment_controller.ensure_comment_input_ready", return_value=True)
+    @patch("comment_controller.find_send_button_coords", return_value=(1000, 1800))
+    def test_post_facebook_comment_retries_intent_and_succeeds(
+        self, _send, _ready, _input, _sheet, _icon, mock_intent, _sleep
+    ):
+        """Nếu lần 1 chưa mở được sheet Facebook, tự động mở lại link intent lần 2 và thành công."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (0, "", "")
+
+        success = comment_controller.post_facebook_comment(
+            adb, "dev1", "https://www.facebook.com/reel/123", "Nội dung cmt FB", dwell_time=5
+        )
+        self.assertTrue(success)
+        self.assertEqual(mock_intent.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
 

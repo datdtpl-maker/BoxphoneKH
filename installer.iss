@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.25"
+  #define MyAppVersion "1.0.28"
 #endif
 
 #define MyAppName "BoxPhoneControl"
@@ -24,7 +24,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-CloseApplications=yes
+CloseApplications=force
 RestartApplications=no
 UsePreviousAppDir=yes
 VersionInfoVersion={#MyAppVersion}.0
@@ -46,3 +46,13 @@ Name: "{autodesktop}\BoxPhoneControl"; Filename: "{app}\{#MyAppExeName}"; Workin
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Mở BoxPhoneControl"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM BoxPhoneControl.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
