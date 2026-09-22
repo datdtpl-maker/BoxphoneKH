@@ -1,0 +1,27 @@
+{
+  "description": "Dữ liệu cấu hình và lịch bơm Traffic Facebook & TikTok đồng bộ từ Notion",
+  "notion_url": "https://app.notion.com/p/654a56cd7cf5416fb65f9b934a62ec45?v=3d570655a9aa810f9ac2000cb17ce8ee",
+  "database_id": "654a56cd7cf5416fb65f9b934a62ec45",
+  "data_source_id": "2109fb78-7695-4614-9051-000a6069715a",
+  "database_title": "Giao việc bơm Traffic Facebook & TikTok",
+  "synced_at": "2026-09-22T04:19:00Z",
+  "active_schedule": {
+    "page_id": "3ba70655-a9aa-810f-b8b0-ca5085c53b93",
+    "title": "Tuần 10/08 - 16/08/2026",
+    "start_date": "2026-08-10",
+    "end_date": "2026-08-15",
+    "active": true,
+    "pump_status": "Đang xử lý",
+    "tiktok_seed_keywords": "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, spa mụn phan thiết, nặn mụn Phan Thiết, lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết",
+    "tiktok_target_channels": "Khải Hoàn Skincare PT, Khải Hoàn & 101 Nốt Mụn",
+    "facebook_seed_keywords": "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, spa mụn phan thiết, nặn mụn Phan Thiết, lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết",
+    "facebook_target_pages": "Khải Hoàn Skincare, Nhà thuốc Khải Hoàn",
+    "admin_note": "Dòng mẫu đang tắt. Sao chép dòng này, đổi tuần và nội dung, sau đó chỉ bật một lịch cần chạy."
+  },
+  "default_tool_inputs": {
+    "TIKTOK_TARGET_CHANNEL": "Khải Hoàn Skincare PT, Khải Hoàn & 101 Nốt Mụn",
+    "TIKTOK_SEED_KEYWORDS": "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, spa mụn phan thiết, nặn mụn Phan Thiết, lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết",
+    "FACEBOOK_TARGET_PAGE_EXACT": "Khải Hoàn Skincare, Nhà thuốc Khải Hoàn",
+    "FACEBOOK_SEED_KEYWORDS": "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, spa mụn phan thiết, nặn mụn Phan Thiết, lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết"
+  }
+}

@@ -156,7 +156,7 @@ class NotionKeywordSyncTests(unittest.TestCase):
         ) as call:
             schedule = fetch_active_keyword_schedule(
                 "token",
-                "https://app.notion.com/p/654a56cd7cf5416fb65f9b934a62ec45?v=view",
+                "https://app.notion.com/p/654a56cd7cf5416fb65f9b934a62ec45?v=3d570655a9aa810f9ac2000cb17ce8ee",
                 today=date(2026, 8, 12),
             )
 

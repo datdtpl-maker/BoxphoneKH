@@ -185,8 +185,13 @@ def _extract_notion_id(value):
     raw = (value or "").strip()
     if not raw:
         return ""
+    parsed = urllib.parse.urlsplit(raw)
+    path_to_check = parsed.path if parsed.scheme or "/" in raw else raw
+    matches = re.findall(r"[0-9a-fA-F]{32}|[0-9a-fA-F-]{36}", path_to_check)
+    if matches:
+        return matches[-1].replace("-", "")
     matches = re.findall(r"[0-9a-fA-F]{32}|[0-9a-fA-F-]{36}", raw)
-    return matches[-1].replace("-", "") if matches else raw
+    return matches[0].replace("-", "") if matches else raw
 
 
 def _resolve_data_source_id(token, database_reference, timeout):

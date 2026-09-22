@@ -953,6 +953,9 @@ class GUIApp(ctk.CTk):
             height=42,
             **field_style,
         )
+        self.ent_fb_seed.insert(
+            0, getattr(config, "FACEBOOK_SEED_KEYWORDS_DEFAULT", "")
+        )
         self.ent_fb_seed.pack(fill="x", padx=16, pady=(0, 8))
 
         ctk.CTkLabel(
@@ -2399,8 +2402,15 @@ class GUIApp(ctk.CTk):
         config.NOTION_API_TOKEN = get_value("NOTION_API_TOKEN")
         config.NOTION_DATA_SOURCE_ID = get_value("NOTION_DATA_SOURCE_ID")
         config.TIKTOK_TARGET_CHANNEL_DEFAULT = get_value("TIKTOK_TARGET_CHANNEL")
+        config.TIKTOK_SEED_KEYWORDS_DEFAULT = get_value(
+            "TIKTOK_SEED_KEYWORDS", config.TIKTOK_SEED_KEYWORDS_DEFAULT
+        )
         config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = get_value(
             "FACEBOOK_TARGET_PAGE_EXACT"
+        )
+        config.FACEBOOK_SEED_KEYWORDS_DEFAULT = get_value(
+            "FACEBOOK_SEED_KEYWORDS",
+            getattr(config, "FACEBOOK_SEED_KEYWORDS_DEFAULT", ""),
         )
 
         main.adb.adb_path = config.ADB_PATH
@@ -2412,7 +2422,9 @@ class GUIApp(ctk.CTk):
             "ent_adb": config.ADB_PATH,
             "ent_notion_token": config.NOTION_API_TOKEN,
             "ent_notion_source_id": config.NOTION_DATA_SOURCE_ID,
+            "ent_tt_seed": config.TIKTOK_SEED_KEYWORDS_DEFAULT,
             "ent_tt_channel": config.TIKTOK_TARGET_CHANNEL_DEFAULT,
+            "ent_fb_seed": config.FACEBOOK_SEED_KEYWORDS_DEFAULT,
             "ent_fb_target": config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT,
         }
         for attribute, value in field_values.items():
@@ -2439,7 +2451,9 @@ class GUIApp(ctk.CTk):
             "ADB_PATH",
             "NOTION_API_TOKEN",
             "NOTION_DATA_SOURCE_ID",
+            "TIKTOK_SEED_KEYWORDS",
             "TIKTOK_TARGET_CHANNEL",
+            "FACEBOOK_SEED_KEYWORDS",
             "FACEBOOK_TARGET_PAGE_EXACT",
         }
         recognized = supported_keys.intersection(values)
@@ -2506,6 +2520,18 @@ class GUIApp(ctk.CTk):
             "NOTION_API_TOKEN": notion_token,
             "NOTION_DATA_SOURCE_ID": notion_source_id,
         }
+        tt_seed_entry = self.__dict__.get("ent_tt_seed")
+        if tt_seed_entry and hasattr(tt_seed_entry, "get") and tt_seed_entry.get().strip():
+            keys["TIKTOK_SEED_KEYWORDS"] = tt_seed_entry.get().strip()
+        tt_channel_entry = self.__dict__.get("ent_tt_channel")
+        if tt_channel_entry and hasattr(tt_channel_entry, "get") and tt_channel_entry.get().strip():
+            keys["TIKTOK_TARGET_CHANNEL"] = tt_channel_entry.get().strip()
+        fb_seed_entry = self.__dict__.get("ent_fb_seed")
+        if fb_seed_entry and hasattr(fb_seed_entry, "get") and fb_seed_entry.get().strip():
+            keys["FACEBOOK_SEED_KEYWORDS"] = fb_seed_entry.get().strip()
+        fb_target_entry = self.__dict__.get("ent_fb_target")
+        if fb_target_entry and hasattr(fb_target_entry, "get") and fb_target_entry.get().strip():
+            keys["FACEBOOK_TARGET_PAGE_EXACT"] = fb_target_entry.get().strip()
         new_lines = []
         updated_keys = set()
         for line in lines:

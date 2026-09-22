@@ -59,7 +59,14 @@ TIKTOK_PACKAGE_ALT = "com.zhiliaoapp.musically"
 TIKTOK_TARGET_CHANNEL_DEFAULT = os.getenv(
     "TIKTOK_TARGET_CHANNEL", "Khải Hoàn Skincare PT, Khải Hoàn & 101 Nốt Mụn"
 )
-TIKTOK_SEED_KEYWORDS_DEFAULT = "skincare, trị mụn, nặn mụn, chăm sóc da"
+TIKTOK_SEED_KEYWORDS_DEFAULT = os.getenv(
+    "TIKTOK_SEED_KEYWORDS",
+    (
+        "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, "
+        "spa mụn phan thiết, nặn mụn Phan Thiết, "
+        "lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết"
+    ),
+)
 TIKTOK_WATCH_TIME_MIN_DEFAULT = 5
 TIKTOK_WATCH_TIME_MAX_DEFAULT = 10
 TIKTOK_STEP1_TOTAL_MIN = 10
@@ -85,8 +92,16 @@ FACEBOOK_STEP3_PAGE_MIN = int(os.getenv("FACEBOOK_STEP3_PAGE_MIN", "300"))
 FACEBOOK_STEP3_PAGE_MAX = int(os.getenv("FACEBOOK_STEP3_PAGE_MAX", "480"))
 FACEBOOK_STEP3_POST_DWELL_MIN = int(os.getenv("FACEBOOK_STEP3_POST_DWELL_MIN", "15"))
 FACEBOOK_STEP3_POST_DWELL_MAX = int(os.getenv("FACEBOOK_STEP3_POST_DWELL_MAX", "30"))
+FACEBOOK_SEED_KEYWORDS_DEFAULT = os.getenv(
+    "FACEBOOK_SEED_KEYWORDS",
+    (
+        "chăm sóc da phan thiết, nặn mụn phan thiết, trị mụn phan thiết, "
+        "spa mụn phan thiết, nặn mụn Phan Thiết, "
+        "lấy nhân mụn chuẩn y khoa Phan Thiết, nặn mụn không đau Phan Thiết"
+    ),
+)
 FACEBOOK_TARGET_PAGE_EXACT_DEFAULT = os.getenv(
-    "FACEBOOK_TARGET_PAGE_EXACT", ""
+    "FACEBOOK_TARGET_PAGE_EXACT", "Khải Hoàn Skincare, Nhà thuốc Khải Hoàn"
 )
 FACEBOOK_CANONICAL_PAGE_NAME = os.getenv(
     "FACEBOOK_CANONICAL_PAGE_NAME",
@@ -98,7 +113,9 @@ FACEBOOK_CANONICAL_PAGE_NAME = os.getenv(
 
 # Notion chỉ cung cấp dữ liệu đầu vào; token luôn được lưu cục bộ trong .env.
 NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN", "")
-NOTION_DATA_SOURCE_ID = os.getenv("NOTION_DATA_SOURCE_ID", "")
+NOTION_DATA_SOURCE_ID = os.getenv(
+    "NOTION_DATA_SOURCE_ID", "654a56cd7cf5416fb65f9b934a62ec45"
+)
 
 # Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix) - Hạn chế like theo yêu cầu
 INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.03"))
