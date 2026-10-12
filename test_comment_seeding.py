@@ -439,6 +439,24 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
     @patch("os.remove")
+    def test_find_tiktok_comment_icon_add_1st(self, _rm, mock_parse, _exists):
+        xml_add_1st = """<hierarchy>
+          <node class='android.widget.TextView' text='Add 1st' bounds='[950,1185][1050,1220]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_add_1st)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertEqual(x, 1000)
+        self.assertEqual(y, 1154)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
     def test_find_tiktok_comment_icon_geometric_midpoint(self, _rm, mock_parse, _exists):
         xml_like_bm = """<hierarchy>
           <node content-desc='Like' bounds='[950,900][1050,1000]' />
@@ -539,6 +557,26 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         is_open = comment_controller.is_tiktok_comment_sheet_open(adb_mock, "dev1", 1920)
         self.assertFalse(is_open)
 
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.getsize", return_value=500)
+    @patch("xml.etree.ElementTree.parse")
+    @patch("os.remove")
+    def test_is_tiktok_comment_sheet_open_ignores_video_comment_button(self, _rm, mock_parse, _size, _exists):
+        """Icon comment ngoài thanh video (desc_comment) KHÔNG được coi là khung bình luận đã mở."""
+        xml_video_rail = """<hierarchy>
+          <node class='android.widget.ImageView' content-desc='desc_comment' bounds='[950,1100][1050,1200]' />
+          <node class='android.widget.TextView' text='Add 1st' bounds='[950,1210][1050,1240]' />
+        </hierarchy>"""
+        import xml.etree.ElementTree as ET
+        mock_tree = MagicMock()
+        mock_tree.getroot.return_value = ET.fromstring(xml_video_rail)
+        mock_parse.return_value = mock_tree
+
+        adb_mock = MagicMock()
+        adb_mock.execute_adb.return_value = (0, "", "")
+        is_open = comment_controller.is_tiktok_comment_sheet_open(adb_mock, "dev1", 1920)
+        self.assertFalse(is_open)
+
     def test_find_facebook_comment_icon_coords_calibrated(self):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
@@ -623,14 +661,14 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
     @patch("comment_controller.open_url_via_intent", return_value=True)
     @patch("comment_controller.wait_for_tiktok_video_ready", return_value=True)
     @patch("comment_controller.find_tiktok_comment_icon_coords", return_value=(950, 1100))
-    @patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, False, False, True])
+    @patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, False, False, False, True])
     @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
     @patch("comment_controller.ensure_comment_input_ready", return_value=True)
     @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
     def test_post_tiktok_comment_retries_intent_and_succeeds(
         self, _send, _ready, _input, _sheet, _icon, _wait, mock_intent, _sleep
     ):
-        """Nếu lần 1 chưa mở được sheet (3 attempt đầu False), tự động mở lại intent lần 2 và thành công."""
+        """Nếu lần 1 chưa mở được sheet (4 attempt đầu False), tự động mở lại intent lần 2 và thành công."""
         adb = MagicMock()
         adb.get_effective_screen_size.return_value = (1080, 1920)
         adb.execute_adb.return_value = (0, "", "")
@@ -640,6 +678,26 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         )
         self.assertTrue(success)
         self.assertEqual(mock_intent.call_count, 2)
+
+    @patch("comment_controller.time.sleep", return_value=None)
+    @patch("comment_controller.open_url_via_intent", return_value=True)
+    @patch("comment_controller.wait_for_tiktok_video_ready", return_value=True)
+    @patch("comment_controller.find_tiktok_comment_icon_coords", return_value=(950, 1100))
+    @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=False)
+    def test_post_tiktok_comment_fails_when_sheet_not_opened(
+        self, _sheet, _icon, _wait, mock_intent, _sleep
+    ):
+        """Nếu không mở được khung bình luận sau cả 2 lượt, bắt buộc trả về False và không được gõ phím/gửi."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (0, "", "")
+
+        success = comment_controller.post_tiktok_comment(
+            adb, "dev1", "https://www.tiktok.com/@test/video/123", "Nội dung cmt", dwell_time=5
+        )
+        self.assertFalse(success)
+        self.assertEqual(mock_intent.call_count, 2)
+        adb.input_text.assert_not_called()
 
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)

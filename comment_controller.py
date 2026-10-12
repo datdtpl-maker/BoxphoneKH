@@ -35,49 +35,11 @@ FACEBOOK_PACKAGE = "com.facebook.katana"
 
 # Mẫu chuẩn icon bóng chat 3 chấm bình luận của TikTok để nhận diện qua Computer Vision
 TIKTOK_COMMENT_BUBBLE_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAACEAAAAgCAIAAAAT2oadAAAJOklEQVRIDR3Be+yd5V0A8O/ted5zzu9"
-    "GGSkIWqB1oROY1MBWZc7EaNxKV6QOeiOb0gnTlQ5Go8P9aaJdYpcMYdOQbFycBYyYCFPDZSajTEWg"
-    "3SgloEIL+xVooR2Hnve87/N8L/7K54PrN9+KiABAbpNTkxAYjoZWu5nRSK0S00UfXnXJkosvEZHS"
-    "tU3TEFEpNcIPHTq0f/9PXn311aLm7jUYAJwSM1mdAgAhLMENW3cROAD0fV9rFYmmaQLq6o98ZM2a"
-    "S1etWjU7EESMMEQUNER084goRQeDQVeqmR9+7Y19Tz/9P6+9zsS9QUQUNQBgQgDADVt3MYYwj98f"
-    "h4dDPX/Fig1Xrzv77HPm5gelVAGLCBGUlND6UqrWKikJp1iC7O45Dc39hZdeeeLxJ14/+natlSQD"
-    "gBCYO27YdgsAuBvUXk0vveTSLVu3hHfz8/N9mRAihzKzY61VhZyFTU3NBpwBoDogoVZmIiVqJ5N/"
-    "+KdHXnnl5eLZ1BhDVXH9lpvhAwK2du3aT3/q04g4M+J2Oh0MpZt2DApLyIgJvZo7ExETlJAkCthO"
-    "2kEzT0yGBADjtjz55BM//NHzscTUzXD9lpsJSkT89m9+4sorPzGaQXMHJRExqywcSzwgjBAxABEB"
-    "gAgdwN2JKCKIsptbqJtRHvZ9/9i/Pr5v31NEHBH4ma07wbuLLlp9w+c2e4Sk6u4USVUlkampKRMn"
-    "xojAAGZyDyK0CHMHAGFGTG4O6BEB0kSE9vrgQw/9+MABIsb1n70xJ//Sl3b8wrkfCo/qdTAYaOkk"
-    "CZgCgEcAgJuLMISomTAjIqCae9RgYUQkooiAJZj6vrDwsWPH/vqOO0qpuHHrjl9d+ytXXbVOsJZS"
-    "hjPDvu/dymAw0L5HQiZStcFw0E4miLlpcq2KiAEVABIlrQoAKSczCw+ShogjPCIeeeTRH/zgSfzs"
-    "thu/dvttOeeBuKqVKCnnRnjadZlxSSm1aXLXt03ThHOtiogi7B7M1Pbt7Mxs21YRjggiQkjuHtB7"
-    "hHa+++u7ceeuv7jpxt8nooFE1apgxKSla5pG+x4RUxJzB/AlSQYRYeZmOhrNdF0HFHCaLIkIM2Nq"
-    "3N2iE2aveO+99+C9D/zbFWsuEeGwolpHs7N93zdNMx6PE2PO2SPcvWlS205mZpe9f+p9ZmGiDKZq"
-    "zXDQdR02UGplIkRUJzcbIqUkk74cPHgQf/Tc//3cWQt96RPHEkc4dWoyHo8PHnzhl1ZfdN555zER"
-    "i5TSmemRN948cvjIBRdesHLlyuRKRNUNEV957eXXX399xYoVK1euDEzuns0BgJvB22+/hYf+953w"
-    "joXJezOr6s8///zeBx4EgNFwcM3Gaz52+ZqUpFf972ee2bv3YQBomub3Nm78+No1xIRu+/fvv+e7"
-    "DwIAE23YsOE3futKN4eoKUnXetd1+JOX387J3VywMlGv/vXdu99554SkJIJJ0u6//HPV2qvedded"
-    "iz99J8KF5Zxzztmx86amacq03bPnr956872UUoSfddZZt+zaMRyOtLQAEJ7ayQSfO/RGJh2ORmF9"
-    "VQXFb3/7bxbffEskMcNoNPrq7X8SEUS0Z8+eI68tnrHsjIhYvnz5V27bOR6Phw1+85t3/PSNE01u"
-    "ptP2wpUrv/DFbYg0N2jUNEBOnvwZPvPC4TNms0e49U1u2ve7o4uLd3/nuxGxsDD3uc9//txzzw6P"
-    "UsvRo2/u/fuHVDXnvPGajb/44QtSzuDTN99662+/dV87neact2/f/vPnf4iYoFYWroonT57Aex78"
-    "l49f/tGcs2upVTPjtOtKjfF4PL8wOzOaYcGqOjMa9H1fii8uHl2+fPns7Ixrr1pHo5m2nQQ0x48f"
-    "P/PMM4fDIWBxd8IgxL6vzz77HP7BH//p1776lWnbMqEITyen5uZmq6Ka5cylVBFcolabpummykRN"
-    "01Strj1+AJZgo2ZJBAlLnRAigicRd7jzzrtw3cbtf3b7rrm52ZzQ3TGciRCcicydEB1qRJAkUzMD"
-    "EabTGMvU3ClnVUtJSqnIxMKGEh5e25zTsePjb3xjD37qmht++aOrr7/+eiHXWoeD3HXdMCcW6bpO"
-    "mB0qABS1JAmAzF2YcUntRdiQAEDVmAmY3DwkmxpDUbW9Dzx84MB+XHfdF8rk1M6bd1644lwilmRE"
-    "FEF93zcNs0jtpjmnaqFmwgk/4O5IpmoU0jRN151iYXXKKTnlUktO+cUXX7z77vs9Aq/a9IcJQiTd"
-    "9uUdy5ad4dAzEQQBAImbWhaqqhYIAElyRKhZTkm18whQzDlX7Vi4KiIhShMRJ06cvO++ew8fOZZz"
-    "xqu37KhaRDgTbN++feWq89q2HWWG09zcCU8DAESMiKoVkZgoZamlNGnUdR1LmFpwRkKnpFUffvif"
-    "Dxw4YJWREK/esqNqAQAvrap+8Y9uuPjii8lrzrmdTpomR4Sbmzshwgc8QpjdNeU8GU+bpnEvLGwo"
-    "SdLPTk0fe/yxp5/6r6Zp3KVtW7zq2psBlYnI63vvvddb/8lf/+S112wYjUYsrmrumnMqXU/Mw0FW"
-    "UzcnJsHUdR0JR4RI7vsSIoT46Pcfe2rfU5waAIje1BQ/c91Oh0qIHDoej4MjSZoZyBWXX/FrV35s"
-    "+fLlIggAGLCk1J6JWNjUwLFpmqIVAMyAEEvAo99/9D/+81ki8sAlAlyr4oZNt0YYi5h17XQ67duZ"
-    "mRkON7PcwMLCwmWXXLx69eq5ZWfOzc3NNKJamSUikmRzN7WmycF+dHHxew/845HDR1hmZmZGqpGS"
-    "RBNtdVfF3t+xyr8RcderuXZnmpkkQOedST8WSWkSkeBCh9dM1a9Zs2rRpOBxGoNbKIgDw0isH77//"
-    "vrba8/PzSANEdIOqNamZGq7ffGuYinB4tNOpWZmdnc3Cqpoy11oRAwBUCwtPJ+PLLrtsy+bNKWcw"
-    "lSTH3z3xyCOPHvjxS8Ph0AMlJeTs5o2Qm0fXAQCuu+7LDAEALNJOJn2ZLiwsNEncPcJwCUUpZTDM"
-    "3bRjstUXrd66bRsThevT+/b9+w+fevfdE4Phgog4UEqiRsQEtTJz9J1Wxd+59pbECAAR1vd9rXV+"
-    "fj7nXFWZoGrNWUop7joYDCbvnzz/ggtuuvHGxaOLf/ed7/V939V2MBykNAunEQBYnJYQEBGm01LK"
-    "/wOtYONDSDJ+qQAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAAAAADEa8dEAAAArElEQVQ4EY3BiW3DMAAEMN7+Q1/1p"
+    "IGL2oLJeCFeiBfihXgh/qiPuIiLuoiv+FX/xBYfdSOW2OpWTLHUgxhiqkdBDHUQYqiDEEMdhKC21"
+    "JSaUlsEtYQiFKGWCGqKoWKoGGqKoJZQhCLUEkFtqSk1pbaIoQ5CDHUQYqiDEFM9CmKpBzHEVrdii"
+    "q3uxBJb3YgtlvonvmKpJfURFzHVFA9iKuJRDCUOYmgcxQvxwg/YpS0lBwrsoQAAAABJRU5ErkJgg"
+    "g=="
 )
 
 
@@ -179,31 +141,54 @@ def open_url_via_intent(
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
         code, stdout, _ = adb.execute_adb(device_id, cmd)
-        if code == 0 and "Error" not in (stdout or ""):
-            return True
+        success = (code == 0 and "Error" not in (stdout or ""))
 
         # Thử mở bằng package TikTok alt nếu package chính lỗi
-        cmd_alt = [
-            "shell", "am", "start",
-            "-a", "android.intent.action.VIEW",
-            "-d", clean_url,
-            "-p", TIKTOK_ALT_PACKAGE,
-            "-f", "0x14000000",
-            "--es", "android.intent.extra.REFERRER_NAME", referrer,
-        ]
-        code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
-        if code_alt == 0 and "Error" not in (stdout_alt or ""):
-            return True
+        if not success:
+            cmd_alt = [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", clean_url,
+                "-p", TIKTOK_ALT_PACKAGE,
+                "-f", "0x14000000",
+                "--es", "android.intent.extra.REFERRER_NAME", referrer,
+            ]
+            code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
+            success = (code_alt == 0 and "Error" not in (stdout_alt or ""))
 
-        # Fallback Intent không gắn cố định package
-        cmd_fallback = [
-            "shell", "am", "start",
-            "-a", "android.intent.action.VIEW",
-            "-d", clean_url,
-            "-f", "0x14000000",
-        ]
-        code_fb, _, _ = adb.execute_adb(device_id, cmd_fallback)
-        return code_fb == 0
+        # Fallback Intent không gắn cố định package nếu cả 2 lỗi
+        if not success:
+            cmd_fallback = [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", clean_url,
+                "-f", "0x14000000",
+            ]
+            code_fb, stdout_fb, _ = adb.execute_adb(device_id, cmd_fallback)
+            success = (code_fb == 0 and "Error" not in (stdout_fb or ""))
+
+        # 2. Nếu có video_id cụ thể, kích hoạt native deep link để bảo đảm TikTok mở đúng video đích
+        video_id = extract_tiktok_video_id(clean_url)
+        if video_id:
+            native_schemes = [
+                (f"snssdk1180://aweme/detail/{video_id}", TIKTOK_PRIMARY_PACKAGE),
+                (f"snssdk1233://aweme/detail/{video_id}", TIKTOK_ALT_PACKAGE),
+                (f"tiktok://aweme/detail/{video_id}", None),
+            ]
+            for nat_uri, pkg in native_schemes:
+                cmd_nat = [
+                    "shell", "am", "start",
+                    "-a", "android.intent.action.VIEW",
+                    "-d", nat_uri,
+                    "-f", "0x14000000",
+                ]
+                if pkg:
+                    cmd_nat.extend(["-p", pkg])
+                code_nat, out_nat, _ = adb.execute_adb(device_id, cmd_nat)
+                if code_nat == 0 and "Error" not in (out_nat or ""):
+                    success = True
+
+        return success
 
     elif "facebook" in clean_platform:
         cmd = [
@@ -251,6 +236,9 @@ def wait_for_tiktok_video_ready(
             status_callback(f"[Device {device_id}][TikTok Seeding] {msg}")
 
     log("Đang chờ TikTok tải xong giao diện video...")
+    video_id = extract_tiktok_video_id(clean_url)
+    re_sent = False
+
     for elapsed in range(max(1, timeout)):
         if is_cancelled and is_cancelled():
             return False
@@ -261,6 +249,20 @@ def wait_for_tiktok_video_ready(
                 adb.lock_portrait(device_id, retries=1)
             except Exception:
                 pass
+
+        # Sau 2-3s khi app đã khởi động xong, nếu có video_id, bắn lại deep link native một lần nữa
+        # để đảm bảo app không bị đứng ở màn hình For You (Dành cho bạn)
+        if elapsed == 3 and video_id and not re_sent:
+            re_sent = True
+            log(f"Kích hoạt điều hướng trực tiếp vào video {video_id}...")
+            for nat_uri in (
+                f"snssdk1180://aweme/detail/{video_id}",
+                f"snssdk1233://aweme/detail/{video_id}",
+            ):
+                adb.execute_adb(
+                    device_id,
+                    ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", nat_uri, "-f", "0x14000000"],
+                )
 
         # Cho video ổn định ít nhất 5s để các máy cấu hình thấp load xong
         if elapsed >= 5:
@@ -441,12 +443,13 @@ def find_tiktok_comment_icon_coords(
                             "comment_count", "comment_list", "comment_icon",
                             "desc_comment", "đọc hoặc thêm bình luận", "doc hoac them binh luan",
                             "be the first", "add comment", "read or add comments",
-                            "leave a comment", "post a comment", "comments"
+                            "leave a comment", "post a comment", "comments",
+                            "add 1st", "add1st", "add first", "1st", "first to comment"
                         )
                     )
                     if is_comment:
                         elem_h = y2 - y1
-                        # Nếu trúng nhãn text nhỏ ở dưới icon (như chữ 'Bóc tem'), nhấp nhẹ lên trên để trúng tâm quả bóng chat
+                        # Nếu trúng nhãn text nhỏ ở dưới icon (như chữ 'Bóc tem', 'Add 1st'), nhấp nhẹ lên trên để trúng tâm quả bóng chat
                         if elem_h < height * 0.05:
                             return cx, max(int(height * 0.35), cy - int(height * 0.025))
                         return cx, cy
@@ -495,6 +498,15 @@ def find_tiktok_comment_icon_coords(
 
 def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
     """Kiểm tra xem bottom sheet bình luận của TikTok đã mở thành công hay chưa."""
+    width = 1080
+    if hasattr(adb, "get_effective_screen_size"):
+        try:
+            w_eff, _ = adb.get_effective_screen_size(device_id)
+            if w_eff > 0:
+                width = w_eff
+        except Exception:
+            pass
+
     xml_file = f"/sdcard/chk_cmt_{device_id}.xml"
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
     local_xml = os.path.join(tempfile.gettempdir(), f"chk_cmt_{safe_dev}.xml")
@@ -515,19 +527,40 @@ def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
                     rid = (elem.get("resource-id") or "").casefold()
                     bounds = elem.get("bounds", "")
                     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    cx = (int(m.group(1)) + int(m.group(3))) // 2 if m else 0
                     cy = (int(m.group(2)) + int(m.group(4))) // 2 if m else 0
 
-                    if "edittext" in cls_name and cy >= height * 0.40:
+                    # 1. Ô EditText nằm ở nửa dưới màn hình (ô nhập bình luận của bottom sheet)
+                    if "edittext" in cls_name and cy >= height * 0.35:
                         return True
+
+                    # 2. Các cụm từ chỉ có trong giao diện khung bình luận (loại trừ icon bên thanh điều hướng)
                     if any(
-                        kw in txt or kw in desc or kw in rid
+                        kw in txt or kw in desc
                         for kw in (
-                            "thêm bình luận", "add comment", "comment_edit_text",
-                            "comment_list", "et_comment", "c0e", "desc_comment",
-                            "đóng", "close", "viết bình luận"
+                            "thêm bình luận", "add comment", "viết bình luận",
+                            "bình luận công khai", "để lại bình luận", "nhập bình luận",
+                            "chưa có bình luận", "be the first to comment", "no comments yet",
+                            "gửi bình luận", "bình luận với tư cách"
                         )
                     ):
                         return True
+
+                    # 3. Tiêu đề bình luận ở giữa/trái màn hình (x < 75%, không phải icon ở cột phải x >= 75%)
+                    if cx < width * 0.75 and cy >= height * 0.20:
+                        if any(kw in txt or kw in desc for kw in ("bình luận", "comments")):
+                            return True
+
+                    # 4. Resource-ID đặc thù của comment sheet
+                    if any(
+                        kw in rid
+                        for kw in (
+                            "comment_edit_text", "et_comment", "c0e", "comment_list",
+                            "comment_container", "comment_bottom_sheet", "comment_reply_text"
+                        )
+                    ):
+                        return True
+
                 # Đã đọc được cây UI dump của TikTok nhưng không có dấu hiệu comment sheet
                 return False
     except Exception:
@@ -539,11 +572,20 @@ def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
             except Exception:
                 pass
 
-    # Nếu uiautomator dump không trích xuất được: kiểm tra qua dumpsys window focus
+    # Nếu uiautomator dump không trích xuất được: kiểm tra qua dumpsys
+    # 1. Kiểm tra bàn phím có đang bật không qua dumpsys input_method
+    try:
+        _, im_out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
+        if "minputshown=true" in (im_out or "").casefold():
+            return True
+    except Exception:
+        pass
+
+    # 2. Kiểm tra cửa sổ comment bottom sheet thực sự qua dumpsys window windows
     try:
         _, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
         lowered = (out or "").casefold()
-        if any(w in lowered for w in ("comment", "bottomsheet", "dialog", "inputmethod")):
+        if any(w in lowered for w in ("commentbottomsheet", "commentdialog", "commentlistsheet", "awemecomment")):
             return True
     except Exception:
         pass
@@ -666,7 +708,7 @@ def ensure_comment_input_ready(
         is_shown = "minputshown=true" in (out or "").casefold()
         if not is_shown:
             _, win_out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
-            is_shown = any(w in (win_out or "").casefold() for w in ("inputmethod", "softinput", "dialog"))
+            is_shown = any(w in (win_out or "").casefold() for w in ("minputshown=true", "mhasfocus=true", "currentfocus"))
 
         if is_shown:
             break
@@ -769,18 +811,21 @@ def post_tiktok_comment(
         comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
         log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
 
-        for attempt in range(1, 4):
+        for attempt in range(1, 5):
             if is_cancelled and is_cancelled():
                 return False
 
             if attempt == 1:
                 target_x, target_y = comment_x, comment_y
             elif attempt == 2:
-                target_x, target_y = int(width * 0.925), int(height * 0.635)
-                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout A ({target_x}, {target_y})...")
+                target_x, target_y = int(width * 0.925), int(height * 0.615)
+                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout S1 ({target_x}, {target_y})...")
+            elif attempt == 3:
+                target_x, target_y = int(width * 0.925), int(height * 0.575)
+                log(f"Thử lại mở khung bình luận lần 3 tại Layout B ({target_x}, {target_y})...")
             else:
-                target_x, target_y = int(width * 0.925), int(height * 0.550)
-                log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
+                target_x, target_y = int(width * 0.925), int(height * 0.525)
+                log(f"Thử lại mở khung bình luận lần 4 tại Layout C ({target_x}, {target_y})...")
 
             adb.tap(device_id, target_x, target_y)
             time.sleep(random.uniform(1.8, 2.2))
@@ -824,18 +869,20 @@ def post_tiktok_comment(
     if is_cancelled and is_cancelled():
         return False
 
-    # 7. Bấm đúng vào icon màu đỏ mũi tên trắng để gửi bình luận
+    # 7. Bấm đúng vào icon màu đỏ mũi tên trắng hoặc phím Enter để gửi bình luận
     log("Tìm nút tròn đỏ mũi tên gửi bình luận...")
     time.sleep(0.8)
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
     log(f"Chạm nút tròn đỏ gửi TikTok tại ({send_x}, {send_y})...")
     adb.tap(device_id, send_x, send_y)
     time.sleep(0.4)
-    # Kích hoạt phím Enter / Action Send
+    # Kích hoạt phím Enter / Action Send (KeyEvent 66)
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
-    time.sleep(0.4)
+    time.sleep(0.5)
     # Chạm lại nút tròn đỏ mũi tên gửi một lần nữa để đảm bảo nhận touch event 100%
     adb.tap(device_id, send_x, send_y)
+    time.sleep(0.4)
+    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(random.uniform(2.5, 3.2))
 
     # 8. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm như module Facebook/TikTok
