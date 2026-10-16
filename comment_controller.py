@@ -1536,8 +1536,9 @@ def build_execution_tasks(
                     break
 
             if fallback_cand:
-                fallback_cand.content = clean_text
-                if url:
+                if not getattr(fallback_cand, "content", "").strip():
+                    fallback_cand.content = clean_text
+                if url and not getattr(fallback_cand, "url", "").strip():
                     fallback_cand.url = url
                 result.append(fallback_cand)
             else:

@@ -566,6 +566,61 @@ class ADBController:
         self.lock_portrait(device_id, retries=2)
         return False
 
+    def emergency_stop_and_clear_recents(self, device_id):
+        """Dừng khẩn cấp tức thì: Cưỡng chế đóng toàn bộ ứng dụng và xóa sạch đa nhiệm trên máy."""
+        packages_to_stop = [
+            "com.ss.android.ugc.trill",
+            "com.zhiliaoapp.musically",
+            "com.facebook.katana",
+            "com.facebook.lite",
+            "com.facebook.orca",
+            "com.android.chrome",
+            "com.google.android.apps.chrome",
+            "com.sec.android.app.sbrowser",
+        ]
+        # 1. Force stop tất cả app mục tiêu
+        for pkg in packages_to_stop:
+            try:
+                self.execute_adb(device_id, ["shell", "am", "force-stop", pkg], timeout=2.0)
+            except Exception:
+                pass
+
+        # 2. Kill background processes
+        try:
+            self.execute_adb(device_id, ["shell", "am", "kill-all"], timeout=2.0)
+        except Exception:
+            pass
+
+        # 3. Trở về màn hình Home
+        self.keyevent(device_id, 3)  # KEYCODE_HOME
+        time.sleep(0.2)
+
+        # 4. Mở màn hình đa nhiệm (Recent Apps)
+        self.keyevent(device_id, 187)  # KEYCODE_APP_SWITCH
+        time.sleep(0.35)
+
+        # 5. Thử xóa đa nhiệm nhanh (max_scrolls=0, không cuộn lặp)
+        cleared = False
+        try:
+            cleared = self.clear_recent_apps(device_id, max_scrolls=0)
+        except Exception:
+            cleared = False
+
+        if not cleared:
+            # Fallback tọa độ nút "Đóng tất cả" / "Clear all" của Samsung & Android
+            width, height = self.get_effective_screen_size(device_id)
+            self.tap(device_id, width // 2, int(height * 0.91))
+            time.sleep(0.2)
+            self.tap(device_id, width // 2, int(height * 0.88))
+            time.sleep(0.2)
+            self.tap(device_id, width // 2, int(height * 0.95))
+            time.sleep(0.2)
+
+        # 6. Trở về Home sạch sẽ và khóa dọc
+        self.keyevent(device_id, 3)
+        self.lock_portrait(device_id, retries=1)
+        return True
+
     def launch_app(self, device_id, package_name):
         """Khởi chạy một ứng dụng bằng package name"""
         # Sử dụng monkey để khởi chạy nhanh app từ launcher
@@ -2579,6 +2634,7 @@ class ADBController:
         self, device_id, width, height, status_callback=None
     ):
         """Thực hiện vi tương tác Facebook (Like, Click 'Xem thêm' bài viết)."""
+        interacted = False
         # 1. Bấm 'Xem thêm' (See more) để mở rộng bài viết dài (tăng Dwell Time)
         if random.random() < 0.35:
             root = self._get_facebook_ui_root(device_id, "fb_seemore")
@@ -2606,7 +2662,8 @@ class ADBController:
                                         "[FB Vi tương tác] 📖 Bấm 'Xem thêm' bài viết dài...",
                                     )
                                 time.sleep(0.8)
-                                return True
+                                interacted = True
+                                break
 
         # 2. Thả Like ngẫu nhiên (tỷ lệ cấu hình)
         if random.random() < config.INTERACTION_LIKE_RATE:
@@ -2617,11 +2674,14 @@ class ADBController:
                         elem.get("content-desc", "")
                     )
                     text = self._normalize_facebook_text(elem.get("text", ""))
-                    if "thich" in desc or "like" in desc or "thich" in text:
-                        # Tuyệt đối không bấm nếu là nút Nhắn tin / Messenger / Gửi
+                    if "thich" in desc or "like" in desc or "thich" in text or "like" in text:
+                        # Tuyệt đối không bấm nếu là nút Nhắn tin / Messenger / Gửi / Bình luận / Chia sẻ
                         if any(
                             k in desc or k in text
-                            for k in ("nhan tin", "tin nhan", "messenger", "message", "gui")
+                            for k in (
+                                "nhan tin", "tin nhan", "messenger", "message",
+                                "gui", "binh luan", "comment", "chia se", "share"
+                            )
                         ):
                             continue
                         bounds = elem.get("bounds", "")
@@ -2637,6 +2697,7 @@ class ADBController:
                             ):
                                 # Trích xuất chữ ký bài viết từ các đoạn text nằm phía trên nút Thích
                                 post_texts = []
+                                reaction_bar_liked = False
                                 for other_elem in root.iter():
                                     other_bounds = other_elem.get("bounds", "")
                                     om = re.findall(r"\d+", other_bounds)
@@ -2647,7 +2708,25 @@ class ADBController:
                                             odesc = other_elem.get("content-desc", "").strip()
                                             content = otext or odesc
                                             if content and len(content) > 3:
-                                                post_texts.append(content)
+                                                norm_c = self._normalize_facebook_text(content)
+                                                # Kiểm tra thanh cảm xúc ngay trên nút Thích có "Bạn và..." / "You and..."
+                                                if y1 - int(height * 0.12) <= oy1 < y1:
+                                                    if (
+                                                        norm_c.startswith("ban va ")
+                                                        or " ban va " in norm_c
+                                                        or norm_c.startswith("you and ")
+                                                        or " you and " in norm_c
+                                                    ):
+                                                        reaction_bar_liked = True
+                                                # Lọc bỏ các con số đếm lượt thích/bình luận động để post_sig luôn cố định
+                                                if not any(
+                                                    dyn in norm_c
+                                                    for dyn in (
+                                                        "nguoi khac", "luot thich", "binh luan",
+                                                        "luot chia se", "others", "comments", "shares"
+                                                    )
+                                                ):
+                                                    post_texts.append(content)
 
                                 if post_texts:
                                     combined = " ".join(post_texts[:5])
@@ -2657,12 +2736,15 @@ class ADBController:
 
                                 # Bảo vệ chống hủy Like: Nếu nút đã ở trạng thái Đã thích -> Bỏ qua ngay
                                 is_already_liked = (
-                                    elem.get("selected", "").lower() == "true"
+                                    reaction_bar_liked
+                                    or elem.get("selected", "").lower() == "true"
+                                    or elem.get("checked", "").lower() == "true"
                                     or any(
                                         k in desc or k in text
                                         for k in (
                                             "da thich", "đã thích", "liked",
-                                            "bo thich", "bỏ thích", "go thich", "gỡ thích", "unlike"
+                                            "bo thich", "bỏ thích", "go thich", "gỡ thích", "unlike",
+                                            "da bay to", "reacted", "nhan dup de bo thich", "double tap to unlike"
                                         )
                                     )
                                 )
@@ -2703,7 +2785,7 @@ class ADBController:
                                     )
                                 time.sleep(0.8)
                                 return True
-        return False
+        return interacted
 
     def browse_facebook_surface(
         self,
@@ -7386,6 +7468,86 @@ class ADBController:
             return True
         return False
 
+    def _extract_tiktok_clip_interaction_state(self, root, width, height):
+        """Trích xuất chữ ký nội dung clip (content_sig), trạng thái Đã thả tim (ui_liked) và Đã lưu Bookmark (ui_bookmarked) từ UI TikTok."""
+        if root is None:
+            return None, False, False
+
+        ui_liked = False
+        ui_bookmarked = False
+        caption_parts = []
+
+        for elem in root.iter():
+            bounds = elem.get("bounds", "")
+            m = re.findall(r"\d+", bounds)
+            if len(m) < 4:
+                continue
+            x1, y1, x2, y2 = map(int, m[:4])
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+
+            desc_raw = (elem.get("content-desc") or "").strip()
+            txt_raw = (elem.get("text") or "").strip()
+            rid_raw = (elem.get("resource-id") or "").strip()
+            desc = desc_raw.casefold()
+            txt = txt_raw.casefold()
+            rid = rid_raw.casefold()
+            norm_desc = self._normalize_tiktok_text(desc_raw)
+            norm_txt = self._normalize_tiktok_text(txt_raw)
+            is_selected = (
+                elem.get("selected", "").lower() == "true"
+                or elem.get("checked", "").lower() == "true"
+            )
+
+            # 1. Cột nút tương tác bên phải (x >= 72% bề ngang màn hình)
+            if cx >= int(width * 0.72) and int(height * 0.30) <= cy <= int(height * 0.88):
+                if any(
+                    k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
+                    for k in ("like", "thích", "thich", "heart", "tim")
+                ):
+                    if is_selected or any(
+                        k in desc or k in txt or k in norm_desc or k in norm_txt
+                        for k in (
+                            "đã thích", "da thich", "liked",
+                            "bỏ thích", "bo thich", "gỡ thích", "go thich", "unlike"
+                        )
+                    ):
+                        ui_liked = True
+
+                if any(
+                    k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
+                    for k in ("bookmark", "lưu", "luu", "yêu thích", "yeu thich", "favorite", "collect", "save")
+                ):
+                    if is_selected or any(
+                        k in desc or k in txt or k in norm_desc or k in norm_txt
+                        for k in (
+                            "đã lưu", "da luu", "saved",
+                            "bỏ lưu", "bo luu", "added to favorites", "remove from favorites"
+                        )
+                    ):
+                        ui_bookmarked = True
+
+            # 2. Vùng mô tả/caption bên trái phía dưới để tạo chữ ký bài đăng cố định
+            elif cx < int(width * 0.72) and int(height * 0.50) <= cy <= int(height * 0.90):
+                content = txt_raw or desc_raw
+                if content and len(content) > 4:
+                    norm_c = norm_txt or norm_desc
+                    if not any(
+                        nav in norm_c
+                        for nav in (
+                            "trang chu", "danh cho ban", "ban be", "hop thu", "ho so",
+                            "home", "for you", "friends", "inbox", "profile", "following"
+                        )
+                    ):
+                        caption_parts.append(content)
+
+        content_sig = None
+        if caption_parts:
+            combined = " ".join(caption_parts[:4])
+            content_sig = "tt_post_" + hashlib.md5(combined.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+        return content_sig, ui_liked, ui_bookmarked
+
     def perform_tiktok_micro_interactions(
         self,
         device_id,
@@ -7397,16 +7559,55 @@ class ADBController:
     ):
         """Thực hiện ma trận vi tương tác ngẫu nhiên (Thả tim, Bookmark, Share, Comment) trên clip TikTok."""
         cx = width // 2
+        ui_checked = False
+        content_sig = None
+        ui_liked = False
+        ui_bookmarked = False
+
+        def ensure_ui_state():
+            nonlocal ui_checked, content_sig, ui_liked, ui_bookmarked
+            if not ui_checked:
+                ui_checked = True
+                try:
+                    root = self._get_tiktok_ui_root(device_id, "tt_micro")
+                    if root is not None:
+                        content_sig, ui_liked, ui_bookmarked = (
+                            self._extract_tiktok_clip_interaction_state(root, width, height)
+                        )
+                except Exception:
+                    pass
 
         # 1. Thả Tim / Like (Double-Tap vào giữa màn hình)
         if random.random() < config.INTERACTION_LIKE_RATE:
-            if clip_signature and interaction_tracker.has_interacted(
-                device_id, "tiktok", clip_signature, "like"
-            ):
+            already_liked = bool(
+                clip_signature
+                and interaction_tracker.has_interacted(
+                    device_id, "tiktok", clip_signature, "like"
+                )
+            )
+            if not already_liked:
+                ensure_ui_state()
+                if ui_liked or (
+                    content_sig
+                    and interaction_tracker.has_interacted(
+                        device_id, "tiktok", content_sig, "like"
+                    )
+                ):
+                    already_liked = True
+
+            if already_liked:
+                if clip_signature:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", clip_signature, "like"
+                    )
+                if content_sig:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", content_sig, "like"
+                    )
                 if status_callback:
                     status_callback(
                         device_id,
-                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature}' đã từng thả tim trước đây • Bỏ qua.",
+                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature or content_sig}' đã từng thả tim trước đây • Bỏ qua, tránh mất tim.",
                     )
             else:
                 like_x = cx + random.randint(-40, 40)
@@ -7418,6 +7619,10 @@ class ADBController:
                     interaction_tracker.record_interaction(
                         device_id, "tiktok", clip_signature, "like"
                     )
+                if content_sig:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", content_sig, "like"
+                    )
                 if status_callback:
                     status_callback(
                         device_id, "[TikTok Vi tương tác] ❤️ Thả tim ngẫu nhiên vào clip..."
@@ -7426,13 +7631,35 @@ class ADBController:
 
         # 2. Lưu Bookmark / Yêu thích (Tín hiệu thuật toán SEO mạnh nhất)
         if random.random() < config.INTERACTION_BOOKMARK_RATE:
-            if clip_signature and interaction_tracker.has_interacted(
-                device_id, "tiktok", clip_signature, "bookmark"
-            ):
+            already_bookmarked = bool(
+                clip_signature
+                and interaction_tracker.has_interacted(
+                    device_id, "tiktok", clip_signature, "bookmark"
+                )
+            )
+            if not already_bookmarked:
+                ensure_ui_state()
+                if ui_bookmarked or (
+                    content_sig
+                    and interaction_tracker.has_interacted(
+                        device_id, "tiktok", content_sig, "bookmark"
+                    )
+                ):
+                    already_bookmarked = True
+
+            if already_bookmarked:
+                if clip_signature:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", clip_signature, "bookmark"
+                    )
+                if content_sig:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", content_sig, "bookmark"
+                    )
                 if status_callback:
                     status_callback(
                         device_id,
-                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature}' đã lưu Bookmark trước đây • Bỏ qua.",
+                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature or content_sig}' đã lưu Bookmark trước đây • Bỏ qua, tránh mất Bookmark.",
                     )
             else:
                 bm_x = int(width * 0.91) + random.randint(-10, 10)
@@ -7441,6 +7668,10 @@ class ADBController:
                 if clip_signature:
                     interaction_tracker.record_interaction(
                         device_id, "tiktok", clip_signature, "bookmark"
+                    )
+                if content_sig:
+                    interaction_tracker.record_interaction(
+                        device_id, "tiktok", content_sig, "bookmark"
                     )
                 if status_callback:
                     status_callback(
@@ -7965,6 +8196,7 @@ class ADBController:
                             int(height * 0.70) + random.randint(-15, 15),
                             duration=random.randint(450, 700),
                         )
+                        channel_video = max(1, channel_video - 1)
                     else:
                         update_status(
                             f"[TikTok B3] 🎬 Vuốt sang clip tiếp theo trong dòng chảy ({channel_video + 1}) • "
@@ -7979,7 +8211,7 @@ class ADBController:
                             int(height * 0.22) + random.randint(-15, 15),
                             duration=random.randint(450, 700),
                         )
-                    channel_video += 1
+                        channel_video += 1
                     time.sleep(0.5)
                     self.recover_tiktok_if_blocked_by_captcha_or_link(
                         device_id, status_callback=status_callback

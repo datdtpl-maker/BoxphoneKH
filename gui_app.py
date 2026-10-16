@@ -1144,14 +1144,14 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.comment_heading_text,
-            text="BƠM BÌNH LUẬN (SEEDING ĐA NỀN TẢNG)",
+            text="BƠM BÌNH LUẬN SEEDING TIKTOK (NOTION)",
             font=section_font,
             text_color="#312e81",
             anchor="w",
         ).pack(fill="x")
         ctk.CTkLabel(
             self.comment_heading_text,
-            text="Mở link trực tiếp qua Android Intent tàng hình • Dwell tự nhiên • Đồng bộ Notion 2 chiều",
+            text="Chuyên biệt TikTok • Đồng bộ chính xác nội dung Notion • Intent tàng hình • Dwell tự nhiên",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color="#4338ca",
             anchor="w",
@@ -1166,14 +1166,14 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             notion_head,
-            text="1. Dữ liệu từ Notion (Tự động quét câu 'Chưa comment')",
+            text="1. Dữ liệu TikTok từ Notion (Tự động quét câu 'Chưa comment')",
             font=section_font,
             text_color=text,
         ).pack(side="left")
 
         self.btn_comment_scan_notion = ctk.CTkButton(
             notion_head,
-            text="🔍 Quét dữ liệu Notion",
+            text="🔍 Quét Notion (TikTok)",
             font=button_font,
             fg_color="#0f766e",
             hover_color="#115e59",
@@ -1188,7 +1188,7 @@ class GUIApp(ctk.CTk):
 
         self.comment_scan_info_lbl = ctk.CTkLabel(
             self.comment_notion_card,
-            text="Nhấn 'Quét dữ liệu Notion' để tự động lấy toàn bộ bình luận Chưa comment.",
+            text="Nhấn 'Quét Notion (TikTok)' để tự động lấy các video và bình luận Chưa comment.",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=muted,
             anchor="w",
@@ -1204,7 +1204,7 @@ class GUIApp(ctk.CTk):
             border_color=input_border,
         )
         self.comment_task_preview.pack(fill="x", padx=14, pady=(0, 10))
-        self.comment_task_preview.insert("1.0", "Chưa quét dữ liệu. Nhấn nút [Quét dữ liệu Notion] ở trên để tải danh sách.")
+        self.comment_task_preview.insert("1.0", "Chưa quét dữ liệu. Nhấn nút [Quét Notion (TikTok)] ở trên để tải danh sách.")
 
         # 2. Target Link & Platform Card
         self.comment_target_card = ctk.CTkFrame(self.comment_scroll, **card_style)
@@ -1212,7 +1212,7 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.comment_target_card,
-            text="2. Nền tảng & Link bài đăng cần bình luận",
+            text="2. Video TikTok & Thiết bị thực thi",
             font=section_font,
             text_color=text,
         ).pack(fill="x", padx=14, pady=(10, 8))
@@ -1225,15 +1225,16 @@ class GUIApp(ctk.CTk):
         # Platform selector
         plat_box = ctk.CTkFrame(row_cfg, fg_color="transparent")
         plat_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(plat_box, text="Nền tảng:", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(plat_box, text="Nền tảng (TikTok độc quyền):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
         self.comment_platform_combo = ctk.CTkComboBox(
             plat_box,
-            values=comment_controller.PLATFORM_CHOICES,
+            values=["TikTok"],
             command=self._on_comment_platform_changed,
             font=body_font,
             height=36,
             corner_radius=10,
         )
+        self.comment_platform_combo.set("TikTok")
         self.comment_platform_combo.pack(fill="x")
 
         # Device selection entry
@@ -1301,14 +1302,14 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.comment_content_card,
-            text="3. Danh sách nội dung bình luận (Mỗi dòng tương ứng 1 máy):",
+            text="3. Danh sách nội dung bình luận TikTok (Từ Notion):",
             font=section_font,
             text_color=text,
         ).pack(fill="x", padx=14, pady=(10, 4))
 
         ctk.CTkLabel(
             self.comment_content_card,
-            text="Mỗi dòng là 1 câu bình luận. Máy 1 lấy dòng 1, Máy 2 lấy dòng 2... Hỗ trợ tiếng Việt có dấu chuẩn 100%.",
+            text="Nội dung được đồng bộ chính xác 100% từ bảng Notion của video. Mỗi dòng tương ứng 1 máy bơm vào clip.",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=muted,
         ).pack(fill="x", padx=14, pady=(0, 6))
@@ -1334,7 +1335,7 @@ class GUIApp(ctk.CTk):
 
         self.btn_comment_start = ctk.CTkButton(
             btn_row,
-            text="🚀 BẮT ĐẦU BƠM BÌNH LUẬN",
+            text="🚀 BẮT ĐẦU BƠM BÌNH LUẬN TIKTOK",
             font=button_font,
             fg_color=green,
             hover_color=green_hover,
@@ -1699,6 +1700,12 @@ class GUIApp(ctk.CTk):
                 command=lambda: self._navigate_module("Facebook"),
                 **nav_style,
             )
+            self.btn_nav_comment = ctk.CTkButton(
+                self.brand_badge,
+                text="Bơm bình luận TikTok",
+                command=self._open_comment_workspace,
+                **nav_style,
+            )
             self.btn_nav_activity = ctk.CTkButton(
                 self.brand_badge,
                 text="Nhật ký hệ thống",
@@ -1729,6 +1736,7 @@ class GUIApp(ctk.CTk):
             self.btn_nav_overview,
             self.btn_nav_tiktok,
             self.btn_nav_facebook,
+            self.btn_nav_comment,
             self.btn_nav_activity,
         ):
             nav_button.pack(fill="x", pady=2)
@@ -1829,17 +1837,16 @@ class GUIApp(ctk.CTk):
             ).pack(side="left", padx=3)
         self.btn_header_stop = ctk.CTkButton(
             header_meta,
-            text="Dừng khẩn cấp",
-            width=130,
-            height=38,
+            text="🚨 DỪNG KHẨN CẤP",
+            width=155,
+            height=40,
             corner_radius=10,
-            fg_color="#FFF1F2",
-            hover_color="#FFE4E6",
-            text_color=red,
-            border_width=1,
-            border_color="#FECDD3",
+            fg_color="#DC2626",
+            hover_color="#B91C1C",
+            text_color="#FFFFFF",
+            border_width=0,
             cursor="hand2",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             command=self.stop_all,
         )
         self.btn_header_stop.pack(side="left", padx=(8, 0))
@@ -1941,9 +1948,13 @@ class GUIApp(ctk.CTk):
             "overview": self.btn_nav_overview,
             "tiktok": self.btn_nav_tiktok,
             "facebook": self.btn_nav_facebook,
+            "bình luận": getattr(self, "btn_nav_comment", None),
+            "comment": getattr(self, "btn_nav_comment", None),
             "activity": self.btn_nav_activity,
         }
         for key, button in mapping.items():
+            if button is None:
+                continue
             selected = key == active
             button.configure(
                 fg_color="#1D4F91" if selected else "transparent",
@@ -1956,9 +1967,17 @@ class GUIApp(ctk.CTk):
         scroll = {
             "TikTok": self.tiktok_scroll,
             "Facebook": self.facebook_scroll,
+            "Bình luận": self.comment_scroll,
         }.get(module_name)
         if scroll is not None:
             self.after_idle(lambda: scroll._parent_canvas.yview_moveto(0))
+
+    def _open_comment_workspace(self):
+        if self.__dict__.get("_log_expanded", False):
+            self.toggle_system_log()
+        self.module_tabs.set("Bình luận")
+        self._sync_navigation_state("comment")
+        self.after_idle(lambda: self.comment_scroll._parent_canvas.yview_moveto(0))
 
     def _show_operations_overview(self):
         if self.__dict__.get("_log_expanded", False):
@@ -2641,9 +2660,37 @@ class GUIApp(ctk.CTk):
             print("[Telegram] Đã tắt toàn bộ thông báo và kết nối bot.")
 
     def stop_all(self):
+        """Dừng khẩn cấp tức thì: Hủy luồng, cưỡng chế đóng ứng dụng và xóa đa nhiệm trên tất cả các máy."""
         self.comment_cancel_flag = True
         main.cancel_all_workflows()
-        print("[GUI] 🛑 ĐÃ XÓA TOÀN BỘ LUỒNG VÀ DỪNG KHẨN CẤP! Phần mềm sẵn sàng nhận lệnh mới.")
+
+        # Cập nhật ngay trạng thái nút dừng khẩn cấp trên Header
+        if hasattr(self, "btn_header_stop"):
+            self.btn_header_stop.configure(
+                text="🛑 ĐANG DỪNG KHẨN CẤP...",
+                state="disabled",
+                fg_color="#7F1D1D",
+                text_color="#FFFFFF",
+            )
+        self.log_message("[DỪNG KHẨN CẤP] 🚨 Người dùng bấm nút DỪNG KHẨN CẤP!")
+
+        def run_emergency_cleanup():
+            try:
+                main.emergency_stop_all_devices(status_callback=self.log_message)
+            finally:
+                self.after(0, self._restore_stop_button)
+
+        self.run_in_thread(run_emergency_cleanup)
+
+    def _restore_stop_button(self):
+        if hasattr(self, "btn_header_stop"):
+            self.btn_header_stop.configure(
+                text="🚨 DỪNG KHẨN CẤP",
+                state="normal",
+                fg_color="#DC2626",
+                text_color="#FFFFFF",
+            )
+        self.log_message("[DỪNG KHẨN CẤP] ✅ Toàn bộ máy đã được đóng app, xóa sạch đa nhiệm và sẵn sàng nhận lệnh mới.")
 
     def parse_targets(self, entry_widget=None):
         if entry_widget is None:
@@ -4064,29 +4111,27 @@ class GUIApp(ctk.CTk):
 
         def worker():
             try:
-                tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
+                tasks = notion_comment_sync.fetch_notion_comments(
+                    only_uncompleted=True, platform_filter="TikTok"
+                )
                 self.comment_notion_tasks = tasks
 
                 def update_ui():
                     if not tasks:
                         self.comment_scan_info_lbl.configure(
-                            text="Tất cả bình luận trên Notion đã Hoàn thành!"
+                            text="Tất cả bình luận TikTok trên Notion đã Hoàn thành!"
                         )
                         self.comment_task_preview.delete("1.0", "end")
                         self.comment_task_preview.insert(
-                            "1.0", "Không còn câu nào ở trạng thái 'Chưa comment'."
+                            "1.0",
+                            "Không còn câu bình luận TikTok nào ở trạng thái 'Chưa comment' trên Notion.",
                         )
                         self.comment_url_entry.delete(0, "end")
                         self.comment_text_box.delete("1.0", "end")
                         return
 
-                    active_p = self.comment_platform_combo.get().strip()
-                    matched_p = comment_controller.filter_tasks_for_platform(tasks, active_p)
-                    if not matched_p and tasks:
-                        active_p = tasks[0].platform
-                        self.comment_platform_combo.set(active_p)
-
-                    self._sync_comment_ui_for_platform(active_p, update_url=True)
+                    self.comment_platform_combo.set("TikTok")
+                    self._sync_comment_ui_for_platform("TikTok", update_url=True)
 
                 self.after(0, update_ui)
             except Exception as exc:
@@ -4255,13 +4300,15 @@ class GUIApp(ctk.CTk):
         if not all_tasks:
             # Tự động quét Notion nếu chưa quét trước đó
             try:
-                all_tasks = notion_comment_sync.fetch_notion_comments(only_uncompleted=True)
+                all_tasks = notion_comment_sync.fetch_notion_comments(
+                    only_uncompleted=True, platform_filter="TikTok"
+                )
                 self.comment_notion_tasks = all_tasks
             except Exception as e:
                 self.log_message(f"[Notion] Không thể quét tự động: {e}")
                 all_tasks = []
 
-        current_platform = self.comment_platform_combo.get().strip()
+        current_platform = "TikTok"
         current_url = self.comment_url_entry.get().strip()
         raw_lines = [
             line.strip()

@@ -110,6 +110,7 @@ def fetch_notion_comments(
     database_id: Optional[str] = None,
     only_uncompleted: bool = True,
     timeout: float = 12.0,
+    platform_filter: Optional[str] = None,
 ) -> list[NotionCommentTask]:
     """Quét danh sách bình luận từ Notion Database.
     
@@ -117,6 +118,7 @@ def fetch_notion_comments(
     - Quét các bài viết đang cần chạy.
     - Đọc các bình luận trong bảng con của từng bài viết.
     - Chỉ lấy những bình luận có trạng thái 'Chưa comment' (bỏ qua cmt đã Hoàn thành).
+    - Mặc định platform_filter='TikTok' chỉ quét nền tảng TikTok, tuyệt đối không quét Facebook.
     """
     tok = (token or DEFAULT_COMMENT_TOKEN).strip()
     db_id = (database_id or DEFAULT_COMMENT_DATABASE_ID).replace("-", "").strip()
@@ -129,7 +131,8 @@ def fetch_notion_comments(
             {"timestamp": "created_time", "direction": "ascending"}
         ]
     }
-    if only_uncompleted:
+    # Chỉ lọc ngoài database nếu không chỉ định quét TikTok (để không bỏ sót bảng con TikTok có cmt chưa chạy)
+    if only_uncompleted and not (platform_filter and platform_filter.casefold() == "tiktok"):
         query_body["filter"] = {
             "property": "Trạng thái",
             "select": {"does_not_equal": "Hoàn thành"}
@@ -158,12 +161,53 @@ def fetch_notion_comments(
         props = page.get("properties", {})
 
         # 1. Lấy thông tin bài viết cha
-        title_prop = props.get("Bài viết / video") or props.get("Nội dung comment") or {}
+        title_prop = (
+            props.get("Bài viết / video")
+            or props.get("Tên bài viết/Video")
+            or props.get("Tên bài viết / Video")
+            or props.get("Tên bài viết")
+            or props.get("Nội dung comment")
+            or {}
+        )
+        if not title_prop:
+            for p_val in props.values():
+                if isinstance(p_val, dict) and p_val.get("type") == "title":
+                    title_prop = p_val
+                    break
         campaign_title = _plain_text(title_prop, "title")
-        post_url = props.get("Link bài đăng", {}).get("url") or ""
 
-        formula_data = props.get("Nền tảng", {}).get("formula") or {}
-        platform_str = formula_data.get("string") or detect_platform_from_url(post_url)
+        post_url_prop = props.get("Link bài đăng") or props.get("Link bài viết") or props.get("URL") or {}
+        if isinstance(post_url_prop, dict):
+            if post_url_prop.get("type") == "url":
+                post_url = post_url_prop.get("url") or ""
+            else:
+                post_url = _plain_text(post_url_prop, "rich_text") or post_url_prop.get("url") or ""
+        else:
+            post_url = str(post_url_prop)
+        post_url = post_url.strip()
+        if post_url and not post_url.startswith("http") and "tiktok.com" in post_url:
+            post_url = f"https://{post_url}"
+
+        plat_prop = props.get("Nền tảng") or {}
+        if plat_prop.get("type") == "select":
+            platform_str = (plat_prop.get("select") or {}).get("name") or ""
+        elif plat_prop.get("type") == "formula":
+            platform_str = (plat_prop.get("formula") or {}).get("string") or ""
+        else:
+            platform_str = _plain_text(plat_prop, "rich_text")
+        if not platform_str:
+            platform_str = detect_platform_from_url(post_url)
+
+        # Lọc nền tảng nếu được yêu cầu (mặc định chỉ quét TikTok cho bình luận)
+        if platform_filter:
+            p_target = platform_filter.casefold()
+            is_match = (
+                p_target in (platform_str or "").casefold()
+                or (p_target == "tiktok" and "tiktok.com" in (post_url or "").casefold())
+                or (p_target == "facebook" and ("facebook.com" in (post_url or "").casefold() or "fb.watch" in (post_url or "").casefold()))
+            )
+            if not is_match:
+                continue
 
         status_data = props.get("Trạng thái", {}).get("select") or {}
         camp_status = status_data.get("name") or "Chưa chạy"

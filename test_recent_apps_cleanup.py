@@ -151,6 +151,33 @@ class RecentAppsCleanupTests(unittest.TestCase):
         self.assertLess(swipes[0][0], swipes[0][2])
         self.assertEqual([(140, 925)], taps)
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_emergency_stop_and_clear_recents_force_stops_apps_and_cleans_screen(self, _sleep):
+        controller = ADBController(adb_path="adb")
+        executed_cmds = []
+        controller.execute_adb = lambda _dev, cmd, **kwargs: (executed_cmds.append(cmd) or (0, "", ""))
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.get_effective_screen_size = lambda _dev: (1080, 1920)
+        keyevents = []
+        controller.keyevent = lambda _dev, code: keyevents.append(code)
+        controller.clear_recent_apps = lambda _dev, max_scrolls=0: True
+
+        res = controller.emergency_stop_and_clear_recents("dev-test")
+        self.assertTrue(res)
+
+        # Kiểm tra các lệnh force-stop và kill-all đã chạy
+        stopped_pkgs = [
+            cmd[3] for cmd in executed_cmds
+            if len(cmd) >= 4 and cmd[1] == "am" and cmd[2] == "force-stop"
+        ]
+        self.assertIn("com.ss.android.ugc.trill", stopped_pkgs)
+        self.assertIn("com.facebook.katana", stopped_pkgs)
+        self.assertIn("com.android.chrome", stopped_pkgs)
+        self.assertTrue(any(cmd[2] == "kill-all" for cmd in executed_cmds if len(cmd) >= 3 and cmd[1] == "am"))
+
+        # Kiểm tra chuỗi keyevent: HOME (3) -> APP_SWITCH (187) -> HOME (3)
+        self.assertEqual([3, 187, 3], keyevents)
+
 
 if __name__ == "__main__":
     unittest.main()

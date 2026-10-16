@@ -33,6 +33,10 @@ if getattr(sys, "frozen", False) and not ENV_PATH.exists():
             pass
 
 load_dotenv(dotenv_path=ENV_PATH)
+if not os.getenv("NOTION_API_TOKEN"):
+    appdata_env = Path(os.getenv("LOCALAPPDATA", "")) / APP_NAME / ".env"
+    if appdata_env.is_file():
+        load_dotenv(dotenv_path=appdata_env)
 
 # Token Bot Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -117,9 +121,9 @@ NOTION_DATA_SOURCE_ID = os.getenv(
     "NOTION_DATA_SOURCE_ID", "654a56cd7cf5416fb65f9b934a62ec45"
 )
 
-# Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix) - Hạn chế like theo yêu cầu
-INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.03"))
-INTERACTION_BOOKMARK_RATE = float(os.getenv("INTERACTION_BOOKMARK_RATE", "0.05"))
+# Tỷ lệ Vi Tương Tác (Micro-Interactions Matrix) - Đảm bảo lượt tương tác tự nhiên ổn định
+INTERACTION_LIKE_RATE = float(os.getenv("INTERACTION_LIKE_RATE", "0.25"))
+INTERACTION_BOOKMARK_RATE = float(os.getenv("INTERACTION_BOOKMARK_RATE", "0.08"))
 INTERACTION_SHARE_RATE = float(os.getenv("INTERACTION_SHARE_RATE", "0.02"))
 INTERACTION_COMMENT_RATE = float(os.getenv("INTERACTION_COMMENT_RATE", "0.10"))
 INTERACTION_LOOP_RATE = float(os.getenv("INTERACTION_LOOP_RATE", "0.15"))

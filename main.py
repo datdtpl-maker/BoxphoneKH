@@ -121,6 +121,47 @@ def is_cancelled():
     global cancel_flag, cancel_sequential
     return cancel_flag or cancel_sequential
 
+
+def emergency_stop_all_devices(status_callback=None):
+    """Cưỡng chế dừng khẩn cấp: đóng toàn bộ ứng dụng và xóa đa nhiệm trên tất cả các máy kết nối."""
+    cancel_all_workflows()
+    devices = get_ordered_devices()
+    if not devices:
+        if status_callback:
+            status_callback("[Dừng khẩn cấp] Không phát hiện thiết bị nào đang kết nối.")
+        return 0
+
+    if status_callback:
+        status_callback(
+            f"[Dừng khẩn cấp] 🚨 Đang cưỡng chế đóng ứng dụng và xóa đa nhiệm đồng loạt trên {len(devices)} máy..."
+        )
+
+    import concurrent.futures
+
+    success_count = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(40, len(devices))) as executor:
+        futures = {
+            executor.submit(adb.emergency_stop_and_clear_recents, dev_id): dev_id
+            for dev_id in devices
+        }
+        for future in concurrent.futures.as_completed(futures):
+            dev_id = futures[future]
+            dev_name = get_device_name(dev_id)
+            try:
+                future.result()
+                success_count += 1
+                if status_callback:
+                    status_callback(f"[Dừng khẩn cấp] ✅ Máy {dev_name}: Đã đóng app và xóa sạch đa nhiệm.")
+            except Exception as exc:
+                if status_callback:
+                    status_callback(f"[Dừng khẩn cấp] ⚠️ Máy {dev_name}: Lỗi: {exc}")
+
+    if status_callback:
+        status_callback(
+            f"[Dừng khẩn cấp] 🏁 Đã dọn sạch hoàn tất {success_count}/{len(devices)} máy!"
+        )
+    return success_count
+
 # Caching mapping thiết bị toàn cục để tra cứu nhanh
 cached_mapping = {}
 _device_mapping_cache_key = None

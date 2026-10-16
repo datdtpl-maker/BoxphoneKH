@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import unittest
 import tempfile
 import os
@@ -23,6 +23,7 @@ class TestInteractionTracker(unittest.TestCase):
 
         self.adb = ADBController(adb_path="adb")
         self.adb.get_effective_screen_size = lambda _dev: (1080, 1920)
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": None
 
     def tearDown(self):
         interaction_tracker.default_tracker = self.orig_tracker
@@ -176,6 +177,91 @@ class TestInteractionTracker(unittest.TestCase):
         self.assertFalse(res)
         self.assertEqual(1, len(taps)) # Vẫn là 1, không tap thêm
         self.assertTrue(any("đã từng Like bài viết này • Bỏ qua" in s for s in statuses))
+
+    def test_tiktok_micro_interactions_skips_when_ui_heart_selected(self):
+        root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Kem dưỡng ẩm phục hồi da chuyên sâu #skincare" bounds="[30,1450][750,1580]" />
+          <node class="android.widget.ImageView" content-desc="Thích video" resource-id="com.ss.android.ugc.trill:id/like_icon" selected="true" bounds="[940,1020][1040,1120]" />
+        </hierarchy>
+        """)
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": root
+        taps = []
+        statuses = []
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+
+        with patch("adb_controller.random.random", side_effect=[0.001, 0.99, 0.99, 0.99]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_tiktok_micro_interactions(
+                "dev1", 1080, 1920, status_callback=lambda _d, msg: statuses.append(msg),
+                clip_signature="kenh_target_clip_99"
+            )
+
+        self.assertEqual(0, len(taps))
+        self.assertTrue(self.tracker.has_interacted("dev1", "tiktok", "kenh_target_clip_99", "like"))
+        self.assertTrue(any("đã từng thả tim trước đây" in s for s in statuses))
+
+    def test_tiktok_micro_interactions_skips_when_same_caption_content_different_clip_index(self):
+        root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Serum trị mụn tái tạo làn da sáng mịn tự nhiên" bounds="[30,1450][750,1580]" />
+          <node class="android.widget.ImageView" content-desc="Thích video" resource-id="com.ss.android.ugc.trill:id/like_icon" selected="false" bounds="[940,1020][1040,1120]" />
+        </hierarchy>
+        """)
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": root
+        taps = []
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+
+        # Lần 1 ở vị trí clip_1 -> thả tim
+        with patch("adb_controller.random.random", side_effect=[0.001, 0.99, 0.99, 0.99]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_tiktok_micro_interactions(
+                "dev1", 1080, 1920, clip_signature="kenh_target_clip_1"
+            )
+        self.assertEqual(2, len(taps))
+
+        # Lần 2 kênh đăng thêm bài mới làm clip này lùi xuống clip_2 -> vẫn nhận diện qua content_sig và bỏ qua
+        statuses = []
+        with patch("adb_controller.random.random", side_effect=[0.001, 0.99, 0.99, 0.99]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_tiktok_micro_interactions(
+                "dev1", 1080, 1920, status_callback=lambda _d, msg: statuses.append(msg),
+                clip_signature="kenh_target_clip_2"
+            )
+        self.assertEqual(2, len(taps))
+        self.assertTrue(any("đã từng thả tim trước đây" in s for s in statuses))
+
+    def test_facebook_micro_interactions_reaction_bar_and_dynamic_counts(self):
+        # Bài viết có dòng đếm động "15 người khác" thay đổi thành "28 người khác" vẫn giữ nguyên post_sig
+        root1 = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Kem chống nắng phổ rộng bảo vệ da tối ưu" bounds="[50,550][1000,680]" />
+          <node class="android.widget.TextView" text="15 lượt thích" bounds="[50,740][400,785]" />
+          <node class="android.widget.Button" text="Thích" content-desc="Thích" selected="false" bounds="[50,800][250,880]" />
+        </hierarchy>
+        """)
+        self.adb._get_facebook_ui_root = lambda _dev, _p: root1
+        taps = []
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+
+        with patch("adb_controller.random.random", side_effect=[0.99, 0.001]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_facebook_micro_interactions("dev1", 1080, 1920)
+        self.assertEqual(1, len(taps))
+
+        # Lần sau số lượt thích tăng lên "28 lượt thích" -> vẫn khớp post_sig đã lưu, không bấm lại
+        root2 = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Kem chống nắng phổ rộng bảo vệ da tối ưu" bounds="[50,550][1000,680]" />
+          <node class="android.widget.TextView" text="28 lượt thích" bounds="[50,740][400,785]" />
+          <node class="android.widget.Button" text="Thích" content-desc="Thích" selected="false" bounds="[50,800][250,880]" />
+        </hierarchy>
+        """)
+        self.adb._get_facebook_ui_root = lambda _dev, _p: root2
+        with patch("adb_controller.random.random", side_effect=[0.99, 0.001]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_facebook_micro_interactions("dev1", 1080, 1920)
+        self.assertEqual(1, len(taps))
 
 
 if __name__ == "__main__":
