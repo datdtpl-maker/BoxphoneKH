@@ -2080,6 +2080,8 @@ class GUIApp(ctk.CTk):
         def action():
             try:
                 print("[Hệ thống] Đang quét cổng thiết bị USB/ADB...")
+                if hasattr(main.adb, "reconnect_devices"):
+                    main.adb.reconnect_devices()
                 devices = main.get_ordered_devices()
                 count = len(devices)
                 for _ in range(15):
@@ -2099,6 +2101,21 @@ class GUIApp(ctk.CTk):
                     self.bulk_disable_rotation(devices)
                 else:
                     print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
+
+                # Chẩn đoán trạng thái chi tiết các thiết bị
+                if hasattr(main.adb, "get_devices_status_detail"):
+                    status_detail = main.adb.get_devices_status_detail()
+                    offline_devs = status_detail.get("offline", [])
+                    unauth_devs = status_detail.get("unauthorized", [])
+                    if offline_devs:
+                        print(f"[Cảnh báo] ⚠️ Phát hiện {len(offline_devs)} máy OFFLINE: {', '.join(offline_devs)} (hãy kiểm tra dây cắm hoặc bật sáng màn hình).")
+                    if unauth_devs:
+                        print(f"[Cảnh báo] ⚠️ Phát hiện {len(unauth_devs)} máy CHƯA CẤP QUYỀN (Unauthorized): {', '.join(unauth_devs)} (cần mở màn hình bấm 'Luôn cho phép gỡ lỗi USB từ máy tính này').")
+                    total_detected = count + len(offline_devs) + len(unauth_devs)
+                    if total_detected <= 20 and count > 0:
+                        print("[Lưu ý Box 40 máy] 💡 Nếu box có 40 máy nhưng hệ điều hành chỉ nhận <= 16-20 máy:")
+                        print("   1. Kiểm tra cáp USB thứ 2 ở mặt sau Box Phone và công tắc nguồn của cụm Hub 2.")
+                        print("   2. Cắm 2 cáp USB vào 2 cổng USB độc lập trên PC (tránh nghẽn 64 Endpoints của 1 cổng USB).")
             finally:
                 if "btn_refresh" in self.__dict__:
                     for _ in range(15):

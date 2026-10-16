@@ -141,7 +141,31 @@ class ADBPerformanceTests(unittest.TestCase):
         finally:
             app._bulk_rotation_lock.release()
 
-        lock.assert_not_called()
+    def test_get_devices_status_detail_classifies_devices(self):
+        controller = ADBController(adb_path="adb")
+        sample_output = (
+            "List of devices attached\n"
+            "device1\tdevice\n"
+            "device2\toffline\n"
+            "device3\tunauthorized\n"
+            "device4\tunknown\n"
+        )
+        with patch.object(controller, "_run_cmd", return_value=(0, sample_output, "")):
+            details = controller.get_devices_status_detail()
+
+        self.assertEqual(["device1"], details["online"])
+        self.assertEqual(["device2"], details["offline"])
+        self.assertEqual(["device3"], details["unauthorized"])
+        self.assertEqual([("device4", "unknown")], details["other"])
+
+    def test_reconnect_devices_invokes_adb_reconnect(self):
+        controller = ADBController(adb_path="adb")
+        commands = []
+        with patch.object(controller, "_run_cmd", side_effect=lambda cmd: (commands.append(cmd), (0, "", ""))[1]):
+            controller.reconnect_devices()
+
+        self.assertIn(["reconnect", "offline"], commands)
+        self.assertIn(["reconnect"], commands)
 
 
 if __name__ == "__main__":

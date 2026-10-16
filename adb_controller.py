@@ -350,6 +350,47 @@ class ADBController:
                 devices.append(parts[0])
         return devices
 
+    def get_devices_status_detail(self):
+        """Quét và phân loại chi tiết trạng thái của toàn bộ thiết bị:
+        online (device), offline, unauthorized, other.
+        """
+        code, stdout, stderr = self._run_cmd(["devices"])
+        if code != 0:
+            return {"online": [], "offline": [], "unauthorized": [], "other": []}
+
+        status_map = {
+            "online": [],
+            "offline": [],
+            "unauthorized": [],
+            "other": [],
+        }
+        lines = stdout.splitlines()
+        for line in lines[1:]:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            parts = line_str.split()
+            if len(parts) >= 2:
+                serial = parts[0]
+                st = parts[1].lower()
+                if st == "device":
+                    status_map["online"].append(serial)
+                elif st == "offline":
+                    status_map["offline"].append(serial)
+                elif st == "unauthorized":
+                    status_map["unauthorized"].append(serial)
+                else:
+                    status_map["other"].append((serial, st))
+        return status_map
+
+    def reconnect_devices(self):
+        """Tự động khôi phục kết nối các máy offline hoặc bị nghẽn ADB stack."""
+        try:
+            self._run_cmd(["reconnect", "offline"])
+            self._run_cmd(["reconnect"])
+        except Exception:
+            pass
+
     def ensure_ime(self, device_id):
         """Đảm bảo bàn phím XwIME đã được bật và chọn làm mặc định để gõ được Tiếng Việt"""
         ime_name = "com.android.xwkeyboard/.XwIME"
