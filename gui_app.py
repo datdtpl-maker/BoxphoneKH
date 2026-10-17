@@ -2432,8 +2432,12 @@ class GUIApp(ctk.CTk):
             for item in admin_ids.split(",")
             if item.strip().isdigit()
         ]
-        config.ADB_PATH = get_value(
-            "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+        config.ADB_PATH = (
+            config.resolve_adb_path(
+                get_value("ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe")
+            )
+            if hasattr(config, "resolve_adb_path")
+            else get_value("ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe")
         )
         config.NOTION_API_TOKEN = get_value("NOTION_API_TOKEN")
         config.NOTION_DATA_SOURCE_ID = get_value("NOTION_DATA_SOURCE_ID")
@@ -2533,7 +2537,14 @@ class GUIApp(ctk.CTk):
     def save_settings(self):
         token = self.ent_token.get().strip()
         admin_ids = self.ent_admins.get().strip()
-        adb_path = self.ent_adb.get().strip()
+        raw_adb = self.ent_adb.get().strip()
+        adb_path = (
+            config.resolve_adb_path(raw_adb)
+            if hasattr(config, "resolve_adb_path")
+            else raw_adb
+        )
+        if adb_path != raw_adb:
+            self._set_entry_value(self.ent_adb, adb_path)
         notion_token = self.ent_notion_token.get().strip()
         notion_source_id = self.ent_notion_source_id.get().strip()
         telegram_token_valid = main.is_valid_telegram_token(token)

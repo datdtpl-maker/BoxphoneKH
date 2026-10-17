@@ -134,6 +134,23 @@ class ConfigPersistenceTests(unittest.TestCase):
         self.assertIn("NOTION_DATA_SOURCE_ID=source-placeholder", saved)
         showwarning.assert_called_once()
 
+    def test_resolve_adb_path_normalizes_directory_and_quotes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            fake_adb = Path(folder) / "adb.exe"
+            fake_adb.write_text("dummy", encoding="utf-8")
+
+            # Trường hợp 1: Người dùng nhập đường dẫn thư mục cha
+            resolved = config.resolve_adb_path(folder)
+            self.assertEqual(str(fake_adb), resolved)
+
+            # Trường hợp 2: Người dùng nhập có bao bọc dấu ngoặc kép
+            resolved_quoted = config.resolve_adb_path(f'"{folder}"')
+            self.assertEqual(str(fake_adb), resolved_quoted)
+
+            # Trường hợp 3: Nhập trực tiếp file
+            resolved_file = config.resolve_adb_path(str(fake_adb))
+            self.assertEqual(str(fake_adb), resolved_file)
+
 
 if __name__ == "__main__":
     unittest.main()

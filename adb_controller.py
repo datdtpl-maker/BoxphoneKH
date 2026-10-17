@@ -47,7 +47,11 @@ class ADBController:
         max_parallel_commands=32,
         portrait_cache_seconds=5.0,
     ):
-        self.adb_path = adb_path
+        self._adb_path = (
+            config.resolve_adb_path(adb_path)
+            if hasattr(config, "resolve_adb_path")
+            else adb_path
+        )
         self.max_parallel_commands = max(
             1, min(64, int(max_parallel_commands))
         )
@@ -57,7 +61,6 @@ class ADBController:
         self._use_socket_transport = True
         self._server_checked = False
         self._server_check_lock = threading.Lock()
-        self._device_workflow_locks = {}
         self._active_device_workflows = {}
         self._device_workflow_locks_guard = threading.Lock()
         self._portrait_cache_seconds = max(
@@ -70,6 +73,20 @@ class ADBController:
         self._screen_size_cache_seconds = 300.0
         self._screen_size_cache_guard = threading.Lock()
         self._recent_tiktok_target_taps = {}
+
+    @property
+    def adb_path(self):
+        if hasattr(config, "resolve_adb_path"):
+            return config.resolve_adb_path(self._adb_path)
+        return self._adb_path
+
+    @adb_path.setter
+    def adb_path(self, value):
+        self._adb_path = (
+            config.resolve_adb_path(value)
+            if hasattr(config, "resolve_adb_path")
+            else value
+        )
 
     @contextmanager
     def device_workflow_scope(self, device_id):

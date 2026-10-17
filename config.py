@@ -38,6 +38,23 @@ if not os.getenv("NOTION_API_TOKEN"):
     if appdata_env.is_file():
         load_dotenv(dotenv_path=appdata_env)
 
+def resolve_adb_path(raw_path):
+    """Chuẩn hóa đường dẫn ADB: tự động thêm adb.exe nếu người dùng chỉ nhập thư mục."""
+    if not raw_path:
+        return r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+    p = str(raw_path).strip().strip('"').strip("'")
+    if os.path.isdir(p):
+        for candidate in [os.path.join(p, "adb.exe"), os.path.join(p, "adb")]:
+            if os.path.isfile(candidate):
+                return candidate
+        return os.path.join(p, "adb.exe")
+    if not p.lower().endswith(".exe") and not os.path.isfile(p):
+        cand = p + ".exe"
+        if os.path.isfile(cand):
+            return cand
+    return p
+
+
 # Token Bot Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
@@ -51,8 +68,8 @@ ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = [int(uid.strip()) for uid in ALLOWED_USER_IDS_RAW.split(",") if uid.strip().isdigit()]
 
 # Đường dẫn đến công cụ adb.exe của phần mềm xiaowei
-ADB_PATH = os.getenv(
-    "ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+ADB_PATH = resolve_adb_path(
+    os.getenv("ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe")
 )
 
 # Tên gói ứng dụng (package) của TikTok
