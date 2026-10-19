@@ -41,7 +41,13 @@ if not os.getenv("NOTION_API_TOKEN"):
 def resolve_adb_path(raw_path):
     """Chuẩn hóa đường dẫn ADB: tự động thêm adb.exe nếu người dùng chỉ nhập thư mục."""
     if not raw_path:
-        return r"C:\Program Files (x86)\xiaowei\tools\adb.exe"
+        for cand in [
+            r"C:\Program Files (x86)\xiaowei_android\tools\adb.exe",
+            r"C:\Program Files (x86)\xiaowei\tools\adb.exe",
+        ]:
+            if os.path.isfile(cand):
+                return cand
+        return r"C:\Program Files (x86)\xiaowei_android\tools\adb.exe"
     p = str(raw_path).strip().strip('"').strip("'")
     if os.path.isdir(p):
         for candidate in [os.path.join(p, "adb.exe"), os.path.join(p, "adb")]:
@@ -53,6 +59,25 @@ def resolve_adb_path(raw_path):
         if os.path.isfile(cand):
             return cand
     return p
+
+
+def parse_adb_ports(raw_ports):
+    """Phân tích cấu hình các cổng ADB (vd: '5037,5038') thành tuple số nguyên."""
+    if not raw_ports:
+        return (5037, 5038)
+    ports = []
+    cleaned = str(raw_ports).replace("[", "").replace("]", "").replace(";", ",")
+    for part in cleaned.split(","):
+        part = part.strip()
+        if part.isdigit():
+            p = int(part)
+            if 1 <= p <= 65535 and p not in ports:
+                ports.append(p)
+    return tuple(ports) if ports else (5037, 5038)
+
+
+# Danh sách cổng ADB đa tiến trình (hỗ trợ Box 40 máy chạy song song trên cổng 5037 và 5038)
+ADB_PORTS = parse_adb_ports(os.getenv("ADB_PORTS", "5037,5038"))
 
 
 # Token Bot Telegram
@@ -69,7 +94,7 @@ ALLOWED_USER_IDS = [int(uid.strip()) for uid in ALLOWED_USER_IDS_RAW.split(",") 
 
 # Đường dẫn đến công cụ adb.exe của phần mềm xiaowei
 ADB_PATH = resolve_adb_path(
-    os.getenv("ADB_PATH", r"C:\Program Files (x86)\xiaowei\tools\adb.exe")
+    os.getenv("ADB_PATH", r"C:\Program Files (x86)\xiaowei_android\tools\adb.exe")
 )
 
 # Tên gói ứng dụng (package) của TikTok

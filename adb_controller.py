@@ -40,6 +40,9 @@ def serialized_device_workflow(method):
     wrapper._serialized_device_workflow = True
     return wrapper
 
+DEFAULT_ADB_PORTS = (5037, 5038)
+
+
 class ADBController:
     def __init__(
         self,
@@ -61,6 +64,11 @@ class ADBController:
         self._use_socket_transport = True
         self._server_checked = False
         self._server_check_lock = threading.Lock()
+        adb_ports = getattr(config, "ADB_PORTS", DEFAULT_ADB_PORTS)
+        self._adb_ports = list(adb_ports) if adb_ports else list(DEFAULT_ADB_PORTS)
+        self._device_ports = {}
+        self._device_ports_lock = threading.Lock()
+        self._server_checked_ports = set()
         self._device_workflow_locks = {}
         self._active_device_workflows = {}
         self._device_workflow_locks_guard = threading.Lock()
@@ -74,6 +82,19 @@ class ADBController:
         self._screen_size_cache_seconds = 300.0
         self._screen_size_cache_guard = threading.Lock()
         self._recent_tiktok_target_taps = {}
+
+    def get_device_port(self, device_id):
+        """Lấy port ADB tương ứng của thiết bị (mặc định 5037 nếu chưa nhận diện)."""
+        if not device_id:
+            return self._adb_ports[0] if self._adb_ports else 5037
+        with self._device_ports_lock:
+            return self._device_ports.get(device_id, self._adb_ports[0] if self._adb_ports else 5037)
+
+    def set_device_port(self, device_id, port):
+        """Cập nhật port ADB cho thiết bị."""
+        if device_id and port:
+            with self._device_ports_lock:
+                self._device_ports[device_id] = int(port)
 
     @property
     def adb_path(self):
@@ -120,9 +141,12 @@ class ADBController:
         with self._device_workflow_locks_guard:
             return self._active_device_workflows.get(device_id, 0) > 0
 
-    def _run_cmd(self, cmd_args, timeout=15):
+    def _run_cmd(self, cmd_args, timeout=15, port=None):
         """Chạy lệnh hệ thống với ADB"""
-        full_cmd = [self.adb_path] + cmd_args
+        if port is not None and not (cmd_args and cmd_args[0] == "-P"):
+            full_cmd = [self.adb_path, "-P", str(port)] + cmd_args
+        else:
+            full_cmd = [self.adb_path] + cmd_args
         
         # Thiết lập ẩn cửa sổ CMD đen của tiến trình con trên Windows
         startupinfo = None
@@ -151,43 +175,48 @@ class ADBController:
         except Exception as e:
             return -1, "", str(e)
 
-    def _ensure_adb_server(self):
-        """Khởi động daemon ADB Server trên cổng 5037 nếu chưa chạy."""
-        with self._server_check_lock:
-            if self._server_checked:
-                return
-            self._server_checked = True
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.2)
-            try:
-                s.connect(("127.0.0.1", 5037))
-                s.close()
-                return
-            except Exception:
-                pass
+    def _ensure_adb_server(self, port=None):
+        """Khởi động daemon ADB Server trên cổng chỉ định nếu chưa chạy."""
+        ports = [port] if port is not None else list(self._adb_ports)
+        for p in ports:
+            with self._server_check_lock:
+                if p in self._server_checked_ports:
+                    continue
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.2)
+                try:
+                    s.connect(("127.0.0.1", p))
+                    s.close()
+                    self._server_checked_ports.add(p)
+                    self._server_checked = True
+                    continue
+                except Exception:
+                    pass
 
-            startupinfo = None
-            creationflags = 0
-            if os.name == "nt":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0
-                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                startupinfo = None
+                creationflags = 0
+                if os.name == "nt":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = 0
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
-            try:
-                subprocess.Popen(
-                    [self.adb_path, "-P", "5037", "nodaemon", "server"],
-                    startupinfo=startupinfo,
-                    creationflags=creationflags,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                time.sleep(0.4)
-            except Exception:
-                pass
+                try:
+                    subprocess.Popen(
+                        [self.adb_path, "-P", str(p), "nodaemon", "server"],
+                        startupinfo=startupinfo,
+                        creationflags=creationflags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    time.sleep(0.4)
+                    self._server_checked_ports.add(p)
+                    self._server_checked = True
+                except Exception:
+                    pass
 
     def _execute_adb_socket(self, device_id, shell_args, timeout=15):
-        """Thực thi lệnh shell ADB trực tiếp qua TCP Socket port 5037.
+        """Thực thi lệnh shell ADB trực tiếp qua TCP Socket port tương ứng (5037/5038).
         Loại bỏ overhead tạo process của subprocess.run (giảm độ trễ từ 40ms xuống 1-3ms).
         Trả về (returncode, stdout, stderr) hoặc None nếu cần fallback về subprocess.
         """
@@ -202,55 +231,66 @@ class ADBController:
         else:
             shell_cmd_str = " ".join(str(a) for a in shell_args)
 
-        self._ensure_adb_server()
+        primary_port = self.get_device_port(device_id)
+        candidate_ports = [primary_port] + [p for p in self._adb_ports if p != primary_port]
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(max(1.0, float(timeout)))
-        try:
-            s.connect(("127.0.0.1", 5037))
+        for port in candidate_ports:
+            self._ensure_adb_server(port)
 
-            # 1. Chuyển context transport sang thiết bị mục tiêu
-            transport_req = f"host:transport:{device_id}".encode("utf-8")
-            s.sendall(f"{len(transport_req):04x}".encode("ascii") + transport_req)
-            status = s.recv(4)
-            if status != b"OKAY":
-                return None  # Fallback về subprocess nếu thiết bị chưa sẵn sàng trên socket
-
-            # 2. Gửi lệnh shell
-            cmd_payload = f"shell:{shell_cmd_str}".encode("utf-8")
-            s.sendall(f"{len(cmd_payload):04x}".encode("ascii") + cmd_payload)
-            cmd_status = s.recv(4)
-            if cmd_status != b"OKAY":
-                return None
-
-            # 3. Đọc dữ liệu stream từ socket
-            chunks = []
-            while True:
-                try:
-                    chunk = s.recv(8192)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                except (socket.timeout, BlockingIOError):
-                    break
-
-            raw_bytes = b"".join(chunks)
-            stdout = (
-                raw_bytes.decode("utf-8", errors="ignore")
-                .replace("\r\r\n", "\n")
-                .replace("\r\n", "\n")
-                .strip()
-            )
-            return 0, stdout, ""
-        except socket.timeout:
-            return -1, "", "Command timed out"
-        except Exception:
-            return None
-        finally:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(max(1.0, float(timeout)))
             try:
-                s.close()
+                s.connect(("127.0.0.1", port))
+
+                # 1. Chuyển context transport sang thiết bị mục tiêu
+                transport_req = f"host:transport:{device_id}".encode("utf-8")
+                s.sendall(f"{len(transport_req):04x}".encode("ascii") + transport_req)
+                status = s.recv(4)
+                if status != b"OKAY":
+                    s.close()
+                    continue
+
+                if port != primary_port:
+                    self.set_device_port(device_id, port)
+
+                # 2. Gửi lệnh shell
+                cmd_payload = f"shell:{shell_cmd_str}".encode("utf-8")
+                s.sendall(f"{len(cmd_payload):04x}".encode("ascii") + cmd_payload)
+                cmd_status = s.recv(4)
+                if cmd_status != b"OKAY":
+                    s.close()
+                    return None
+
+                # 3. Đọc dữ liệu stream từ socket
+                chunks = []
+                while True:
+                    try:
+                        chunk = s.recv(8192)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    except (socket.timeout, BlockingIOError):
+                        break
+
+                raw_bytes = b"".join(chunks)
+                stdout = (
+                    raw_bytes.decode("utf-8", errors="ignore")
+                    .replace("\r\r\n", "\n")
+                    .replace("\r\n", "\n")
+                    .strip()
+                )
+                return 0, stdout, ""
+            except socket.timeout:
+                return -1, "", "Command timed out"
             except Exception:
                 pass
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+
+        return None
 
     def execute_adb(self, device_id, cmd_args, timeout=15):
         """Thực thi lệnh ADB trên một thiết bị cụ thể"""
@@ -266,11 +306,26 @@ class ADBController:
                 return res
 
         # Fallback an toàn tuyệt đối về subprocess.run chuẩn
+        port = self.get_device_port(device_id) if device_id else None
         if device_id:
             device_args = ["-s", device_id] + cmd_args
         else:
             device_args = cmd_args
-        return self._run_cmd(device_args, timeout)
+
+        res = self._run_cmd(device_args, timeout, port=port)
+        if (
+            device_id
+            and res[0] != 0
+            and len(self._adb_ports) > 1
+            and any(err_msg in res[2].lower() for err_msg in ("device not found", "error: device", "cannot connect"))
+        ):
+            for alt_port in self._adb_ports:
+                if alt_port != port:
+                    alt_res = self._run_cmd(device_args, timeout, port=alt_port)
+                    if alt_res[0] == 0:
+                        self.set_device_port(device_id, alt_port)
+                        return alt_res
+        return res
 
     def _get_portrait_device_lock(self, device_id):
         with self._portrait_state_guard:
@@ -354,60 +409,74 @@ class ADBController:
             return applied
 
     def get_devices(self):
-        """Lấy danh sách các thiết bị đang kết nối dạng list các serial ID"""
-        code, stdout, stderr = self._run_cmd(["devices"])
-        if code != 0:
-            print(f"Loi khi lay danh sach thiet bi: {stderr}")
-            return []
-        
+        """Lấy danh sách các thiết bị đang kết nối từ tất cả các cổng ADB (5037, 5038...)"""
         devices = []
-        lines = stdout.splitlines()
-        for line in lines[1:]: # Bỏ qua dòng đầu "List of devices attached"
-            if not line.strip():
+        for port in self._adb_ports:
+            code, stdout, stderr = self._run_cmd(["devices"], port=port)
+            if code != 0:
                 continue
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] == "device":
-                devices.append(parts[0])
+            lines = stdout.splitlines()
+            for line in lines[1:]: # Bỏ qua dòng đầu "List of devices attached"
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                parts = line_str.split()
+                if len(parts) >= 2 and parts[1] == "device":
+                    serial = parts[0]
+                    self.set_device_port(serial, port)
+                    if serial not in devices:
+                        devices.append(serial)
         return devices
 
     def get_devices_status_detail(self):
-        """Quét và phân loại chi tiết trạng thái của toàn bộ thiết bị:
+        """Quét và phân loại chi tiết trạng thái của toàn bộ thiết bị trên các cổng ADB:
         online (device), offline, unauthorized, other.
         """
-        code, stdout, stderr = self._run_cmd(["devices"])
-        if code != 0:
-            return {"online": [], "offline": [], "unauthorized": [], "other": []}
-
         status_map = {
             "online": [],
             "offline": [],
             "unauthorized": [],
             "other": [],
         }
-        lines = stdout.splitlines()
-        for line in lines[1:]:
-            line_str = line.strip()
-            if not line_str:
+        seen = set()
+
+        for port in self._adb_ports:
+            code, stdout, stderr = self._run_cmd(["devices"], port=port)
+            if code != 0:
                 continue
-            parts = line_str.split()
-            if len(parts) >= 2:
-                serial = parts[0]
-                st = parts[1].lower()
-                if st == "device":
-                    status_map["online"].append(serial)
-                elif st == "offline":
-                    status_map["offline"].append(serial)
-                elif st == "unauthorized":
-                    status_map["unauthorized"].append(serial)
-                else:
-                    status_map["other"].append((serial, st))
+            lines = stdout.splitlines()
+            for line in lines[1:]:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                parts = line_str.split()
+                if len(parts) >= 2:
+                    serial = parts[0]
+                    st = parts[1].lower()
+                    self.set_device_port(serial, port)
+                    if serial in seen:
+                        continue
+                    seen.add(serial)
+                    if st == "device":
+                        status_map["online"].append(serial)
+                    elif st == "offline":
+                        status_map["offline"].append(serial)
+                    elif st == "unauthorized":
+                        status_map["unauthorized"].append(serial)
+                    else:
+                        status_map["other"].append((serial, st))
         return status_map
 
     def reconnect_devices(self):
-        """Tự động khôi phục kết nối các máy offline hoặc bị nghẽn ADB stack."""
+        """Tự động khôi phục kết nối các máy offline hoặc bị nghẽn ADB stack trên tất cả các port."""
         try:
-            self._run_cmd(["reconnect", "offline"])
-            self._run_cmd(["reconnect"])
+            for port in self._adb_ports:
+                if port == 5037:
+                    self._run_cmd(["reconnect", "offline"])
+                    self._run_cmd(["reconnect"])
+                else:
+                    self._run_cmd(["reconnect", "offline"], port=port)
+                    self._run_cmd(["reconnect"], port=port)
         except Exception:
             pass
 
@@ -781,9 +850,9 @@ class ADBController:
         return False
 
     def dismiss_system_usb_storage_popup(self, device_id, status_callback=None, force=False):
-        """Phát hiện và tự động đóng popup 'Cho phép truy cập dữ liệu điện thoại?' (Samsung MTP prompt).
-        Bấm ra vùng nền ngoài (backdrop) hoặc gửi phím Back để đóng dialog mà KHÔNG chọn Cho phép / Từ chối,
-        giúp giữ nguyên 100% kết nối USB và ADB, không bị ngắt quãng tiến trình.
+        """Phát hiện và tự động xử lý popup 'Cho phép / Không cho phép' (Samsung MTP prompt, USB debug, System permissions).
+        Tự động bấm 'CHO PHÉP' / 'ALLOW' / 'OK' để hoàn tất cấp quyền và đóng dialog,
+        đồng thời hỗ trợ bấm ra vùng nền ngoài và phím Back để giải phóng màn hình và bảo toàn kết nối ADB.
         """
         try:
             has_mtp_dialog = force
@@ -802,6 +871,11 @@ class ADBController:
                         "truy cap du lieu",
                         "access to phone data",
                         "mtp",
+                        "grantpermissions",
+                        "packageinstaller",
+                        "permissioncontroller",
+                        "alertdialog",
+                        "usbdebuggingactivity",
                     )
                     lower_out = stdout.casefold()
                     for line in lower_out.splitlines():
@@ -814,15 +888,26 @@ class ADBController:
                 self._safe_status_callback(
                     status_callback,
                     device_id,
-                    "[Bảo vệ kết nối] Phát hiện Popup truy cập dữ liệu USB • Đang tự động bấm ra ngoài để giữ kết nối ADB...",
+                    "[Xử lý Popup] Phát hiện Popup yêu cầu Cho phép • Đang tự động bấm 'Cho phép' và giải phóng màn hình...",
                 )
                 width, height = self.get_effective_screen_size(device_id)
-                # Bấm vào vùng nền phía trên popup (khoảng 25% chiều cao màn hình - vùng backdrop)
+
+                # 1. Bấm vào nút 'CHO PHÉP' / 'ALLOW' (nút positive ở góc phải dưới của hộp thoại Samsung)
+                btn_allow_x = int(width * 0.76)
+                btn_allow_y = int(height * 0.585)
+                self.tap(device_id, btn_allow_x, btn_allow_y)
+                time.sleep(0.15)
+
+                # 2. Gửi phím điều hướng Android DPAD_RIGHT + ENTER để kích hoạt nút Positive
+                self.keyevent(device_id, 22)
+                self.keyevent(device_id, 66)
+                time.sleep(0.15)
+
+                # 3. Bấm vào vùng nền phía trên popup (khoảng 25% chiều cao) và gửi phím Back dự phòng
                 self.tap(device_id, width // 2, int(height * 0.25))
-                time.sleep(0.3)
-                # Gửi phím Back nhẹ dự phòng nếu popup vẫn chưa tắt
+                time.sleep(0.15)
                 self.keyevent(device_id, 4)
-                time.sleep(0.3)
+                time.sleep(0.15)
                 return True
         except Exception:
             pass

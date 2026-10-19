@@ -294,7 +294,11 @@ def capture_screen_fast(adb, device_id: str) -> Optional[np.ndarray]:
             startupinfo.wShowWindow = 0
 
         import subprocess
-        cmd = [adb_path, "-s", device_id, "exec-out", "screencap", "-p"]
+        port = adb.get_device_port(device_id) if hasattr(adb, "get_device_port") else None
+        if port:
+            cmd = [adb_path, "-P", str(port), "-s", device_id, "exec-out", "screencap", "-p"]
+        else:
+            cmd = [adb_path, "-s", device_id, "exec-out", "screencap", "-p"]
         proc = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
