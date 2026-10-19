@@ -167,6 +167,27 @@ class ADBPerformanceTests(unittest.TestCase):
         self.assertIn(["reconnect", "offline"], commands)
         self.assertIn(["reconnect"], commands)
 
+    def test_dismiss_system_usb_storage_popup_taps_backdrop_on_marker(self):
+        controller = ADBController(adb_path="adb")
+        commands = []
+
+        def execute(device_id, args, timeout=15):
+            commands.append((device_id, tuple(args)))
+            if "dumpsys" in args:
+                return 0, "mCurrentFocus=Window{123 u0 com.samsung.android.MtpApplication}\n", ""
+            return 0, "", ""
+
+        controller.execute_adb = execute
+        controller.get_effective_screen_size = lambda dev: (1080, 1920)
+
+        res = controller.dismiss_system_usb_storage_popup("device-1")
+        self.assertTrue(res)
+        # Verify it tapped the backdrop (y around 25% of 1920 = 480) and sent keyevent 4
+        tap_cmd = ("device-1", ("shell", "input", "tap", "540", "480"))
+        key_cmd = ("device-1", ("shell", "input", "keyevent", "4"))
+        self.assertIn(tap_cmd, commands)
+        self.assertIn(key_cmd, commands)
+
 
 if __name__ == "__main__":
     unittest.main()

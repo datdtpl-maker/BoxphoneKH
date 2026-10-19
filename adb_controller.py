@@ -777,8 +777,69 @@ class ADBController:
                 time.sleep(delay)
         return False
 
+    def dismiss_system_usb_storage_popup(self, device_id, status_callback=None, force=False):
+        """Phát hiện và tự động đóng popup 'Cho phép truy cập dữ liệu điện thoại?' (Samsung MTP prompt).
+        Bấm ra vùng nền ngoài (backdrop) hoặc gửi phím Back để đóng dialog mà KHÔNG chọn Cho phép / Từ chối,
+        giúp giữ nguyên 100% kết nối USB và ADB, không bị ngắt quãng tiến trình.
+        """
+        try:
+            has_mtp_dialog = force
+            if not has_mtp_dialog:
+                code, stdout, _ = self.execute_adb(
+                    device_id, ["shell", "dumpsys", "window", "windows"]
+                )
+                if code == 0 and stdout:
+                    markers = (
+                        "mtpapplication",
+                        "usbauthorization",
+                        "usbstorage",
+                        "mtpreceiver",
+                        "usbpopup",
+                        "allow access to phone data",
+                        "truy cap du lieu",
+                        "access to phone data",
+                        "mtp",
+                    )
+                    lower_out = stdout.casefold()
+                    for line in lower_out.splitlines():
+                        if any(f in line for f in ("mcurrentfocus", "mfusedapp", "focusedapplication", "mresumedactivity")):
+                            if any(m in line for m in markers):
+                                has_mtp_dialog = True
+                                break
+
+            if has_mtp_dialog:
+                self._safe_status_callback(
+                    status_callback,
+                    device_id,
+                    "[Bảo vệ kết nối] Phát hiện Popup truy cập dữ liệu USB • Đang tự động bấm ra ngoài để giữ kết nối ADB...",
+                )
+                width, height = self.get_effective_screen_size(device_id)
+                # Bấm vào vùng nền phía trên popup (khoảng 25% chiều cao màn hình - vùng backdrop)
+                self.tap(device_id, width // 2, int(height * 0.25))
+                time.sleep(0.3)
+                # Gửi phím Back nhẹ dự phòng nếu popup vẫn chưa tắt
+                self.keyevent(device_id, 4)
+                time.sleep(0.3)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def bulk_dismiss_system_usb_storage_popups(self, target_devices=None, status_callback=None, force=False):
+        """Đóng popup USB MTP đồng loạt trên toàn bộ thiết bị chỉ định bằng đa luồng song song."""
+        devices = target_devices or self.get_devices()
+        if not devices:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(devices), self.max_parallel_commands)) as executor:
+            results = list(executor.map(
+                lambda dev: (dev, self.dismiss_system_usb_storage_popup(dev, status_callback, force=force)),
+                devices
+            ))
+        return results
+
     def ensure_facebook_ready(self, device_id):
         """Giữ Facebook hiện tại hoặc mở app nếu chưa ở foreground."""
+        self.dismiss_system_usb_storage_popup(device_id)
         self.lock_portrait(device_id)
         if self.is_facebook_in_foreground(device_id):
             ready = self.ensure_facebook_home(device_id)
@@ -5961,6 +6022,7 @@ class ADBController:
 
     def launch_tiktok(self, device_id):
         """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
+        self.dismiss_system_usb_storage_popup(device_id)
         self.lock_portrait(device_id, retries=3)
         code, stdout, stderr = self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"])
         if code != 0 or "Error" in stdout:
@@ -5971,7 +6033,8 @@ class ADBController:
         self.lock_portrait(device_id, retries=3)
         time.sleep(2.5)
         self.lock_portrait(device_id, retries=3)
-        # Tự động từ chối popup vị trí nếu hiển thị lúc mở app
+        # Tự động từ chối popup USB MTP và vị trí nếu hiển thị lúc mở app
+        self.dismiss_system_usb_storage_popup(device_id)
         self.dismiss_tiktok_location_popup(device_id)
         self.dismiss_tiktok_blocking_popup(device_id)
         self.lock_portrait(device_id, retries=3)

@@ -225,6 +225,21 @@ class GUIApp(ctk.CTk):
         )
         self.btn_complete_notion.pack(side="right", padx=(10, 0), pady=2)
 
+        self.btn_dismiss_popups = ctk.CTkButton(
+            self.brand_badge,
+            text="Đóng Popup 40 máy",
+            font=button_font,
+            width=150,
+            height=44,
+            fg_color="#D97706",
+            hover_color="#B45309",
+            text_color="#ffffff",
+            corner_radius=12,
+            cursor="hand2",
+            command=self.dismiss_all_popups_action,
+        )
+        self.btn_dismiss_popups.pack(side="right", padx=(10, 0), pady=2)
+
         self.btn_mute_all = ctk.CTkButton(
             self.brand_badge,
             text="Tắt âm tất cả",
@@ -1760,6 +1775,7 @@ class GUIApp(ctk.CTk):
 
         sidebar_buttons = (
             (self.btn_refresh, "Quét thiết bị", blue, blue_hover),
+            (self.btn_dismiss_popups, "Đóng Popup 40 máy", "#D97706", "#B45309"),
             (self.btn_mute_all, "Tắt âm toàn bộ", "#6447C7", "#5136AD"),
             (self.btn_scan_notion, "Đồng bộ từ Notion", "#0B7B72", "#08645E"),
             (self.btn_complete_notion, "Hoàn thành lịch tuần", "#475569", "#334155"),
@@ -2099,6 +2115,8 @@ class GUIApp(ctk.CTk):
                     for idx, dev in enumerate(devices):
                         print(f"   📱 [{idx+1}] Máy {main.get_device_name(dev)} (ID: {dev})")
                     self.bulk_disable_rotation(devices)
+                    if hasattr(main.adb, "bulk_dismiss_system_usb_storage_popups"):
+                        main.adb.bulk_dismiss_system_usb_storage_popups(devices)
                 else:
                     print("[Hệ thống] ❌ Chưa phát hiện thiết bị nào. Hãy kết nối cáp USB và kiểm tra ADB.")
 
@@ -2153,6 +2171,38 @@ class GUIApp(ctk.CTk):
                 fg_color="#fff7ed",
                 text_color="#c2410c",
             )
+
+    def dismiss_all_popups_action(self):
+        """Đóng các popup thông báo hệ thống (MTP / USB) trên toàn bộ máy mà không làm ngắt kết nối."""
+        devices = main.get_ordered_devices()
+        if not devices:
+            messagebox.showwarning(
+                "Chưa có thiết bị",
+                "Không có điện thoại nào đang kết nối!",
+            )
+            return
+
+        if hasattr(self, "btn_dismiss_popups"):
+            self.btn_dismiss_popups.configure(
+                state="disabled",
+                text="Đang đóng popup...",
+            )
+
+        def action():
+            try:
+                print(f"[Hệ thống] Đang tự động đóng popup thông báo trên {len(devices)} máy...")
+                if hasattr(main.adb, "bulk_dismiss_system_usb_storage_popups"):
+                    main.adb.bulk_dismiss_system_usb_storage_popups(devices, force=True)
+                print(f"[Hệ thống] ✅ Đã đóng popup thông báo trên {len(devices)} máy (bảo toàn 100% kết nối ADB)!")
+            finally:
+                if hasattr(self, "btn_dismiss_popups"):
+                    self.after(
+                        0,
+                        lambda: self.btn_dismiss_popups.configure(
+                            state="normal", text="Đóng Popup 40 máy"
+                        ),
+                    )
+        self.run_in_thread(action)
 
     def mute_all_devices_action(self):
         """Tắt âm lượng media của toàn bộ điện thoại đang kết nối."""
@@ -2832,6 +2882,8 @@ class GUIApp(ctk.CTk):
                         return device_id, False
                     if hasattr(main.adb, "collapse_statusbar_if_expanded"):
                         main.adb.collapse_statusbar_if_expanded(device_id)
+                    if hasattr(main.adb, "dismiss_system_usb_storage_popup"):
+                        main.adb.dismiss_system_usb_storage_popup(device_id)
                     if hasattr(main.adb, "dismiss_facebook_messenger_if_present"):
                         main.adb.dismiss_facebook_messenger_if_present(device_id)
                     if opening_platform == "facebook":
