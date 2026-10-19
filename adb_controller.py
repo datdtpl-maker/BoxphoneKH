@@ -61,6 +61,7 @@ class ADBController:
         self._use_socket_transport = True
         self._server_checked = False
         self._server_check_lock = threading.Lock()
+        self._device_workflow_locks = {}
         self._active_device_workflows = {}
         self._device_workflow_locks_guard = threading.Lock()
         self._portrait_cache_seconds = max(
@@ -92,6 +93,8 @@ class ADBController:
     def device_workflow_scope(self, device_id):
         """Grant exclusive in-process control of a device to one workflow."""
         with self._device_workflow_locks_guard:
+            if not hasattr(self, "_device_workflow_locks"):
+                self._device_workflow_locks = {}
             lock = self._device_workflow_locks.setdefault(
                 device_id, threading.RLock()
             )
