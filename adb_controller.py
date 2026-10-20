@@ -30,6 +30,24 @@ if hasattr(sys.stderr, "reconfigure"):
         pass
 
 
+class WorkflowCancelledException(BaseException):
+    """Ngoại lệ dừng khẩn cấp kế thừa BaseException để không bị nuốt bởi except Exception:"""
+    pass
+
+
+def _handle_workflow_exception(args):
+    if issubclass(args.exc_type, WorkflowCancelledException):
+        return
+    if hasattr(threading, "__default_excepthook__"):
+        threading.__default_excepthook__(args)
+    elif hasattr(sys, "__excepthook__"):
+        sys.__excepthook__(args.exc_type, args.exc_value, args.exc_traceback)
+
+
+if hasattr(threading, "excepthook"):
+    threading.excepthook = _handle_workflow_exception
+
+
 def serialized_device_workflow(method):
     """Prevent two platform workflows from controlling one phone concurrently."""
     @wraps(method)
@@ -82,6 +100,31 @@ class ADBController:
         self._screen_size_cache_seconds = 300.0
         self._screen_size_cache_guard = threading.Lock()
         self._recent_tiktok_target_taps = {}
+        self._emergency_stopped = False
+        self._emergency_stop_lock = threading.Lock()
+
+    def is_emergency_stopped(self):
+        with self._emergency_stop_lock:
+            return getattr(self, "_emergency_stopped", False)
+
+    def set_emergency_stopped(self, state=True):
+        with self._emergency_stop_lock:
+            self._emergency_stopped = bool(state)
+
+    def interruptible_sleep(self, seconds, check_cancelled=None, step=0.05):
+        """Ngủ ngắt được ngay lập tức nếu có lệnh dừng khẩn cấp hoặc hủy."""
+        if seconds <= 0:
+            return
+        deadline = time.monotonic() + float(seconds)
+        while True:
+            if self.is_emergency_stopped():
+                raise WorkflowCancelledException("EMERGENCY_STOP_ACTIVE: Dừng khẩn cấp ngắt thời gian chờ")
+            if check_cancelled and check_cancelled():
+                raise WorkflowCancelledException("CANCELLED: Tác vụ đã bị hủy")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(step, remaining))
 
     def get_device_port(self, device_id):
         """Lấy port ADB tương ứng của thiết bị (mặc định 5037 nếu chưa nhận diện)."""
@@ -292,8 +335,20 @@ class ADBController:
 
         return None
 
-    def execute_adb(self, device_id, cmd_args, timeout=15):
+    def execute_adb(self, device_id, cmd_args, timeout=15, **kwargs):
         """Thực thi lệnh ADB trên một thiết bị cụ thể"""
+        if getattr(self, "_emergency_stopped", False):
+            bypass_emergency = kwargs.get("bypass_emergency", False)
+            is_safe_cleanup_key = (
+                cmd_args
+                and len(cmd_args) >= 4
+                and cmd_args[0] == "shell"
+                and cmd_args[1] == "input"
+                and cmd_args[2] == "keyevent"
+                and str(cmd_args[3]) in ("3", "187")
+            )
+            if not bypass_emergency and not is_safe_cleanup_key:
+                raise WorkflowCancelledException("EMERGENCY_STOP_ACTIVE: Dừng khẩn cấp đang kích hoạt")
         # Thử thực thi siêu tốc qua TCP Socket nếu là lệnh shell trên thiết bị cụ thể
         if (
             device_id
@@ -707,48 +762,58 @@ class ADBController:
             "com.android.chrome",
             "com.google.android.apps.chrome",
             "com.sec.android.app.sbrowser",
+            "com.shopee.vn",
         ]
-        # 1. Force stop tất cả app mục tiêu
+        # 1. Force stop tất cả app mục tiêu (bypass_emergency=True)
         for pkg in packages_to_stop:
             try:
-                self.execute_adb(device_id, ["shell", "am", "force-stop", pkg], timeout=2.0)
+                self.execute_adb(device_id, ["shell", "am", "force-stop", pkg], timeout=2.0, bypass_emergency=True)
             except Exception:
                 pass
 
         # 2. Kill background processes
         try:
-            self.execute_adb(device_id, ["shell", "am", "kill-all"], timeout=2.0)
+            self.execute_adb(device_id, ["shell", "am", "kill-all"], timeout=2.0, bypass_emergency=True)
         except Exception:
             pass
 
         # 3. Trở về màn hình Home
-        self.keyevent(device_id, 3)  # KEYCODE_HOME
-        time.sleep(0.2)
+        self.keyevent(device_id, 3)
+        time.sleep(0.15)
 
         # 4. Mở màn hình đa nhiệm (Recent Apps)
-        self.keyevent(device_id, 187)  # KEYCODE_APP_SWITCH
-        time.sleep(0.35)
+        self.keyevent(device_id, 187)
+        time.sleep(0.2)
 
-        # 5. Thử xóa đa nhiệm nhanh (max_scrolls=0, không cuộn lặp)
+        # 5. Thử xóa đa nhiệm nhanh nếu có nút xóa hiển thị
         cleared = False
         try:
             cleared = self.clear_recent_apps(device_id, max_scrolls=0)
         except Exception:
             cleared = False
 
-        if not cleared:
-            # Fallback tọa độ nút "Đóng tất cả" / "Clear all" của Samsung & Android
-            width, height = self.get_effective_screen_size(device_id)
-            self.tap(device_id, width // 2, int(height * 0.91))
-            time.sleep(0.2)
-            self.tap(device_id, width // 2, int(height * 0.88))
-            time.sleep(0.2)
-            self.tap(device_id, width // 2, int(height * 0.95))
-            time.sleep(0.2)
-
-        # 6. Trở về Home sạch sẽ và khóa dọc
+        # 6. Trở về Home an toàn (loại bỏ hoàn toàn tap mù tọa độ mép dưới màn hình)
         self.keyevent(device_id, 3)
         self.lock_portrait(device_id, retries=1)
+        return True
+
+    def launch_facebook(self, device_id):
+        """Mở ứng dụng Facebook (thử com.facebook.katana trước, dự phòng com.facebook.lite)"""
+        self.dismiss_system_usb_storage_popup(device_id)
+        self.lock_portrait(device_id, retries=2)
+        code, stdout, stderr = self.execute_adb(
+            device_id,
+            ["shell", "monkey", "-p", config.FACEBOOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"]
+        )
+        if code != 0 or "Error" in (stdout or ""):
+            self.execute_adb(
+                device_id,
+                ["shell", "monkey", "-p", "com.facebook.lite", "-c", "android.intent.category.LAUNCHER", "1"]
+            )
+        self.lock_portrait(device_id, retries=2)
+        time.sleep(1.0)
+        self.dismiss_system_usb_storage_popup(device_id)
+        self.lock_portrait(device_id, retries=2)
         return True
 
     def launch_app(self, device_id, package_name):

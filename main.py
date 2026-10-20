@@ -92,6 +92,8 @@ def start_workflow_session():
         _workflow_session_id += 1
         cancel_flag = False
         cancel_sequential = False
+        if hasattr(adb, "set_emergency_stopped"):
+            adb.set_emergency_stopped(False)
         return _workflow_session_id
 
 
@@ -102,6 +104,8 @@ def cancel_all_workflows():
         _workflow_session_id += 1
         cancel_flag = True
         cancel_sequential = True
+        if hasattr(adb, "set_emergency_stopped"):
+            adb.set_emergency_stopped(True)
         return _workflow_session_id
 
 
@@ -129,6 +133,8 @@ def emergency_stop_all_devices(status_callback=None):
     if not devices:
         if status_callback:
             status_callback("[Dừng khẩn cấp] Không phát hiện thiết bị nào đang kết nối.")
+        if hasattr(adb, "set_emergency_stopped"):
+            adb.set_emergency_stopped(False)
         return 0
 
     if status_callback:
@@ -155,6 +161,9 @@ def emergency_stop_all_devices(status_callback=None):
             except Exception as exc:
                 if status_callback:
                     status_callback(f"[Dừng khẩn cấp] ⚠️ Máy {dev_name}: Lỗi: {exc}")
+
+    if hasattr(adb, "set_emergency_stopped"):
+        adb.set_emergency_stopped(False)
 
     if status_callback:
         status_callback(
@@ -781,9 +790,17 @@ def handle_inline_callbacks(call):
         cancel_all_workflows()
         safe_send_message(
             chat_id,
-            "⏹️ **ĐÃ DỪNG TẤT CẢ TÁC VỤ**",
+            "🛑 **ĐANG DỪNG KHẨN CẤP VÀ DỌN DẸP TOÀN BỘ MÁY...**",
             parse_mode="Markdown",
         )
+        def _bg_stop():
+            emergency_stop_all_devices()
+            safe_send_message(
+                chat_id,
+                "⏹️ **ĐÃ DỪNG TOÀN BỘ VÀ VỀ MÀN HÌNH CHÍNH**",
+                parse_mode="Markdown",
+            )
+        threading.Thread(target=_bg_stop, daemon=True).start()
 
 
 # Xử lý tất cả tin nhắn văn bản (Ngôn ngữ tự nhiên)
@@ -959,13 +976,13 @@ def handle_all_messages(message):
         status_msg = bot.send_message(message.chat.id, "🛑 **HỦY BỎ TÁC VỤ**\n\nĐang gửi lệnh dừng khẩn cấp cho tất cả các máy...")
         
         def finish_stop_notice():
-            time.sleep(3.5)
+            emergency_stop_all_devices()
             try:
-                bot.edit_message_text("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Bot đã sẵn sàng nhận các câu lệnh mới.", message.chat.id, status_msg.message_id)
+                bot.edit_message_text("⏹️ **HỦY BỎ THÀNH CÔNG**\n\nToàn bộ tiến trình tự động hóa đã dừng lại. Toàn bộ máy đã về màn hình chính. Bot đã sẵn sàng nhận các câu lệnh mới.", message.chat.id, status_msg.message_id)
             except Exception:
                 pass
                 
-        threading.Thread(target=finish_stop_notice).start()
+        threading.Thread(target=finish_stop_notice, daemon=True).start()
 
     elif action == "back":
         for dev in target_devices:

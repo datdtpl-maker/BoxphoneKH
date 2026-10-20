@@ -1773,14 +1773,66 @@ class GUIApp(ctk.CTk):
         )
         self.platform_badge.pack(fill="x", pady=(0, 10))
 
-        sidebar_buttons = (
+        primary_sidebar_buttons = (
             (self.btn_refresh, "Quét thiết bị", blue, blue_hover),
             (self.btn_dismiss_popups, "Đóng Popup 40 máy", "#D97706", "#B45309"),
             (self.btn_mute_all, "Tắt âm toàn bộ", "#6447C7", "#5136AD"),
+        )
+        for button, label, color, hover in primary_sidebar_buttons:
+            button.configure(
+                text=label,
+                width=0,
+                height=42,
+                corner_radius=10,
+                fg_color=color,
+                hover_color=hover,
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            )
+            button.pack(fill="x", pady=3)
+
+        # Hai nút mở TikTok và Facebook kiểm tra tài khoản
+        if not hasattr(self, "frame_app_checkers"):
+            self.frame_app_checkers = ctk.CTkFrame(
+                self.brand_badge, fg_color="transparent"
+            )
+            self.frame_app_checkers.columnconfigure(0, weight=1)
+            self.frame_app_checkers.columnconfigure(1, weight=1)
+
+            self.btn_open_tiktok = ctk.CTkButton(
+                self.frame_app_checkers,
+                text="📱 TikTok",
+                height=40,
+                corner_radius=10,
+                fg_color="#111827",
+                hover_color="#1F2937",
+                text_color="#FFFFFF",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                cursor="hand2",
+                command=self.open_tiktok_all_action,
+            )
+            self.btn_open_tiktok.grid(row=0, column=0, sticky="ew", padx=(0, 2))
+
+            self.btn_open_facebook = ctk.CTkButton(
+                self.frame_app_checkers,
+                text="📘 Facebook",
+                height=40,
+                corner_radius=10,
+                fg_color="#1877F2",
+                hover_color="#145DBF",
+                text_color="#FFFFFF",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                cursor="hand2",
+                command=self.open_facebook_all_action,
+            )
+            self.btn_open_facebook.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+
+        self.frame_app_checkers.pack(fill="x", pady=3)
+
+        secondary_sidebar_buttons = (
             (self.btn_scan_notion, "Đồng bộ từ Notion", "#0B7B72", "#08645E"),
             (self.btn_complete_notion, "Hoàn thành lịch tuần", "#475569", "#334155"),
         )
-        for button, label, color, hover in sidebar_buttons:
+        for button, label, color, hover in secondary_sidebar_buttons:
             button.configure(
                 text=label,
                 width=0,
@@ -2251,6 +2303,66 @@ class GUIApp(ctk.CTk):
                     text="Tắt âm tất cả",
                 ),
             )
+
+        self.run_in_thread(action)
+
+    def open_tiktok_all_action(self):
+        """Mở ứng dụng TikTok trên các máy đã chọn (hoặc toàn bộ máy) để kiểm tra tài khoản sống/bị ban."""
+        devices = self.parse_targets()
+        if not devices:
+            return
+
+        if hasattr(self, "btn_open_tiktok"):
+            self.btn_open_tiktok.configure(state="disabled", text="Đang mở...")
+        self.log_message(f"[Mở TikTok] 📱 Đang mở TikTok trên {len(devices)} máy để kiểm tra tài khoản...")
+
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _open(d):
+                try:
+                    main.adb.launch_tiktok(d)
+                    return True
+                except Exception as e:
+                    print(f"Lỗi mở TikTok máy {d}: {e}")
+                    return False
+
+            with ThreadPoolExecutor(max_workers=min(40, len(devices))) as executor:
+                list(executor.map(_open, devices))
+
+            self.log_message(f"[Mở TikTok] ✅ Đã mở TikTok trên {len(devices)} máy thành công.")
+            if hasattr(self, "btn_open_tiktok"):
+                self.after(0, lambda: self.btn_open_tiktok.configure(state="normal", text="📱 TikTok"))
+
+        self.run_in_thread(action)
+
+    def open_facebook_all_action(self):
+        """Mở ứng dụng Facebook trên các máy đã chọn (hoặc toàn bộ máy) để kiểm tra tài khoản sống/bị ban."""
+        devices = self.parse_targets()
+        if not devices:
+            return
+
+        if hasattr(self, "btn_open_facebook"):
+            self.btn_open_facebook.configure(state="disabled", text="Đang mở...")
+        self.log_message(f"[Mở Facebook] 📘 Đang mở Facebook trên {len(devices)} máy để kiểm tra tài khoản...")
+
+        def action():
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _open(d):
+                try:
+                    main.adb.launch_facebook(d)
+                    return True
+                except Exception as e:
+                    print(f"Lỗi mở Facebook máy {d}: {e}")
+                    return False
+
+            with ThreadPoolExecutor(max_workers=min(40, len(devices))) as executor:
+                list(executor.map(_open, devices))
+
+            self.log_message(f"[Mở Facebook] ✅ Đã mở Facebook trên {len(devices)} máy thành công.")
+            if hasattr(self, "btn_open_facebook"):
+                self.after(0, lambda: self.btn_open_facebook.configure(state="normal", text="📘 Facebook"))
 
         self.run_in_thread(action)
 
@@ -2742,15 +2854,23 @@ class GUIApp(ctk.CTk):
         self.comment_cancel_flag = True
         main.cancel_all_workflows()
 
-        # Cập nhật ngay trạng thái nút dừng khẩn cấp trên Header
-        if hasattr(self, "btn_header_stop"):
-            self.btn_header_stop.configure(
-                text="🛑 ĐANG DỪNG KHẨN CẤP...",
-                state="disabled",
-                fg_color="#7F1D1D",
-                text_color="#FFFFFF",
-            )
-        self.log_message("[DỪNG KHẨN CẤP] 🚨 Người dùng bấm nút DỪNG KHẨN CẤP!")
+        # Cập nhật ngay trạng thái nút dừng khẩn cấp trên Header và các tab
+        for btn in (
+            getattr(self, "btn_header_stop", None),
+            getattr(self, "btn_tt_stop", None),
+            getattr(self, "btn_fb_stop", None),
+        ):
+            if btn:
+                try:
+                    btn.configure(
+                        text="🛑 ĐANG DỪNG KHẨN CẤP...",
+                        state="disabled",
+                        fg_color="#7F1D1D",
+                        text_color="#FFFFFF",
+                    )
+                except Exception:
+                    pass
+        self.log_message("[DỪNG KHẨN CẤP] 🚨 Đang dừng toàn bộ tác vụ và đưa 40 máy về màn hình chính...")
 
         def run_emergency_cleanup():
             try:
@@ -2768,7 +2888,27 @@ class GUIApp(ctk.CTk):
                 fg_color="#DC2626",
                 text_color="#FFFFFF",
             )
-        self.log_message("[DỪNG KHẨN CẤP] ✅ Toàn bộ máy đã được đóng app, xóa sạch đa nhiệm và sẵn sàng nhận lệnh mới.")
+        if hasattr(self, "btn_tt_stop"):
+            try:
+                self.btn_tt_stop.configure(
+                    text="🛑 Dừng toàn bộ",
+                    state="normal",
+                    fg_color="#ffebee",
+                    text_color="#e53935",
+                )
+            except Exception:
+                pass
+        if hasattr(self, "btn_fb_stop"):
+            try:
+                self.btn_fb_stop.configure(
+                    text="🛑 Dừng toàn bộ",
+                    state="normal",
+                    fg_color="#ffebee",
+                    text_color="#e53935",
+                )
+            except Exception:
+                pass
+        self.log_message("[DỪNG KHẨN CẤP] ✅ Toàn bộ quy trình đã dừng hẳn. Các thiết bị đã về màn hình chính và sẵn sàng nhận lệnh mới.")
 
     def parse_targets(self, entry_widget=None):
         if entry_widget is None:
