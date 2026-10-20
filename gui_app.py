@@ -2308,6 +2308,8 @@ class GUIApp(ctk.CTk):
 
     def open_tiktok_all_action(self):
         """Mở ứng dụng TikTok trên các máy đã chọn (hoặc toàn bộ máy) để kiểm tra tài khoản sống/bị ban."""
+        if hasattr(main.adb, "set_emergency_stopped"):
+            main.adb.set_emergency_stopped(False)
         devices = self.parse_targets()
         if not devices:
             return
@@ -2338,6 +2340,8 @@ class GUIApp(ctk.CTk):
 
     def open_facebook_all_action(self):
         """Mở ứng dụng Facebook trên các máy đã chọn (hoặc toàn bộ máy) để kiểm tra tài khoản sống/bị ban."""
+        if hasattr(main.adb, "set_emergency_stopped"):
+            main.adb.set_emergency_stopped(False)
         devices = self.parse_targets()
         if not devices:
             return
@@ -2912,8 +2916,12 @@ class GUIApp(ctk.CTk):
 
     def parse_targets(self, entry_widget=None):
         if entry_widget is None:
-            entry_widget = self.ent_selection
-        selection = entry_widget.get().strip()
+            for attr in ("ent_social_selection", "ent_tt_selection", "ent_fb_selection", "ent_comment_selection", "ent_selection"):
+                w = getattr(self, attr, None)
+                if w and hasattr(w, "get"):
+                    entry_widget = w
+                    break
+        selection = entry_widget.get().strip() if entry_widget and hasattr(entry_widget, "get") else ""
         devices = main.get_ordered_devices()
         if not devices:
             messagebox.showwarning("Cảnh báo", "Không có thiết bị nào đang kết nối!")

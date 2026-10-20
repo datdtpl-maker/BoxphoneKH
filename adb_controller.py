@@ -102,6 +102,15 @@ class ADBController:
         self._recent_tiktok_target_taps = {}
         self._emergency_stopped = False
         self._emergency_stop_lock = threading.Lock()
+        self._cleanup_local = threading.local()
+
+    @contextmanager
+    def emergency_cleanup_scope(self):
+        self._cleanup_local.active = True
+        try:
+            yield
+        finally:
+            self._cleanup_local.active = False
 
     def is_emergency_stopped(self):
         with self._emergency_stop_lock:
@@ -338,7 +347,7 @@ class ADBController:
     def execute_adb(self, device_id, cmd_args, timeout=15, **kwargs):
         """Thực thi lệnh ADB trên một thiết bị cụ thể"""
         if getattr(self, "_emergency_stopped", False):
-            bypass_emergency = kwargs.get("bypass_emergency", False)
+            bypass_emergency = kwargs.get("bypass_emergency", False) or getattr(self._cleanup_local, "active", False)
             is_safe_cleanup_key = (
                 cmd_args
                 and len(cmd_args) >= 4
@@ -608,12 +617,23 @@ class ADBController:
             "dismiss_all",
             "recents_clear",
             "recent_clear",
+            "clear_all_button",
+            "recents_close_all_button",
         )
         empty_markers = (
             "no recent items",
             "no recent apps",
+            "no recently used apps",
+            "no recently",
             "khong co ung dung gan day",
+            "khong co ung dung da dung gan day",
+            "khong co ung dung",
             "khong co muc gan day",
+            "khong co muc",
+            "da dung gan day",
+            "gan day",
+            "không có ứng dụng",
+            "không có mục",
         )
         chinese_clear_markers = (
             "全部清除",
@@ -753,49 +773,60 @@ class ADBController:
 
     def emergency_stop_and_clear_recents(self, device_id):
         """Dừng khẩn cấp tức thì: Cưỡng chế đóng toàn bộ ứng dụng và xóa sạch đa nhiệm trên máy."""
-        packages_to_stop = [
-            "com.ss.android.ugc.trill",
-            "com.zhiliaoapp.musically",
-            "com.facebook.katana",
-            "com.facebook.lite",
-            "com.facebook.orca",
-            "com.android.chrome",
-            "com.google.android.apps.chrome",
-            "com.sec.android.app.sbrowser",
-            "com.shopee.vn",
-        ]
-        # 1. Force stop tất cả app mục tiêu (bypass_emergency=True)
-        for pkg in packages_to_stop:
+        with self.emergency_cleanup_scope():
+            packages_to_stop = [
+                "com.ss.android.ugc.trill",
+                "com.zhiliaoapp.musically",
+                "com.facebook.katana",
+                "com.facebook.lite",
+                "com.facebook.orca",
+                "com.android.chrome",
+                "com.google.android.apps.chrome",
+                "com.sec.android.app.sbrowser",
+                "com.shopee.vn",
+            ]
+            # 1. Force stop tất cả app mục tiêu
+            for pkg in packages_to_stop:
+                try:
+                    self.execute_adb(device_id, ["shell", "am", "force-stop", pkg], timeout=2.0)
+                except Exception:
+                    pass
+
+            # 2. Kill background processes
             try:
-                self.execute_adb(device_id, ["shell", "am", "force-stop", pkg], timeout=2.0, bypass_emergency=True)
+                self.execute_adb(device_id, ["shell", "am", "kill-all"], timeout=2.0)
             except Exception:
                 pass
 
-        # 2. Kill background processes
-        try:
-            self.execute_adb(device_id, ["shell", "am", "kill-all"], timeout=2.0, bypass_emergency=True)
-        except Exception:
-            pass
+            # 3. Trở về màn hình Home
+            self.keyevent(device_id, 3)
+            time.sleep(0.15)
 
-        # 3. Trở về màn hình Home
-        self.keyevent(device_id, 3)
-        time.sleep(0.15)
+            # 4. Mở màn hình đa nhiệm (Recent Apps)
+            self.keyevent(device_id, 187)
+            time.sleep(0.35)
 
-        # 4. Mở màn hình đa nhiệm (Recent Apps)
-        self.keyevent(device_id, 187)
-        time.sleep(0.2)
-
-        # 5. Thử xóa đa nhiệm nhanh nếu có nút xóa hiển thị
-        cleared = False
-        try:
-            cleared = self.clear_recent_apps(device_id, max_scrolls=0)
-        except Exception:
+            # 5. Thử xóa đa nhiệm bằng clear_recent_apps (đã được cấp quyền trong emergency_cleanup_scope)
             cleared = False
+            try:
+                cleared = self.clear_recent_apps(device_id, max_scrolls=0)
+            except Exception:
+                cleared = False
 
-        # 6. Trở về Home an toàn (loại bỏ hoàn toàn tap mù tọa độ mép dưới màn hình)
-        self.keyevent(device_id, 3)
-        self.lock_portrait(device_id, retries=1)
-        return True
+            # 6. Nếu UIAutomator không tìm thấy nút, bấm vào tọa độ Close all / Đóng tất cả chuẩn của Samsung Galaxy
+            if not cleared:
+                width, height = self.get_effective_screen_size(device_id)
+                # Tọa độ Close all trên Samsung SM-J730G & SM-G935F (height * 0.80)
+                self.tap(device_id, width // 2, int(height * 0.80))
+                time.sleep(0.2)
+                # Tọa độ ĐÓNG TẤT CẢ trên Samsung SM-N935F (height * 0.955)
+                self.tap(device_id, width // 2, int(height * 0.955))
+                time.sleep(0.2)
+
+            # 7. Trở về Home sạch sẽ và khóa dọc
+            self.keyevent(device_id, 3)
+            self.lock_portrait(device_id, retries=1)
+            return True
 
     def launch_facebook(self, device_id):
         """Mở ứng dụng Facebook (thử com.facebook.katana trước, dự phòng com.facebook.lite)"""
