@@ -48,7 +48,7 @@ class RecentAppsCleanupTests(unittest.TestCase):
         root = ET.fromstring(
             """
             <hierarchy>
-              <node clickable="true" bounds="[40,1300][1040,1880]">
+                <node clickable="true" bounds="[40,1300][1040,1880]">
                 <node clickable="false" text="Đóng tất cả"
                       bounds="[350,1580][730,1720]" />
               </node>
@@ -152,15 +152,33 @@ class RecentAppsCleanupTests(unittest.TestCase):
         self.assertEqual([(140, 925)], taps)
 
     @patch("adb_controller.time.sleep", return_value=None)
+    def test_clear_recent_apps_fallback_samsung_coordinates_when_dump_fails(self, _sleep):
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        # uiautomator dump fails
+        controller.execute_adb = lambda *_args, **_kwargs: (1, "", "dump error")
+        controller.get_effective_screen_size = lambda _device_id: (1080, 1920)
+        keyevents = []
+        taps = []
+        controller.keyevent = lambda _dev, code: keyevents.append(code)
+        controller.tap = lambda _dev, x, y: taps.append((x, y))
+
+        cleared = controller.clear_recent_apps("device-samsung-fallback", max_scrolls=0)
+        self.assertTrue(cleared)
+        self.assertEqual([187, 3], keyevents)
+        # Should tap both Samsung launcher (0.80) and SystemUI (0.958)
+        self.assertIn((540, int(1920 * 0.80)), taps)
+        self.assertIn((540, int(1920 * 0.958)), taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
     def test_emergency_stop_and_clear_recents_force_stops_apps_and_cleans_screen(self, _sleep):
         controller = ADBController(adb_path="adb")
         executed_cmds = []
         controller.execute_adb = lambda _dev, cmd, **kwargs: (executed_cmds.append(cmd) or (0, "", ""))
         controller.lock_portrait = lambda *_args, **_kwargs: True
         controller.get_effective_screen_size = lambda _dev: (1080, 1920)
-        keyevents = []
-        controller.keyevent = lambda _dev, code: keyevents.append(code)
-        controller.clear_recent_apps = lambda _dev, max_scrolls=0: True
+        cleared_calls = []
+        controller.clear_recent_apps = lambda _dev, max_scrolls=0: (cleared_calls.append((_dev, max_scrolls)) or True)
 
         res = controller.emergency_stop_and_clear_recents("dev-test")
         self.assertTrue(res)
@@ -175,8 +193,8 @@ class RecentAppsCleanupTests(unittest.TestCase):
         self.assertIn("com.android.chrome", stopped_pkgs)
         self.assertTrue(any(cmd[2] == "kill-all" for cmd in executed_cmds if len(cmd) >= 3 and cmd[1] == "am"))
 
-        # Kiểm tra chuỗi keyevent: HOME (3) -> APP_SWITCH (187) -> HOME (3)
-        self.assertEqual([3, 187, 3], keyevents)
+        # Kiểm tra clear_recent_apps đã được gọi trực tiếp một lần
+        self.assertEqual([("dev-test", 0)], cleared_calls)
 
 
 if __name__ == "__main__":

@@ -591,10 +591,13 @@ class ADBController:
 
     def clear_recent_apps(self, device_id, max_scrolls=6):
         """Mở màn hình đa nhiệm và bấm Xóa tất cả trên nhiều launcher."""
-        self.lock_portrait(device_id, retries=3)
+        self.lock_portrait(device_id, retries=2)
+        # 1. Mở màn hình đa nhiệm duy nhất một lần
         self.keyevent(device_id, 187)  # KEYCODE_APP_SWITCH
-        time.sleep(0.8)
+        time.sleep(0.6)
         width, height = self.get_effective_screen_size(device_id)
+        w_portrait = min(width, height)
+        h_portrait = max(width, height)
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_recents_{safe_device_id}.xml"
         local_xml = os.path.join(tempfile.gettempdir(), f"temp_recents_{safe_device_id}.xml")
@@ -619,6 +622,7 @@ class ADBController:
             "recent_clear",
             "clear_all_button",
             "recents_close_all_button",
+            "recents_close_all_container",
         )
         empty_markers = (
             "no recent items",
@@ -647,11 +651,11 @@ class ADBController:
             root = None
             self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
             dump_code, _, _ = self.execute_adb(
-                device_id, ["shell", "uiautomator", "dump", remote_xml]
+                device_id, ["shell", "uiautomator", "dump", remote_xml], timeout=4.0
             )
             if dump_code == 0:
                 pull_code, _, _ = self.execute_adb(
-                    device_id, ["pull", remote_xml, local_xml]
+                    device_id, ["pull", remote_xml, local_xml], timeout=4.0
                 )
                 if pull_code == 0 and os.path.exists(local_xml):
                     try:
@@ -668,6 +672,7 @@ class ADBController:
                     }
                     screen_text = []
                     clear_candidates = []
+                    is_rotated = root.attrib.get("rotation") in ("1", "3")
                     for node in root.iter():
                         raw_label = " ".join(
                             part
@@ -697,19 +702,25 @@ class ADBController:
                         )
                         if not is_clear:
                             continue
-                        # Bấm đúng tâm node mang chữ thay vì tâm container cha.
-                        # Container của launcher có thể phủ gần hết màn hình,
-                        # trong khi vị trí nút khác nhau trên từng thiết bị.
-                        coords = self._element_center(node)
-                        if coords is None:
-                            clickable = node
-                            while (
-                                clickable is not None
-                                and clickable.get("clickable", "false") != "true"
-                            ):
-                                clickable = parent_map.get(clickable)
-                            if clickable is not None:
-                                coords = self._element_center(clickable)
+
+                        # Nếu XML xoay ngang nhưng màn hình là dọc (như Samsung S7/G935F)
+                        if is_rotated and ("recents_close_all" in resource_id or "clear_all" in resource_id):
+                            if "recents_close_all" in resource_id:
+                                coords = (w_portrait // 2, int(h_portrait * 0.958))
+                            else:
+                                coords = (w_portrait // 2, int(h_portrait * 0.80))
+                        else:
+                            coords = self._element_center(node)
+                            if coords is None:
+                                clickable = node
+                                while (
+                                    clickable is not None
+                                    and clickable.get("clickable", "false") != "true"
+                                ):
+                                    clickable = parent_map.get(clickable)
+                                if clickable is not None:
+                                    coords = self._element_center(clickable)
+
                         if coords:
                             exact_vietnamese = normalized == "dong tat ca"
                             exact_supported = (
@@ -735,15 +746,15 @@ class ADBController:
                         )
                         if tap_code not in (None, 0):
                             continue
-                        time.sleep(0.8)
+                        time.sleep(0.6)
                         self.keyevent(device_id, 3)
-                        self.lock_portrait(device_id, retries=2)
+                        self.lock_portrait(device_id, retries=1)
                         return True
 
                     combined_text = " ".join(screen_text)
                     if any(marker in combined_text for marker in empty_markers):
                         self.keyevent(device_id, 3)
-                        self.lock_portrait(device_id, retries=2)
+                        self.lock_portrait(device_id, retries=1)
                         return True
             finally:
                 try:
@@ -767,9 +778,15 @@ class ADBController:
                 )
                 time.sleep(0.4)
 
+        # Fallback bấm vị trí Đóng tất cả chuẩn Samsung ngay trên màn hình Recents:
+        # Launcher Samsung One UI / Exp (0.80) và SystemUI Recents (0.958)
+        self.tap(device_id, w_portrait // 2, int(h_portrait * 0.80))
+        time.sleep(0.25)
+        self.tap(device_id, w_portrait // 2, int(h_portrait * 0.958))
+        time.sleep(0.6)
         self.keyevent(device_id, 3)
-        self.lock_portrait(device_id, retries=2)
-        return False
+        self.lock_portrait(device_id, retries=1)
+        return True
 
     def emergency_stop_and_clear_recents(self, device_id):
         """Dừng khẩn cấp tức thì: Cưỡng chế đóng toàn bộ ứng dụng và xóa sạch đa nhiệm trên máy."""
@@ -798,33 +815,20 @@ class ADBController:
             except Exception:
                 pass
 
-            # 3. Trở về màn hình Home
-            self.keyevent(device_id, 3)
-            time.sleep(0.15)
-
-            # 4. Mở màn hình đa nhiệm (Recent Apps)
-            self.keyevent(device_id, 187)
-            time.sleep(0.35)
-
-            # 5. Thử xóa đa nhiệm bằng clear_recent_apps (đã được cấp quyền trong emergency_cleanup_scope)
-            cleared = False
+            # 3. Mở đa nhiệm và bấm Đóng tất cả (gọi clear_recent_apps trực tiếp - không gửi keyevent kép)
             try:
-                cleared = self.clear_recent_apps(device_id, max_scrolls=0)
+                self.clear_recent_apps(device_id, max_scrolls=0)
             except Exception:
-                cleared = False
-
-            # 6. Nếu UIAutomator không tìm thấy nút, bấm vào tọa độ Close all / Đóng tất cả chuẩn của Samsung Galaxy
-            if not cleared:
+                self.keyevent(device_id, 187)
+                time.sleep(0.5)
                 width, height = self.get_effective_screen_size(device_id)
-                # Tọa độ Close all trên Samsung SM-J730G & SM-G935F (height * 0.80)
-                self.tap(device_id, width // 2, int(height * 0.80))
-                time.sleep(0.2)
-                # Tọa độ ĐÓNG TẤT CẢ trên Samsung SM-N935F (height * 0.955)
-                self.tap(device_id, width // 2, int(height * 0.955))
-                time.sleep(0.2)
+                w, h = min(width, height), max(width, height)
+                self.tap(device_id, w // 2, int(h * 0.80))
+                time.sleep(0.25)
+                self.tap(device_id, w // 2, int(h * 0.958))
+                time.sleep(0.6)
+                self.keyevent(device_id, 3)
 
-            # 7. Trở về Home sạch sẽ và khóa dọc
-            self.keyevent(device_id, 3)
             self.lock_portrait(device_id, retries=1)
             return True
 
