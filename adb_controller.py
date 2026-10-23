@@ -2903,6 +2903,110 @@ class ADBController:
                 pass
             self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
 
+    def dismiss_facebook_blocking_popups(
+        self, device_id, status_callback=None
+    ):
+        """Phát hiện và tự động tắt các hộp thoại, popup cản trở trên Facebook (Lưu thông tin đăng nhập, Bật thông báo, Đồng bộ danh bạ...)."""
+        root = self._get_facebook_ui_root(device_id, "fb_popup_chk")
+        if root is None:
+            return False
+
+        parent_map = {
+            child: parent for parent in root.iter() for child in parent
+        }
+        popup_markers = (
+            "luu thong tin dang nhap",
+            "save login info",
+            "bat thong bao",
+            "turn on notifications",
+            "thong bao",
+            "dong bo danh ba",
+            "sync contacts",
+            "tim ban be",
+            "find friends",
+            "cap nhat facebook",
+            "update facebook",
+            "phien ban moi",
+            "new version",
+            "them vao man hinh",
+            "add to home screen",
+            "cho phep facebook",
+            "allow facebook",
+            "danh gia",
+            "rate us",
+            "luc khac",
+            "not now",
+            "de sau",
+        )
+        dismiss_labels = {
+            "luc khac",
+            "not now",
+            "de sau",
+            "later",
+            "khong",
+            "no",
+            "khong phai bay gio",
+            "khong cam on",
+            "no thanks",
+            "bo qua",
+            "skip",
+            "huy",
+            "cancel",
+            "dong",
+            "close",
+            "tu choi",
+            "deny",
+            "dont allow",
+        }
+
+        has_popup = False
+        dismiss_node = None
+
+        for node in root.iter():
+            label = self._normalize_facebook_text(
+                f"{node.get('text', '')} {node.get('content-desc', '')}"
+            )
+            resource_id = node.get("resource-id", "").casefold()
+
+            if any(marker in label for marker in popup_markers):
+                has_popup = True
+
+            if label in dismiss_labels or any(
+                k in label for k in ("luc khac", "not now", "de sau", "khong phai bay gio")
+            ):
+                clickable = node
+                while clickable is not None and clickable.get("clickable", "false") != "true":
+                    clickable = parent_map.get(clickable)
+                dismiss_node = clickable if clickable is not None else node
+                has_popup = True
+                break
+
+            if any(k in resource_id for k in ("cancel", "dismiss", "close", "negative")):
+                clickable = node
+                while clickable is not None and clickable.get("clickable", "false") != "true":
+                    clickable = parent_map.get(clickable)
+                dismiss_node = clickable if clickable is not None else node
+                has_popup = True
+                break
+
+        if has_popup and dismiss_node is not None:
+            coords = self._element_center(dismiss_node)
+            if coords:
+                if status_callback:
+                    status_callback(
+                        device_id,
+                        f"[Facebook] Tự động đóng popup cản trở tại {coords}...",
+                    )
+                self.tap(device_id, coords[0], coords[1])
+                time.sleep(1.0)
+                return True
+        elif has_popup:
+            self.keyevent(device_id, 4)
+            time.sleep(0.8)
+            return True
+
+        return False
+
     def dismiss_facebook_composer_if_present(
         self, device_id, status_callback=None
     ):
@@ -3992,6 +4096,7 @@ class ADBController:
             update_status("[Facebook B1] Kiểm tra và mở Facebook...")
             if not self.ensure_facebook_ready(device_id):
                 raise RuntimeError("Không mở được ứng dụng Facebook")
+            self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
             feed_total = random.randint(
                 config.FACEBOOK_STEP1_FEED_MIN,
                 config.FACEBOOK_STEP1_FEED_MAX,
@@ -5991,10 +6096,18 @@ class ADBController:
             "add phone number",
             "cap nhat so dien thoai",
             "update phone number",
+            "cap nhat tiktok",
+            "update tiktok",
+            "phien ban moi",
+            "new version",
+            "luu thong tin dang nhap",
+            "save login info",
             "bat thong bao",
             "turn on notifications",
             "dong bo danh ba",
             "sync contacts",
+            "tim ban be",
+            "find friends",
             "verify to continue",
             "drag the puzzle",
             "puzzle piece",
@@ -6014,6 +6127,7 @@ class ADBController:
         close_markers = {
             "close", "dong", "not now", "de sau", "later", "skip",
             "bo qua", "cancel", "huy", "mo tiktok", "open tiktok",
+            "luc khac", "khong", "khong phai bay gio", "khong cam on", "no thanks",
         }
         popup_found = False
         close_coords = None
@@ -6203,7 +6317,7 @@ class ADBController:
                 if any(marker in label for marker in age_or_reward_markers):
                     has_age_or_reward_popup = True
 
-                if label in ("huy", "cancel", "de sau", "khong phai bay gio", "khong bao gio", "hoi vao lan sau"):
+                if label in ("huy", "cancel", "de sau", "khong phai bay gio", "khong bao gio", "hoi vao lan sau", "luc khac", "bo qua", "skip"):
                     if not cancel_location_node:
                         cancel_location_node = node
                     if not cancel_age_node:

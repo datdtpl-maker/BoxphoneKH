@@ -1639,6 +1639,31 @@ class FacebookAutomationTests(unittest.TestCase):
         self.assertIn(4, keyevents)
 
 
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_dismiss_facebook_blocking_popups(self, _mock_sleep):
+        controller = ADBController(adb_path="adb")
+        controller.is_facebook_in_foreground = lambda _dev: True
+        
+        popup_xml = """
+        <hierarchy>
+          <node text="Lưu thông tin đăng nhập của bạn?" bounds="[100,600][980,800]" />
+          <node text="Lúc khác" clickable="true" bounds="[150,1200][450,1320]" />
+          <node text="Lưu" clickable="true" bounds="[630,1200][930,1320]" />
+        </hierarchy>
+        """
+        import xml.etree.ElementTree as ET
+        controller._get_facebook_ui_root = lambda *_args: ET.fromstring(popup_xml)
+        
+        taps = []
+        controller.tap = lambda _dev, x, y: taps.append((x, y))
+        
+        dismissed = controller.dismiss_facebook_blocking_popups("dev-1")
+        self.assertTrue(dismissed)
+        self.assertEqual(1, len(taps))
+        # Nút 'Lúc khác' có bounds [150,1200][450,1320] -> tâm là (300, 1260)
+        self.assertEqual((300, 1260), taps[0])
+
+
 if __name__ == "__main__":
     unittest.main()
 
