@@ -249,6 +249,16 @@ def wait_for_tiktok_video_ready(
                 adb.lock_portrait(device_id, retries=1)
             except Exception:
                 pass
+        if hasattr(adb, 'dismiss_system_usb_storage_popup'):
+            try:
+                adb.dismiss_system_usb_storage_popup(device_id)
+            except Exception:
+                pass
+        if hasattr(adb, 'dismiss_tiktok_location_popup'):
+            try:
+                adb.dismiss_tiktok_location_popup(device_id)
+            except Exception:
+                pass
 
         # Sau 2-3s khi app đã khởi động xong, nếu có video_id, bắn lại deep link native một lần nữa
         # để đảm bảo app không bị đứng ở màn hình For You (Dành cho bạn)
