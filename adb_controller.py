@@ -1,4 +1,6 @@
 import sys
+import gc
+import ctypes
 import tempfile
 import subprocess
 import base64
@@ -530,6 +532,158 @@ class ADBController:
                     else:
                         status_map["other"].append((serial, st))
         return status_map
+
+    def get_memory_status(self):
+        """Đọc dung lượng RAM của tiến trình hiện tại (MB) và RAM trống hệ thống (GB)."""
+        proc_mb = 0.0
+        free_gb = 0.0
+        total_gb = 0.0
+        if os.name == "nt":
+            try:
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    free_gb = stat.ullAvailPhys / (1024 ** 3)
+                    total_gb = stat.ullTotalPhys / (1024 ** 3)
+
+                class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                    _fields_ = [
+                        ("cb", ctypes.c_ulong),
+                        ("PageFaultCount", ctypes.c_ulong),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t),
+                    ]
+                pmc = PROCESS_MEMORY_COUNTERS()
+                pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+                k32 = ctypes.windll.kernel32
+                k32.GetCurrentProcess.restype = ctypes.c_void_p
+                h_proc = k32.GetCurrentProcess()
+                fn = getattr(k32, "K32GetProcessMemoryInfo", ctypes.windll.psapi.GetProcessMemoryInfo)
+                fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESS_MEMORY_COUNTERS), ctypes.c_ulong]
+                fn.restype = ctypes.c_int
+                if fn(h_proc, ctypes.byref(pmc), pmc.cb):
+                    proc_mb = pmc.WorkingSetSize / (1024 ** 2)
+            except Exception:
+                pass
+        return round(proc_mb, 1), round(free_gb, 2), round(total_gb, 1)
+
+    def cleanup_system_resources(self, deep=False, max_file_age_sec=90):
+        """Tự động dọn dẹp file tạm XML/PNG, thu hồi bộ nhớ phân mảnh và giải phóng WorkingSet RAM."""
+        before_mb, _, _ = self.get_memory_status()
+        files_removed = 0
+        now = time.time()
+        age_limit = 0 if deep else max(10, int(max_file_age_sec))
+
+        # 1. Dọn file tạm XML/PNG trên PC (%TEMP%, thư mục temp/, thư mục gốc)
+        candidate_dirs = [
+            tempfile.gettempdir(),
+            os.path.join(os.path.dirname(__file__), "temp"),
+            os.path.dirname(__file__),
+        ]
+        temp_prefixes = (
+            "temp_fb_",
+            "temp_facebook_",
+            "temp_recents_",
+            "temp_dump_",
+            "temp_state_",
+            "temp_check_",
+            "temp_view_",
+            "temp_shop_",
+            "temp_shopee_",
+            "screenshot_",
+        )
+        for folder in candidate_dirs:
+            if not folder or not os.path.isdir(folder):
+                continue
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if not entry.is_file():
+                            continue
+                        name_lower = entry.name.lower()
+                        if not (name_lower.endswith(".xml") or name_lower.endswith(".png")):
+                            continue
+                        if not any(name_lower.startswith(p) for p in temp_prefixes):
+                            continue
+                        try:
+                            if age_limit > 0 and (now - entry.stat().st_mtime) < age_limit:
+                                continue
+                            os.remove(entry.path)
+                            files_removed += 1
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+
+        # 2. Thu gọn các bộ nhớ đệm nội bộ để không phình to sau 24h
+        try:
+            if hasattr(self, "_recent_tiktok_target_taps") and isinstance(self._recent_tiktok_target_taps, dict):
+                if len(self._recent_tiktok_target_taps) > 80:
+                    self._recent_tiktok_target_taps.clear()
+            with self._screen_size_cache_guard:
+                if len(self._screen_size_cache) > 120:
+                    self._screen_size_cache.clear()
+        except Exception:
+            pass
+
+        # 3. Dọn file dump tồn đọng trên /sdcard/ của các máy đang rảnh (nếu deep=True)
+        if deep:
+            try:
+                devices = self.get_devices()
+                for dev_id in devices:
+                    if not self.is_device_workflow_active(dev_id):
+                        self.execute_adb(
+                            dev_id,
+                            ["shell", "rm -f /sdcard/dump_*.xml /sdcard/fb_*.xml /sdcard/state_*.xml /sdcard/screen_*.png >/dev/null 2>&1 || true"],
+                            timeout=3,
+                        )
+            except Exception:
+                pass
+
+        # 4. Chạy Python Garbage Collector + ép Windows thu hồi WorkingSet RAM
+        try:
+            gc.collect()
+            if os.name == "nt":
+                k32 = ctypes.windll.kernel32
+                k32.GetCurrentProcess.restype = ctypes.c_void_p
+                h_proc = k32.GetCurrentProcess()
+                k32.SetProcessWorkingSetSize.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t]
+                k32.SetProcessWorkingSetSize(
+                    h_proc, ctypes.c_size_t(-1), ctypes.c_size_t(-1)
+                )
+                try:
+                    ctypes.windll.psapi.EmptyWorkingSet(h_proc)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        after_mb, free_gb, total_gb = self.get_memory_status()
+        return {
+            "files_removed": files_removed,
+            "ram_before_mb": before_mb,
+            "ram_after_mb": after_mb,
+            "free_sys_gb": free_gb,
+            "total_sys_gb": total_gb,
+        }
 
     def reconnect_devices(self):
         """Tự động khôi phục kết nối các máy offline hoặc bị nghẽn ADB stack trên tất cả các port."""
@@ -2114,11 +2268,11 @@ class ADBController:
         pull_code, _, _ = self.execute_adb(
             device_id, ["pull", remote_xml, local_xml]
         )
-        if pull_code != 0 or not os.path.exists(local_xml):
-            return None
 
         candidates = []
         try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return None
             root = ET.parse(local_xml).getroot()
             for node in root.iter():
                 class_name = node.get("class", "").casefold()
@@ -2694,6 +2848,20 @@ class ADBController:
         local_xml = os.path.join(
             tempfile.gettempdir(), f"temp_{prefix}_{safe_device_id}.xml"
         )
+        # 1. Thử cơ chế One-shot Streaming trực tiếp qua RAM (không tạo file trên PC, không spawn adb pull)
+        fast_cmd = f"uiautomator dump {remote_xml} >/dev/null 2>&1 && cat {remote_xml} && rm -f {remote_xml}"
+        code, stdout, _ = self.execute_adb(device_id, ["shell", fast_cmd])
+        if code == 0 and stdout and "<hierarchy" in stdout:
+            try:
+                start_idx = stdout.find("<hierarchy")
+                end_idx = stdout.find("</hierarchy>")
+                if start_idx != -1 and end_idx != -1:
+                    clean_xml = stdout[start_idx : end_idx + len("</hierarchy>")]
+                    return ET.fromstring(clean_xml)
+            except Exception:
+                pass
+
+        # 2. Fallback an toàn (rm -> dump -> pull -> finally xóa file tạm)
         self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
         dump_code, _, _ = self.execute_adb(
             device_id, ["shell", "uiautomator", "dump", remote_xml]
@@ -2709,6 +2877,12 @@ class ADBController:
             return ET.parse(local_xml).getroot()
         except Exception:
             return None
+        finally:
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
 
     def dismiss_facebook_composer_if_present(
         self, device_id, status_callback=None
@@ -6425,11 +6599,11 @@ class ADBController:
             return None
 
         pull_code, _, _ = self.execute_adb(device_id, ["pull", xml_file, local_xml])
-        if pull_code != 0 or not os.path.exists(local_xml):
-            return None
 
         candidates = []
         try:
+            if pull_code != 0 or not os.path.exists(local_xml):
+                return None
             root = ET.parse(local_xml).getroot()
             for elem in root.iter():
                 class_name = elem.get("class", "").lower()

@@ -188,6 +188,21 @@ class ADBPerformanceTests(unittest.TestCase):
         self.assertIn(tap_cmd, commands)
         self.assertIn(key_cmd, commands)
 
+    def test_cleanup_system_resources_removes_stale_temp_files_and_trims_ram(self):
+        import os
+        import tempfile
+        controller = ADBController(adb_path="adb")
+        stale_xml = os.path.join(tempfile.gettempdir(), "temp_fb_composer_chk_test_unit.xml")
+        with open(stale_xml, "w", encoding="utf-8") as f:
+            f.write("<hierarchy></hierarchy>")
+        old_time = time.time() - 300
+        os.utime(stale_xml, (old_time, old_time))
+
+        stats = controller.cleanup_system_resources(deep=False, max_file_age_sec=60)
+        self.assertGreaterEqual(stats["files_removed"], 1)
+        self.assertFalse(os.path.exists(stale_xml))
+        self.assertGreaterEqual(stats["total_sys_gb"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

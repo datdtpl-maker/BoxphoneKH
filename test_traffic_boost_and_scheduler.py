@@ -277,6 +277,8 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         from unittest.mock import patch
         import interaction_tracker
 
+        # Reset test device history so test is idempotent across runs
+        interaction_tracker.default_tracker.clear_history("dev-newest-test")
         # Even if positional key was recorded before, a new video with new caption must be liked
         interaction_tracker.record_interaction("dev-newest-test", "tiktok", "kenh_clip_1", "like")
 

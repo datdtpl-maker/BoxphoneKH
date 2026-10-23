@@ -329,13 +329,30 @@ class GUIApp(ctk.CTk):
             command=self.toggle_system_log,
         )
         self.btn_toggle_log.pack(side="right", padx=(0, 8))
+
+        self.btn_clear_log = ctk.CTkButton(
+            self.log_header,
+            text="🧹 Xóa nhật ký",
+            width=102,
+            height=28,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#f1f5f9",
+            hover_color="#e2e8f0",
+            text_color="#334155",
+            border_width=1,
+            border_color="#cbd5e1",
+            corner_radius=9,
+            cursor="hand2",
+            command=self.clear_system_log,
+        )
+        self.btn_clear_log.pack(side="right", padx=(0, 6))
         
         self.log_box = ctk.CTkTextbox(
             self.log_card,
             height=78,
             state="disabled",
-            fg_color="#0b1220",
-            text_color="#dbeafe",
+            fg_color="#090d16",
+            text_color="#e2e8f0",
             font=ctk.CTkFont(family="Cascadia Mono", size=11),
             border_width=1,
             border_color="#1e293b",
@@ -345,9 +362,10 @@ class GUIApp(ctk.CTk):
         )
         self.log_box.pack(fill="x", padx=18, pady=(0, 14))
         
-        # Redirect standard output & error to log_box
-        sys.stdout = ConsoleRedirector(self.log_box)
-        sys.stderr = ConsoleRedirector(self.log_box)
+        # Dùng chung 1 ConsoleRedirector duy nhất cho cả stdout và stderr để chống nhân đôi bộ đếm timer
+        self.console_redirector = ConsoleRedirector(self.log_box, flush_interval_ms=90, max_lines=2500)
+        sys.stdout = self.console_redirector
+        sys.stderr = self.console_redirector
 
         # ================= ROW 2: OPERATIONAL CARDS =================
         self.ops_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -782,11 +800,11 @@ class GUIApp(ctk.CTk):
         self.lbl_tt_timeline = ctk.CTkLabel(
             self.tt_timeline_card,
             text=(
-                "LỘ TRÌNH TỰ ĐỘNG\n\n"
-                "00   Nuôi Facebook Feed  •  10–20 giây\n"
-                "01   Trang chủ  •  10–20 giây\n"
-                "02   Từ khóa nhiệm vụ  •  10–15 giây\n"
-                "03   Trong kênh  •  3–5 phút, đổi clip mỗi 15–30 giây"
+                "⚡ LỘ TRÌNH TỰ ĐỘNG THÔNG MINH (ƯU TIÊN VIDEO MỚI NHẤT)\n\n"
+                "00   Nuôi chéo Facebook Feed  •  10–20 giây\n"
+                "01   Lướt For You TikTok Home  •  10–20 giây\n"
+                "02   Tìm từ khóa mồi ngành hàng  •  10–15 giây\n"
+                "03   Vào Kênh đích  •  Ưu tiên 6 clip mới nhất (Like 90%, Chống trùng 100%)"
             ),
             justify="left",
             anchor="w",
@@ -797,17 +815,18 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.tiktok_scroll,
-            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả",
+            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả (hoặc bấm nút chọn nhanh bên dưới)",
             font=label_font,
             text_color=text,
         ).pack(padx=16, pady=(0, 3), anchor="w")
         self.ent_tt_selection = ctk.CTkEntry(
             self.tiktok_scroll,
-            placeholder_text="Ví dụ: 1-5,10",
+            placeholder_text="Ví dụ: 1-10, 15 • Bỏ trống = chạy toàn bộ 40 máy",
             height=42,
             **field_style,
         )
-        self.ent_tt_selection.pack(fill="x", padx=16, pady=(0, 8))
+        self.ent_tt_selection.pack(fill="x", padx=16, pady=(0, 4))
+        self._build_quick_selection_bar(self.tiktok_scroll, self.ent_tt_selection)
 
         self.tt_combined_card = ctk.CTkFrame(
             self.tiktok_scroll,
@@ -1016,17 +1035,18 @@ class GUIApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.facebook_scroll,
-            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả",
+            text="3. Thiết bị chạy • Bỏ trống để chọn tất cả (hoặc bấm nút chọn nhanh bên dưới)",
             font=label_font,
             text_color=text,
         ).pack(padx=16, pady=(0, 3), anchor="w")
         self.ent_fb_selection = ctk.CTkEntry(
             self.facebook_scroll,
-            placeholder_text="Ví dụ: 1-5,10",
+            placeholder_text="Ví dụ: 1-10, 15 • Bỏ trống = chạy toàn bộ 40 máy",
             height=42,
             **field_style,
         )
-        self.ent_fb_selection.pack(fill="x", padx=16, pady=(0, 8))
+        self.ent_fb_selection.pack(fill="x", padx=16, pady=(0, 4))
+        self._build_quick_selection_bar(self.facebook_scroll, self.ent_fb_selection)
 
         self.fb_combined_card = ctk.CTkFrame(
             self.facebook_scroll,
@@ -1592,9 +1612,15 @@ class GUIApp(ctk.CTk):
 
         # Quét thiết bị khi vừa khởi động (chạy sau khi mainloop đã sẵn sàng)
         self.after(800, self.refresh_devices_action)
+        # Tăng thời gian cache khóa dọc lên 5 phút để không spam ADB mỗi phút
+        if hasattr(main, "adb"):
+            main.adb._portrait_cache_seconds = 300.0
         # Thiết bị Box Phone có thể kết nối muộn hoặc tự bật lại cảm biến xoay.
-        # Kiểm tra định kỳ để các app social luôn giữ hướng dọc.
-        self.after(15000, self._portrait_guard_tick)
+        # Kiểm tra định kỳ mỗi 10 phút (thay vì 60s) để chống nghẽn PC khi treo máy qua đêm.
+        self.after(45000, self._portrait_guard_tick)
+        # Khởi chạy bộ giám sát RAM & tự động dọn rác chống lag 24/7
+        self.after(3000, self._update_ram_badge_tick)
+        self.after(600000, self._anti_lag_maintenance_tick)
         # Khởi chạy bot Telegram ở luồng phụ
         self.start_bot_service()
         # Khởi chạy luồng đếm giờ tự động theo khung giờ vàng
@@ -1699,31 +1725,31 @@ class GUIApp(ctk.CTk):
             }
             self.btn_nav_overview = ctk.CTkButton(
                 self.brand_badge,
-                text="Tổng quan vận hành",
+                text="📊  Tổng quan vận hành",
                 command=self._show_operations_overview,
                 **nav_style,
             )
             self.btn_nav_tiktok = ctk.CTkButton(
                 self.brand_badge,
-                text="TikTok Automation",
+                text="🎵  TikTok Automation",
                 command=lambda: self._navigate_module("TikTok"),
                 **nav_style,
             )
             self.btn_nav_facebook = ctk.CTkButton(
                 self.brand_badge,
-                text="Facebook Automation",
+                text="📘  Facebook Automation",
                 command=lambda: self._navigate_module("Facebook"),
                 **nav_style,
             )
             self.btn_nav_comment = ctk.CTkButton(
                 self.brand_badge,
-                text="Bơm bình luận TikTok",
+                text="💬  Bơm bình luận TikTok",
                 command=self._open_comment_workspace,
                 **nav_style,
             )
             self.btn_nav_activity = ctk.CTkButton(
                 self.brand_badge,
-                text="Nhật ký hệ thống",
+                text="🖥️  Nhật ký hệ thống",
                 command=self._open_activity_workspace,
                 **nav_style,
             )
@@ -1773,22 +1799,16 @@ class GUIApp(ctk.CTk):
         )
         self.platform_badge.pack(fill="x", pady=(0, 10))
 
-        primary_sidebar_buttons = (
-            (self.btn_refresh, "Quét thiết bị", blue, blue_hover),
-            (self.btn_dismiss_popups, "Đóng Popup 40 máy", "#D97706", "#B45309"),
-            (self.btn_mute_all, "Tắt âm toàn bộ", "#6447C7", "#5136AD"),
+        self.btn_refresh.configure(
+            text="🔄 Quét & Kết nối 40 máy",
+            width=0,
+            height=40,
+            corner_radius=10,
+            fg_color=blue,
+            hover_color=blue_hover,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
         )
-        for button, label, color, hover in primary_sidebar_buttons:
-            button.configure(
-                text=label,
-                width=0,
-                height=42,
-                corner_radius=10,
-                fg_color=color,
-                hover_color=hover,
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            )
-            button.pack(fill="x", pady=3)
+        self.btn_refresh.pack(fill="x", pady=(2, 3))
 
         # Hai nút mở TikTok và Facebook kiểm tra tài khoản
         if not hasattr(self, "frame_app_checkers"):
@@ -1800,22 +1820,24 @@ class GUIApp(ctk.CTk):
 
             self.btn_open_tiktok = ctk.CTkButton(
                 self.frame_app_checkers,
-                text="📱 TikTok",
-                height=40,
+                text="📱 Mở TikTok",
+                height=38,
                 corner_radius=10,
-                fg_color="#111827",
-                hover_color="#1F2937",
+                fg_color="#1E293B",
+                hover_color="#334155",
                 text_color="#FFFFFF",
+                border_width=1,
+                border_color="#475569",
                 font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
                 cursor="hand2",
                 command=self.open_tiktok_all_action,
             )
-            self.btn_open_tiktok.grid(row=0, column=0, sticky="ew", padx=(0, 2))
+            self.btn_open_tiktok.grid(row=0, column=0, sticky="ew", padx=(0, 3))
 
             self.btn_open_facebook = ctk.CTkButton(
                 self.frame_app_checkers,
-                text="📘 Facebook",
-                height=40,
+                text="📘 Mở Facebook",
+                height=38,
                 corner_radius=10,
                 fg_color="#1877F2",
                 hover_color="#145DBF",
@@ -1824,25 +1846,61 @@ class GUIApp(ctk.CTk):
                 cursor="hand2",
                 command=self.open_facebook_all_action,
             )
-            self.btn_open_facebook.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+            self.btn_open_facebook.grid(row=0, column=1, sticky="ew", padx=(3, 0))
 
         self.frame_app_checkers.pack(fill="x", pady=3)
 
+        self.btn_dismiss_popups.configure(
+            text="🛡️ Đóng Popup 40 máy",
+            width=0,
+            height=36,
+            corner_radius=10,
+            fg_color="#D97706",
+            hover_color="#B45309",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+        )
+        self.btn_dismiss_popups.pack(fill="x", pady=2)
+        self.btn_mute_all.configure(
+            text="🔇 Tắt âm 40 máy",
+            width=0,
+            height=36,
+            corner_radius=10,
+            fg_color="#6447C7",
+            hover_color="#5136AD",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+        )
+        self.btn_mute_all.pack(fill="x", pady=2)
+
+        if not hasattr(self, "btn_clean_ram"):
+            self.btn_clean_ram = ctk.CTkButton(
+                self.brand_badge,
+                text="⚡ Giải phóng RAM & Rác",
+                height=38,
+                corner_radius=10,
+                fg_color="#0284C7",
+                hover_color="#0369A1",
+                text_color="#FFFFFF",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                cursor="hand2",
+                command=self.clean_system_resources_action,
+            )
+        self.btn_clean_ram.pack(fill="x", pady=3)
+
         secondary_sidebar_buttons = (
-            (self.btn_scan_notion, "Đồng bộ từ Notion", "#0B7B72", "#08645E"),
-            (self.btn_complete_notion, "Hoàn thành lịch tuần", "#475569", "#334155"),
+            (self.btn_scan_notion, "📥 Đồng bộ từ Notion", "#0B7B72", "#08645E"),
+            (self.btn_complete_notion, "✅ Hoàn thành lịch tuần", "#475569", "#334155"),
         )
         for button, label, color, hover in secondary_sidebar_buttons:
             button.configure(
                 text=label,
                 width=0,
-                height=42,
+                height=38,
                 corner_radius=10,
                 fg_color=color,
                 hover_color=hover,
                 font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             )
-            button.pack(fill="x", pady=3)
+            button.pack(fill="x", pady=2)
 
         self.btn_telegram_notifications.configure(
             width=0,
@@ -1888,25 +1946,50 @@ class GUIApp(ctk.CTk):
         ).pack(anchor="w", pady=(2, 0))
 
         header_meta = ctk.CTkFrame(self.main_header, fg_color="transparent")
-        header_meta.grid(row=0, column=1, sticky="e", padx=(8, 10), pady=10)
-        for label, fg, color in (
-            ("2 MODULE", soft_blue, blue),
-            ("ADB READY", "#ECFDF5", green),
-            ("LOCAL SECURE", "#F1F5F9", "#475569"),
-        ):
-            ctk.CTkLabel(
-                header_meta,
-                text=label,
-                height=30,
-                corner_radius=9,
-                fg_color=fg,
-                text_color=color,
-                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-            ).pack(side="left", padx=3)
+        header_meta.grid(row=0, column=1, sticky="e", padx=(8, 14), pady=10)
+        self.lbl_anti_lag_badge = ctk.CTkLabel(
+            header_meta,
+            text="🛡️ CHỐNG LAG 24/7: BẬT",
+            height=32,
+            corner_radius=9,
+            fg_color="#ECFDF5",
+            text_color=green,
+            padx=10,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.lbl_anti_lag_badge.pack(side="left", padx=4)
+
+        self.lbl_ram_status_badge = ctk.CTkLabel(
+            header_meta,
+            text="💾 RAM App: -- MB • PC trống: -- GB",
+            height=32,
+            corner_radius=9,
+            fg_color=soft_blue,
+            text_color=blue,
+            padx=10,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        )
+        self.lbl_ram_status_badge.pack(side="left", padx=4)
+
+        self.btn_header_clean_ram = ctk.CTkButton(
+            header_meta,
+            text="⚡ Tối ưu RAM",
+            width=118,
+            height=38,
+            corner_radius=10,
+            fg_color="#0284C7",
+            hover_color="#0369A1",
+            text_color="#FFFFFF",
+            cursor="hand2",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            command=self.clean_system_resources_action,
+        )
+        self.btn_header_clean_ram.pack(side="left", padx=(4, 4))
+
         self.btn_header_stop = ctk.CTkButton(
             header_meta,
             text="🚨 DỪNG KHẨN CẤP",
-            width=155,
+            width=158,
             height=40,
             corner_radius=10,
             fg_color="#DC2626",
@@ -1917,7 +2000,7 @@ class GUIApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             command=self.stop_all,
         )
-        self.btn_header_stop.pack(side="left", padx=(8, 0))
+        self.btn_header_stop.pack(side="left", padx=(6, 0))
 
         # Main workspace on the left, realtime operations stream on the right.
         self.ops_frame.configure(fg_color="transparent")
@@ -3071,12 +3154,157 @@ class GUIApp(ctk.CTk):
             )
         return results
 
+    def _build_quick_selection_bar(self, parent, entry_widget):
+        """Tạo thanh nút bấm chọn nhanh cụm máy (Tất cả, 1-10, 11-20, 21-30, 31-40, 1-20, 21-40)."""
+        bar = ctk.CTkFrame(parent, fg_color="transparent")
+        bar.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(
+            bar,
+            text="Chọn nhanh:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#475569",
+        ).pack(side="left", padx=(0, 6))
+        presets = (
+            ("🌐 Tất cả 40 máy", ""),
+            ("1–10", "1-10"),
+            ("11–20", "11-20"),
+            ("21–30", "21-30"),
+            ("31–40", "31-40"),
+            ("Nửa đầu (1–20)", "1-20"),
+            ("Nửa sau (21–40)", "21-40"),
+        )
+        for label, value in presets:
+            is_all = value == ""
+            ctk.CTkButton(
+                bar,
+                text=label,
+                width=0,
+                height=28,
+                corner_radius=8,
+                fg_color="#dbeafe" if is_all else "#f1f5f9",
+                hover_color="#bfdbfe" if is_all else "#e2e8f0",
+                text_color="#1d4ed8" if is_all else "#334155",
+                border_width=1,
+                border_color="#93c5fd" if is_all else "#cbd5e1",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                cursor="hand2",
+                command=lambda w=entry_widget, v=value, lbl=label: self._apply_quick_device_preset(w, v, lbl),
+            ).pack(side="left", padx=2, ipadx=6)
+
+    def _apply_quick_device_preset(self, entry_widget, value, label):
+        """Điền nhanh cụm máy vào ô chọn thiết bị."""
+        for target_entry in (
+            entry_widget,
+            getattr(self, "ent_tt_selection", None),
+            getattr(self, "ent_fb_selection", None),
+            getattr(self, "ent_social_selection", None),
+        ):
+            if target_entry is not None and hasattr(target_entry, "delete"):
+                try:
+                    target_entry.delete(0, "end")
+                    if value:
+                        target_entry.insert(0, value)
+                except Exception:
+                    pass
+        desc = "Toàn bộ máy đang kết nối" if not value else f"Máy {value}"
+        self.log_message(f"[Chọn nhanh] 🎯 Đã chọn cụm chạy: {desc} ({label})")
+
+    def clear_system_log(self):
+        """Xóa sạch nhật ký trên giao diện và giải phóng bộ đệm text widget."""
+        redirector = self.__dict__.get("console_redirector")
+        if redirector is not None and hasattr(redirector, "clear"):
+            redirector.clear()
+        elif hasattr(self, "log_box"):
+            try:
+                self.log_box.configure(state="normal")
+                self.log_box.delete("1.0", "end")
+                self.log_box.configure(state="disabled")
+            except Exception:
+                pass
+        print("[Hệ thống] 🧹 Đã làm sạch nhật ký hiển thị và giải phóng bộ đệm giao diện.")
+
+    def _update_ram_badge_tick(self):
+        """Cập nhật chỉ số RAM trực tiếp trên thanh Header và Sidebar mỗi 10 giây."""
+        try:
+            if hasattr(main, "adb") and hasattr(main.adb, "get_memory_status"):
+                proc_mb, free_gb, _total_gb = main.adb.get_memory_status()
+                badge = self.__dict__.get("lbl_ram_status_badge")
+                if badge is not None:
+                    badge.configure(
+                        text=f"💾 RAM App: {proc_mb:.0f} MB • PC trống: {free_gb:.1f} GB"
+                    )
+                plat_badge = self.__dict__.get("platform_badge")
+                if plat_badge is not None:
+                    plat_badge.configure(
+                        text=f"⚡ RAM APP: {proc_mb:.0f}MB • TRỐNG: {free_gb:.1f}GB"
+                    )
+        except Exception:
+            pass
+        self.after(10000, self._update_ram_badge_tick)
+
+    def _anti_lag_maintenance_tick(self):
+        """Tự động bảo trì chống lag mỗi 10 phút khi treo máy chạy 24/7."""
+        def bg_maintenance():
+            try:
+                if hasattr(main, "adb") and hasattr(main.adb, "cleanup_system_resources"):
+                    stats = main.adb.cleanup_system_resources(deep=False, max_file_age_sec=90)
+                    removed = stats.get("files_removed", 0)
+                    before_mb = stats.get("ram_before_mb", 0)
+                    after_mb = stats.get("ram_after_mb", 0)
+                    if removed > 0 or (before_mb - after_mb) > 15:
+                        print(
+                            f"[Chống Lag 24/7] 🛡️ Đã tự động dọn {removed} file tạm & tối ưu RAM "
+                            f"({before_mb:.0f}MB → {after_mb:.0f}MB)."
+                        )
+            except Exception:
+                pass
+        self.run_in_thread(bg_maintenance)
+        self.after(600000, self._anti_lag_maintenance_tick)
+
+    def clean_system_resources_action(self):
+        """Nút bấm Giải phóng RAM & Dọn rác tức thì cho máy tính và BoxPhone."""
+        for btn_attr in ("btn_clean_ram", "btn_header_clean_ram"):
+            btn = self.__dict__.get(btn_attr)
+            if btn is not None:
+                try:
+                    btn.configure(state="disabled", text="⏳ Đang tối ưu...")
+                except Exception:
+                    pass
+
+        def action():
+            try:
+                if hasattr(main, "adb") and hasattr(main.adb, "cleanup_system_resources"):
+                    stats = main.adb.cleanup_system_resources(deep=True)
+                    removed = stats.get("files_removed", 0)
+                    before_mb = stats.get("ram_before_mb", 0.0)
+                    after_mb = stats.get("ram_after_mb", 0.0)
+                    free_gb = stats.get("free_sys_gb", 0.0)
+                    self.log_message(
+                        f"[Tối ưu Hệ thống] ⚡ Đã xóa {removed} file tạm XML/PNG • "
+                        f"Thu hồi RAM App: {before_mb:.1f} MB → {after_mb:.1f} MB • "
+                        f"RAM PC trống: {free_gb:.2f} GB!"
+                    )
+            finally:
+                def restore():
+                    if "btn_clean_ram" in self.__dict__:
+                        self.btn_clean_ram.configure(
+                            state="normal", text="⚡ Giải phóng RAM & Rác"
+                        )
+                    if "btn_header_clean_ram" in self.__dict__:
+                        self.btn_header_clean_ram.configure(
+                            state="normal", text="⚡ Tối ưu RAM"
+                        )
+                    self._update_ram_badge_tick()
+                self.after(0, restore)
+
+        self.run_in_thread(action)
+
     def _portrait_guard_tick(self):
-        """Kiểm tra dọc nhẹ, bỏ qua máy đang chạy workflow."""
+        """Kiểm tra dọc nhẹ mỗi 10 phút, bỏ qua máy đang chạy workflow để không làm lag PC."""
         self.bulk_disable_rotation(
             skip_busy=True, skip_if_running=True
         )
-        self.after(60000, self._portrait_guard_tick)
+        self.after(600000, self._portrait_guard_tick)
 
     def toggle_system_log(self):
         """Expand the activity panel across the workspace and restore it."""
@@ -3230,6 +3458,11 @@ class GUIApp(ctk.CTk):
 
     def _interruptible_session_sleep(self, seconds, is_cancelled):
         remaining = max(0.0, float(seconds))
+        if remaining >= 10.0 and hasattr(main, "adb") and hasattr(main.adb, "cleanup_system_resources"):
+            try:
+                main.adb.cleanup_system_resources(deep=False)
+            except Exception:
+                pass
         while remaining > 0 and not (is_cancelled and is_cancelled()):
             chunk = min(1.0, remaining)
             time.sleep(chunk)
@@ -4750,6 +4983,18 @@ class ConsoleRedirector:
             except Exception:
                 pass
         self._schedule_drain()
+
+    def clear(self):
+        with self._lock:
+            self.buffer = ""
+            self._pending_lines.clear()
+            self._rendered_lines = 0
+        try:
+            self.text_widget.configure(state="normal")
+            self.text_widget.delete("1.0", "end")
+            self.text_widget.configure(state="disabled")
+        except Exception:
+            pass
 
     def flush(self):
         with self._lock:
