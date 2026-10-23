@@ -201,5 +201,77 @@ class DomMultiResolutionAccuracyTests(unittest.TestCase):
         self.assertIn("Nhà thuốc Khải Hoàn", resolved_nhathuoc)
 
 
+    def test_ui_automator_dom_tiktok_english_liked(self):
+        """Kiểm tra nhận diện nút Like (đã like) và nút Bình luận trên TikTok Tiếng Anh."""
+        import ui_automator_dom
+        xml_en = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Video liked" bounds="[912,997][1080,1155]" />
+          <node class="android.widget.ImageView" content-desc="Read or add comments, 2" bounds="[912,1155][1080,1313]" />
+          <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[30,1400][500,1460]" />
+        </hierarchy>"""
+        root = ET.fromstring(xml_en)
+        ctrls = ui_automator_dom.find_tiktok_video_controls(root, 1080, 1920)
+        self.assertEqual(ctrls["like"]["center"], (996, 1076))
+        self.assertTrue(ctrls["like"]["is_liked"])
+        self.assertEqual(ctrls["comment"]["center"], (996, 1234))
+        self.assertEqual(ctrls["channel_name"], "khải hoàn skincare pt")
+
+    def test_ui_automator_dom_tiktok_vietnamese_unliked(self):
+        """Kiểm tra nhận diện nút Like (chưa like) và nút Bình luận trên TikTok Tiếng Việt."""
+        import ui_automator_dom
+        xml_vi = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Thích video" bounds="[912,997][1080,1155]" />
+          <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[912,1155][1080,1313]" />
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[30,1400][500,1460]" />
+        </hierarchy>"""
+        root = ET.fromstring(xml_vi)
+        ctrls = ui_automator_dom.find_tiktok_video_controls(root, 1080, 1920)
+        self.assertEqual(ctrls["like"]["center"], (996, 1076))
+        self.assertFalse(ctrls["like"]["is_liked"])
+        self.assertEqual(ctrls["comment"]["center"], (996, 1234))
+        self.assertEqual(ctrls["channel_name"], "khải hoàn & 101 nốt mụn")
+
+    def test_ui_automator_dom_tiktok_2k_resolution(self):
+        """Kiểm tra nhận diện chính xác trên màn hình 2K (1440x2560)."""
+        import ui_automator_dom
+        xml_2k = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Thích video" bounds="[1216,1333][1440,1543]" />
+          <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[1216,1543][1440,1753]" />
+          <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[40,1850][700,1930]" />
+        </hierarchy>"""
+        root = ET.fromstring(xml_2k)
+        ctrls = ui_automator_dom.find_tiktok_video_controls(root, 1440, 2560)
+        self.assertEqual(ctrls["like"]["center"], (1328, 1438))
+        self.assertEqual(ctrls["comment"]["center"], (1328, 1648))
+
+    @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True)
+    @patch("time.sleep", return_value=None)
+    def test_post_tiktok_comment_skips_like_if_already_liked(self, _sleep, _sheet_open):
+        """Kiểm tra post_tiktok_comment: Nếu video đã Like trên DOM thì KHÔNG bấm Like nữa, tuyệt đối không swipe."""
+        import comment_controller
+        from unittest.mock import MagicMock
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (0, "", "")
+        
+        xml_liked = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Video liked" bounds="[912,997][1080,1155]" />
+          <node class="android.widget.ImageView" content-desc="Read or add comments" bounds="[912,1155][1080,1313]" />
+        </hierarchy>"""
+        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_liked)):
+            taps = []
+            adb.tap = lambda dev, x, y: taps.append((x, y))
+            ok = comment_controller.post_tiktok_comment(
+                adb, "dev-test", "https://www.tiktok.com/@khaihoanskincare/video/123", "Bình luận test", dwell_time=1
+            )
+            self.assertTrue(ok)
+            # Điểm Like (996, 1076) KHÔNG được xuất hiện trong taps vì đã like
+            self.assertNotIn((996, 1076), taps)
+            # Điểm Comment (996, 1234) PHẢI xuất hiện trong taps để mở sheet
+            self.assertIn((996, 1234), taps)
+            # Tuyệt đối KHÔNG có lệnh swipe nào
+            self.assertFalse(hasattr(adb, "swipe") and adb.swipe.called)
+
+
 if __name__ == "__main__":
     unittest.main()

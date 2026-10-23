@@ -17,6 +17,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Callable, Optional
 
+import ui_automator_dom
+
 try:
     import cv2
     import numpy as np
@@ -325,6 +327,83 @@ def capture_screen_fast(adb, device_id: str) -> Optional[np.ndarray]:
             except Exception:
                 pass
     return None
+
+
+def find_tiktok_video_buttons_via_dom(
+    adb, device_id: str, width: int, height: int
+) -> tuple[Optional[tuple[int, int]], bool, Optional[tuple[int, int]]]:
+    """Quét DOM XML để bắt chính xác 100% tọa độ nút Like (và cờ đã like) cùng tọa độ Bình luận theo bounds từng máy."""
+    root = ui_automator_dom.dump_ui_tree(adb, device_id)
+    if root is not None:
+        ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+        like_c = ctrls["like"]["center"] if ctrls.get("like") else None
+        is_liked = ctrls["like"]["is_liked"] if ctrls.get("like") else False
+        cmt_c = ctrls["comment"]["center"] if ctrls.get("comment") else None
+        if like_c or cmt_c:
+            return like_c, is_liked, cmt_c
+
+    safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
+    xml_file = f"/sdcard/dump_dom_btn_{safe_dev}.xml"
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_dom_btn_{safe_dev}.xml")
+
+    like_coords = None
+    is_liked = False
+    comment_coords = None
+
+    try:
+        adb.execute_adb(device_id, ["shell", "rm", "-f", xml_file])
+        code, _, _ = adb.execute_adb(
+            device_id, ["shell", "uiautomator", "dump", "--compressed", xml_file], timeout=5.0
+        )
+        if code != 0:
+            code, _, _ = adb.execute_adb(
+                device_id, ["shell", "uiautomator", "dump", xml_file], timeout=5.0
+            )
+        if code == 0:
+            adb.execute_adb(device_id, ["pull", xml_file, local_xml], timeout=5.0)
+            if os.path.exists(local_xml) and os.path.getsize(local_xml) > 200:
+                tree = ET.parse(local_xml)
+                root = tree.getroot()
+
+                for elem in root.iter():
+                    bounds = elem.get("bounds", "")
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+                    if not m:
+                        continue
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    desc = (elem.get("content-desc") or "").casefold()
+                    txt = (elem.get("text") or "").casefold()
+                    rid = (elem.get("resource-id") or "").casefold()
+
+                    # 1. Bắt nút Thả tim (Like) ở cột bên phải màn hình
+                    if cx >= width * 0.70 and height * 0.40 <= cy <= height * 0.72:
+                        if any(k in desc or k in rid for k in ("thích video", "thich video", "bỏ thích video", "bo thich video", "like", "unlike", "iv_like", "like_icon")):
+                            like_coords = (cx, cy)
+                            is_liked = (
+                                (elem.get("selected") == "true")
+                                or (elem.get("checked") == "true")
+                                or any(k in desc or k in txt for k in ("video liked", "đã thích", "da thich", "bỏ thích", "bo thich", "unlike"))
+                            )
+
+                    # 2. Bắt nút Bình luận (Comment) ở cột bên phải màn hình
+                    if cx >= width * 0.70 and height * 0.50 <= cy <= height * 0.78:
+                        if any(k in desc or k in txt or k in rid for k in ("bình luận", "binh luan", "comment", "bóc tem", "boc tem", "add 1st", "add1st", "be the first")):
+                            elem_h = y2 - y1
+                            if elem_h < height * 0.05:
+                                comment_coords = (cx, max(int(height * 0.40), cy - int(height * 0.025)))
+                            else:
+                                comment_coords = (cx, cy)
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(local_xml):
+            try:
+                os.remove(local_xml)
+            except Exception:
+                pass
+
+    return like_coords, is_liked, comment_coords
 
 
 def find_tiktok_comment_icon_via_template(
@@ -728,7 +807,14 @@ def post_tiktok_comment(
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
 ) -> bool:
-    """Quy trình mở link video TikTok, xem tự nhiên và đăng bình luận."""
+    """Quy trình mở link video TikTok, xem tự nhiên và đăng bình luận.
+
+    Khóa cứng video mục tiêu (Target Lock), kiểm tra DOM thời gian thực:
+    - Thả tim trước nếu chưa like (video/tài khoản đã like thì bỏ qua, tuyệt đối không hủy tim)
+    - Nhận diện chính xác tọa độ theo từng máy qua UI Automator DOM Engine
+    - Tuyệt đối không lướt (swipe) làm trượt sang video khác
+    - Gửi bình luận và đóng an toàn qua phím Back/Escape/Backdrop
+    """
     def log(msg: str):
         if status_callback:
             status_callback(f"[Device {device_id}][TikTok Seeding] {msg}")
@@ -738,6 +824,9 @@ def post_tiktok_comment(
         return False
 
     width, height = adb.get_effective_screen_size(device_id)
+    target_channel = ui_automator_dom.extract_tiktok_channel_from_url(url)
+    target_video_id = extract_tiktok_video_id(url)
+    item_key = target_video_id or target_channel or url
 
     # 0. Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm
     log("Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm...")
@@ -768,7 +857,7 @@ def post_tiktok_comment(
             except Exception:
                 pass
 
-        # 1. Mở link video
+        # 1. Mở link video mục tiêu qua Intent Zalo Referrer
         log(f"Đang mở link video qua Intent Zalo Referrer (lượt {flow_attempt}/2)...")
         success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
         if not success:
@@ -784,7 +873,19 @@ def post_tiktok_comment(
         if is_cancelled and is_cancelled():
             return False
 
-        # 3. Dwell time: Xem video tự nhiên
+        # 3. Quét DOM kiểm tra Khóa cứng Video mục tiêu (Target Lock)
+        root = ui_automator_dom.dump_ui_tree(adb, device_id)
+        ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+        dom_channel = ctrls.get("channel_name", "")
+        if target_channel and dom_channel:
+            if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                log(f"⚠️ Video đang phát ('{dom_channel}') chưa khớp Kênh mục tiêu ('{target_channel}') • Mở lại Intent...")
+                open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+                time.sleep(2.5)
+                root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+
+        # 4. Dwell time: Xem video tự nhiên (KHÔNG SWIPE DỌC)
         dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
         log(f"Đang xem video tự nhiên trong {dwell_target}s trước khi bình luận...")
         for remaining in range(dwell_target, 0, -1):
@@ -795,17 +896,41 @@ def post_tiktok_comment(
                 log(f"Đang xem video ({remaining}s còn lại)...")
             time.sleep(1.0)
 
-        # 4. Bấm nút Mở khung bình luận (có cơ chế xác nhận và thử lại an toàn)
-        log("Mở khung bình luận...")
-        comment_x, comment_y = find_tiktok_comment_icon_coords(adb, device_id, width, height)
-        log(f"Chạm icon Bình luận TikTok tại ({comment_x}, {comment_y})...")
+        # 5. Xác định chính xác vị trí Like & Comment từ DOM
+        dom_like, is_already_liked, dom_comment = find_tiktok_video_buttons_via_dom(adb, device_id, width, height)
+        like_target = (ctrls.get("like") and ctrls["like"].get("center")) or dom_like or (int(width * 0.925), int(height * 0.550))
+        if ctrls.get("like"):
+            is_already_liked = is_already_liked or ctrls["like"].get("is_liked", False)
+        comment_target = (ctrls.get("comment") and ctrls["comment"].get("center")) or dom_comment or find_tiktok_comment_icon_coords(adb, device_id, width, height)
 
+        # 6. THẢ TIM TRƯỚC (LIKE FIRST) - Khóa cứng trên clip target, chống hủy tim
+        already_tracked = False
+        try:
+            import interaction_tracker
+            already_tracked = interaction_tracker.has_interacted(device_id, "tiktok", item_key, "like")
+        except Exception:
+            pass
+
+        if is_already_liked or already_tracked:
+            log("❤️ Video/tài khoản này đã được thả tim trước đó (DOM Đã thích/Video liked) • Bỏ qua bước thả tim, giữ nguyên tim!")
+        else:
+            log(f"❤️ Tiến hành thả tim trước tại tọa độ DOM ({like_target[0]}, {like_target[1]})...")
+            adb.tap(device_id, like_target[0], like_target[1])
+            try:
+                import interaction_tracker
+                interaction_tracker.record_interaction(device_id, "tiktok", item_key, "like")
+            except Exception:
+                pass
+            time.sleep(random.uniform(1.0, 1.4))
+
+        # 7. MỞ KHUNG BÌNH LUẬN (Tuyệt đối không vuốt lướt)
+        log(f"Chạm icon Bình luận TikTok tại ({comment_target[0]}, {comment_target[1]})...")
         for attempt in range(1, 5):
             if is_cancelled and is_cancelled():
                 return False
 
             if attempt == 1:
-                target_x, target_y = comment_x, comment_y
+                target_x, target_y = comment_target
             elif attempt == 2:
                 target_x, target_y = int(width * 0.925), int(height * 0.643)
                 log(f"Lần 1 chưa mở được, chuyển sang tọa độ chuẩn ({target_x}, {target_y})...")
@@ -839,13 +964,13 @@ def post_tiktok_comment(
             pass
         return False
 
-    # 5. Chạm vào ô nhập bình luận
+    # 8. Chạm vào ô nhập bình luận bằng DOM live
     log("Chạm vào ô nhập bình luận...")
     input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
     ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
     time.sleep(random.uniform(0.8, 1.2))
 
-    # 6. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
+    # 9. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
     log(f"Đang nhập nội dung từ Notion: '{comment_text}'...")
     if hasattr(adb, "ensure_ime"):
         try:
@@ -858,7 +983,7 @@ def post_tiktok_comment(
     if is_cancelled and is_cancelled():
         return False
 
-    # 7. Bấm đúng vào icon màu đỏ mũi tên trắng hoặc phím Enter để gửi bình luận
+    # 10. Bấm đúng vào icon màu đỏ mũi tên trắng hoặc phím Enter để gửi bình luận
     log("Tìm nút tròn đỏ mũi tên gửi bình luận...")
     time.sleep(0.8)
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
@@ -874,13 +999,13 @@ def post_tiktok_comment(
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(random.uniform(2.5, 3.2))
 
-    # 8. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm như module Facebook/TikTok
+    # 11. Hoàn tất bình luận: Đóng bảng an toàn (TUYỆT ĐỐI KHÔNG SWIPE) và dọn dẹp đa nhiệm
     log("Đã đăng bình luận TikTok thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
     try:
         adb.keyevent(device_id, 4)
-        time.sleep(0.5)
-        if hasattr(adb, "clear_recent_apps"):
-            adb.clear_recent_apps(device_id)
+        time.sleep(0.4)
+        adb.keyevent(device_id, 111)
+        time.sleep(0.3)
         adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
         adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
         adb.keyevent(device_id, 3)
@@ -1049,7 +1174,15 @@ def post_facebook_comment(
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
 ) -> bool:
-    """Quy trình mở link bài viết/Reels Facebook, đọc tự nhiên và đăng bình luận."""
+    """Quy trình mở link bài viết/Reels Facebook, đọc tự nhiên và đăng bình luận.
+
+    Áp dụng DOM chuẩn cho Facebook:
+    - Thả Like trước (bỏ qua nếu bài viết đã like để không hủy like)
+    - Mở khung bình luận bằng DOM element
+    - Nhập bình luận Unicode từ Notion qua XwIME
+    - Bấm nút gửi màu xanh + KeyEvent 66
+    - Đóng an toàn
+    """
     def log(msg: str):
         if status_callback:
             status_callback(f"[Device {device_id}][Facebook Seeding] {msg}")
@@ -1103,9 +1236,37 @@ def post_facebook_comment(
                 return False
             time.sleep(1.0)
 
-        # 1. Bấm nút Mở khung bình luận (3 lần thử thích ứng đa giao diện)
-        log("Mở khung bình luận Facebook...")
-        comment_x, comment_y = find_facebook_comment_icon_coords(adb, device_id, width, height)
+        # 1. Quét DOM xác định các nút Thích và Bình luận trên bài viết Facebook
+        log("Quét DOM bắt chính xác vị trí nút Thích và Bình luận Facebook...")
+        root = ui_automator_dom.dump_ui_tree(adb, device_id)
+        fb_ctrls = ui_automator_dom.find_facebook_target_controls(root, width, height)
+
+        fb_like_c = (fb_ctrls.get("like") and fb_ctrls["like"].get("center")) or (int(width * 0.20), int(height * 0.940))
+        is_fb_liked = fb_ctrls["like"].get("is_liked", False) if fb_ctrls.get("like") else False
+        comment_x, comment_y = (fb_ctrls.get("comment") and fb_ctrls["comment"].get("center")) or find_facebook_comment_icon_coords(adb, device_id, width, height)
+
+        # 2. THẢ LIKE TRƯỚC (LIKE FIRST) - Chống hủy Like
+        item_key = url
+        already_tracked = False
+        try:
+            import interaction_tracker
+            already_tracked = interaction_tracker.has_interacted(device_id, "facebook", item_key, "like")
+        except Exception:
+            pass
+
+        if is_fb_liked or already_tracked:
+            log("❤️ Bài viết/Reel Facebook này đã được Like trước đó • Bỏ qua bước like, giữ nguyên Like!")
+        else:
+            log(f"❤️ Tiến hành thả Like trước tại tọa độ DOM Facebook ({fb_like_c[0]}, {fb_like_c[1]})...")
+            adb.tap(device_id, fb_like_c[0], fb_like_c[1])
+            try:
+                import interaction_tracker
+                interaction_tracker.record_interaction(device_id, "facebook", item_key, "like")
+            except Exception:
+                pass
+            time.sleep(random.uniform(1.0, 1.4))
+
+        # 3. Bấm nút Mở khung bình luận Facebook
         log(f"Chạm icon Bình luận Facebook tại ({comment_x}, {comment_y})...")
 
         for attempt in range(1, 4):
@@ -1115,11 +1276,9 @@ def post_facebook_comment(
             if attempt == 1:
                 target_x, target_y = comment_x, comment_y
             elif attempt == 2:
-                # Biến thể xem chi tiết ảnh / Video / Thước phim (Image 2 & Image 5): x = 22.0%, y = 96.0%
                 target_x, target_y = int(width * 0.220), int(height * 0.960)
                 log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ thanh chi tiết ({target_x}, {target_y})...")
             else:
-                # Chạm vào giữa ảnh để kích hoạt thanh công cụ rồi tap nút comment
                 log("Lần 2 chưa mở được, chạm kích hoạt màn hình và thử lại...")
                 adb.tap(device_id, int(width * 0.50), int(height * 0.50))
                 time.sleep(0.5)
@@ -1147,13 +1306,13 @@ def post_facebook_comment(
             pass
         return False
 
-    # 2. Chạm vào ô nhập bình luận
+    # 4. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
     input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
     ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
     time.sleep(random.uniform(0.8, 1.2))
 
-    # 3. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
+    # 5. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
     log(f"Đang nhập nội dung từ Notion: '{comment_text}'...")
     if hasattr(adb, "ensure_ime"):
         try:
@@ -1166,7 +1325,7 @@ def post_facebook_comment(
     if is_cancelled and is_cancelled():
         return False
 
-    # 4. Bấm đúng vào icon màu xanh để gửi bình luận
+    # 6. Bấm đúng vào icon màu xanh để gửi bình luận
     log("Tìm nút gửi bình luận màu xanh...")
     time.sleep(0.8)
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
@@ -1176,11 +1335,10 @@ def post_facebook_comment(
     # Kích hoạt phím Enter / Action Send dự phòng
     adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
     time.sleep(0.4)
-    # Chạm lại nút gửi màu xanh một lần nữa để đảm bảo nhận touch event 100%
     adb.tap(device_id, send_x, send_y)
     time.sleep(random.uniform(2.5, 3.2))
 
-    # 5. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm
+    # 7. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm
     log("Đã đăng bình luận Facebook thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
     try:
         adb.keyevent(device_id, 4)

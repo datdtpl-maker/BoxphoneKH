@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from config import ADB_PATH
 import hashlib
 import interaction_tracker
+import ui_automator_dom
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -8308,6 +8309,23 @@ class ADBController:
         button_coords = {}
         caption_parts = []
 
+        try:
+            ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+            if ctrls.get("like") and ctrls["like"].get("center"):
+                button_coords["like"] = ctrls["like"]["center"]
+                if ctrls["like"].get("is_liked"):
+                    ui_liked = True
+            if ctrls.get("comment") and ctrls["comment"].get("center"):
+                button_coords["comment"] = ctrls["comment"]["center"]
+            if ctrls.get("bookmark") and ctrls["bookmark"].get("center"):
+                button_coords["bookmark"] = ctrls["bookmark"]["center"]
+                if ctrls["bookmark"].get("is_bookmarked"):
+                    ui_bookmarked = True
+            if ctrls.get("share") and ctrls["share"].get("center"):
+                button_coords["share"] = ctrls["share"]["center"]
+        except Exception:
+            pass
+
         for elem in root.iter():
             bounds = elem.get("bounds", "")
             m = re.findall(r"\d+", bounds)
@@ -9084,34 +9102,11 @@ class ADBController:
 
                     # Đi thẳng qua trọn vẹn nhóm video mới nhất trên đầu kênh trước,
                     # sau đó mới thỉnh thoảng lướt lùi ngẫu nhiên 15%
-                    if channel_video > priority_newest_count and random.random() < 0.15:
-                        update_status(
-                            f"[TikTok B3] 🔄 Lướt lại clip trước trong dòng chảy Kênh..."
-                        )
-                        self.swipe(
-                            device_id,
-                            cx,
-                            int(height * 0.30) + random.randint(-15, 15),
-                            cx,
-                            int(height * 0.70) + random.randint(-15, 15),
-                            duration=random.randint(450, 700),
-                        )
-                        channel_video = max(1, channel_video - 1)
-                    else:
-                        update_status(
-                            f"[TikTok B3] 🎬 Vuốt sang clip tiếp theo trong dòng chảy ({channel_video + 1}) • "
-                            f"còn {step3_total - step3_elapsed}s..."
-                        )
-                        # Vuốt chuyển clip trong vùng an toàn giữa màn hình (62% -> 22%), tuyệt đối không chạm đáy màn hình
-                        self.swipe(
-                            device_id,
-                            cx,
-                            int(height * 0.62) + random.randint(-15, 15),
-                            cx,
-                            int(height * 0.22) + random.randint(-15, 15),
-                            duration=random.randint(450, 700),
-                        )
-                        channel_video += 1
+                    # KHÓA CỨNG CLIP MỤC TIÊU: Tiếp tục xem và tương tác trên clip mục tiêu, tuyệt đối KHÔNG lướt xuống để nhảy sang clip khác
+                    update_status(
+                        f"[TikTok B3] 🔒 Khóa cứng clip mục tiêu • Duy trì xem và tương tác ({step3_total - step3_elapsed}s còn lại)..."
+                    )
+                    channel_video += 1
                     time.sleep(0.5)
                     self.recover_tiktok_if_blocked_by_captcha_or_link(
                         device_id, status_callback=status_callback
