@@ -8256,9 +8256,20 @@ class ADBController:
         close_coords = None
         if root is not None:
             for elem in root.iter():
+                cls_name = (elem.get("class") or "").casefold()
+                rid = (elem.get("resource-id") or "").casefold()
                 raw = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
                 norm = self._normalize_facebook_text(raw.replace("đ", "d").replace("Đ", "d"))
-                if any(k in norm for k in ("comment", "comments", "binh luan", "them binh luan", "add comment")):
+                bounds = elem.get("bounds", "")
+                m = re.findall(r"\d+", bounds)
+                cy = (int(m[1]) + int(m[3])) // 2 if len(m) >= 4 else 0
+
+                # Chỉ tính là bảng bình luận mở khi có EditText ở nửa dưới màn hình hoặc resource-id đặc trưng
+                if "edittext" in cls_name and cy >= height * 0.35:
+                    found_sheet = True
+                elif any(k in rid for k in ("comment_edit_text", "et_comment", "c0e", "comment_bottom_sheet", "comment_container", "comment_list")):
+                    found_sheet = True
+                elif any(k in norm for k in ("them binh luan", "add comment", "viet binh luan", "binh luan cong khai", "de lai binh luan")) and cy >= height * 0.40:
                     found_sheet = True
                 if any(k in norm for k in ("dong", "close")):
                     bounds = elem.get("bounds", "")
@@ -8277,19 +8288,13 @@ class ADBController:
             if close_coords:
                 self.tap(device_id, close_coords[0], close_coords[1])
                 time.sleep(0.3)
-            # Tap backdrop phía trên và kéo xuống để đóng triệt để (không bao giờ tap vào vùng comments)
-            self.tap(device_id, width // 2, int(height * 0.12))
+            # Đóng bảng an toàn bằng phím Back, Escape và tap backdrop phía trên (TUYỆT ĐỐI KHÔNG SWIPE DỌC)
+            self.keyevent(device_id, 4)
             time.sleep(0.2)
-            self.swipe(
-                device_id,
-                width // 2,
-                int(height * 0.32),
-                width // 2,
-                int(height * 0.80),
-                duration=250,
-            )
-            time.sleep(0.3)
             self.keyevent(device_id, 111)
+            time.sleep(0.2)
+            self.tap(device_id, width // 2, int(height * 0.12))
+            time.sleep(0.3)
             return True
         return False
 
@@ -8586,24 +8591,11 @@ class ADBController:
             self.tap(device_id, cm_x, cm_y)
             time.sleep(random.uniform(1.8, 2.5))
             
-            # ĐÓNG BẢNG BÌNH LUẬN AN TOÀN TUYỆT ĐỐI (KHÔNG CHẠM VÀO NỬA DƯỚI / Ô BÌNH LUẬN / EMOJI):
-            # 1. Tap vùng nền video phía trên (backdrop y=12%) để đóng sheet mà không chạm vào comment/emoji
-            self.tap(device_id, width // 2, int(height * 0.12))
-            time.sleep(0.3)
-            # 2. Vuốt kéo tiêu đề bảng bình luận xuống dưới để thu gọn
-            self.swipe(
-                device_id,
-                width // 2,
-                int(height * 0.32),
-                width // 2,
-                int(height * 0.80),
-                duration=250,
-            )
-            time.sleep(0.3)
-            # 3. Đóng bàn phím mềm nếu bị bung (Escape)
+            # ĐÓNG BẢNG BÌNH LUẬN AN TOÀN TUYỆT ĐỐI (DÙNG BACK/ESCAPE/BACKDROP, TUYỆT ĐỐI KHÔNG SWIPE DỌC):
             self.keyevent(device_id, 111)
             time.sleep(0.2)
-            # 4. Tap lại backdrop phía trên lần nữa để video trở lại toàn màn hình
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
             self.tap(device_id, width // 2, int(height * 0.12))
             time.sleep(0.3)
             if status_callback:
@@ -9012,6 +9004,25 @@ class ADBController:
                 for _ in range(initial_watch):
                     time.sleep(1.0)
                     check_cancelled()
+
+                # Xác thực video hiện tại vẫn thuộc Kênh mục tiêu; nếu lướt lạc sang kênh khác, tự quay lại Kênh
+                try:
+                    cur_root = self._get_tiktok_ui_root(device_id, "tt_target_verify")
+                    if cur_root is not None:
+                        is_target_clip = False
+                        target_clean = self._normalize_tiktok_identity(target_channel)
+                        for elem in cur_root.iter():
+                            node_text = self._normalize_tiktok_identity(f"{elem.get('text', '')} {elem.get('content-desc', '')}")
+                            if target_clean in node_text:
+                                is_target_clip = True
+                                break
+                        if not is_target_clip and not self.is_on_tiktok_target_profile(device_id, target_channel, root=cur_root):
+                            update_status(f"[TikTok B3] Phát hiện video không thuộc Kênh '{target_channel}' • Quay lại mở đúng video của Kênh...")
+                            self.keyevent(device_id, 4)
+                            time.sleep(1.2)
+                            self.click_random_tiktok_profile_video(device_id, target_channel)
+                except Exception:
+                    pass
 
                 # 2. Thực hiện vi tương tác (Thả tim, Bookmark, Share, Xem lướt bình luận) - ưu tiên cao cho các video mới nhất
                 try:

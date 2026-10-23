@@ -46,9 +46,11 @@ TIKTOK_COMMENT_BUBBLE_B64 = (
 def resolve_canonical_url(url: str, timeout: float = 8.0) -> str:
     """Phân giải link rút gọn (vt.tiktok.com, fb.watch, bit.ly,...) về link chuẩn."""
     if not url or not url.strip().startswith("http"):
-        return url.strip()
+        return (url or "").strip()
 
     clean_url = url.strip()
+    if "/video/" in clean_url or "/reel/" in clean_url or "/posts/" in clean_url:
+        return clean_url
     try:
         req = urllib.request.Request(
             clean_url,
@@ -131,7 +133,27 @@ def open_url_via_intent(
                 except Exception:
                     pass
 
-        # 1. Primary VIEW intent với URL sạch và package TikTok chính
+        video_id = extract_tiktok_video_id(clean_url)
+        # 1. Nếu có video_id: mở thẳng native deep link để vào đúng video mục tiêu 100%
+        if video_id:
+            pkg_target = TIKTOK_PRIMARY_PACKAGE
+            if hasattr(adb, "is_app_installed"):
+                if not adb.is_app_installed(device_id, TIKTOK_PRIMARY_PACKAGE) and adb.is_app_installed(device_id, TIKTOK_ALT_PACKAGE):
+                    pkg_target = TIKTOK_ALT_PACKAGE
+            scheme = "snssdk1233" if pkg_target == TIKTOK_ALT_PACKAGE else "snssdk1180"
+            cmd_nat = [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", f"{scheme}://aweme/detail/{video_id}",
+                "-p", pkg_target,
+                "-f", "0x14000000",
+                "--es", "android.intent.extra.REFERRER_NAME", referrer,
+            ]
+            code, stdout, _ = adb.execute_adb(device_id, cmd_nat)
+            if code == 0 and "Error" not in (stdout or ""):
+                return True
+
+        # 2. Fallback mở bằng URL HTTP chuẩn
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
@@ -143,7 +165,6 @@ def open_url_via_intent(
         code, stdout, _ = adb.execute_adb(device_id, cmd)
         success = (code == 0 and "Error" not in (stdout or ""))
 
-        # Thử mở bằng package TikTok alt nếu package chính lỗi
         if not success:
             cmd_alt = [
                 "shell", "am", "start",
@@ -155,38 +176,6 @@ def open_url_via_intent(
             ]
             code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
             success = (code_alt == 0 and "Error" not in (stdout_alt or ""))
-
-        # Fallback Intent không gắn cố định package nếu cả 2 lỗi
-        if not success:
-            cmd_fallback = [
-                "shell", "am", "start",
-                "-a", "android.intent.action.VIEW",
-                "-d", clean_url,
-                "-f", "0x14000000",
-            ]
-            code_fb, stdout_fb, _ = adb.execute_adb(device_id, cmd_fallback)
-            success = (code_fb == 0 and "Error" not in (stdout_fb or ""))
-
-        # 2. Nếu có video_id cụ thể, kích hoạt native deep link để bảo đảm TikTok mở đúng video đích
-        video_id = extract_tiktok_video_id(clean_url)
-        if video_id:
-            native_schemes = [
-                (f"snssdk1180://aweme/detail/{video_id}", TIKTOK_PRIMARY_PACKAGE),
-                (f"snssdk1233://aweme/detail/{video_id}", TIKTOK_ALT_PACKAGE),
-                (f"tiktok://aweme/detail/{video_id}", None),
-            ]
-            for nat_uri, pkg in native_schemes:
-                cmd_nat = [
-                    "shell", "am", "start",
-                    "-a", "android.intent.action.VIEW",
-                    "-d", nat_uri,
-                    "-f", "0x14000000",
-                ]
-                if pkg:
-                    cmd_nat.extend(["-p", pkg])
-                code_nat, out_nat, _ = adb.execute_adb(device_id, cmd_nat)
-                if code_nat == 0 and "Error" not in (out_nat or ""):
-                    success = True
 
         return success
 
@@ -260,21 +249,7 @@ def wait_for_tiktok_video_ready(
             except Exception:
                 pass
 
-        # Sau 2-3s khi app đã khởi động xong, nếu có video_id, bắn lại deep link native một lần nữa
-        # để đảm bảo app không bị đứng ở màn hình For You (Dành cho bạn)
-        if elapsed == 3 and video_id and not re_sent:
-            re_sent = True
-            log(f"Kích hoạt điều hướng trực tiếp vào video {video_id}...")
-            for nat_uri in (
-                f"snssdk1180://aweme/detail/{video_id}",
-                f"snssdk1233://aweme/detail/{video_id}",
-            ):
-                adb.execute_adb(
-                    device_id,
-                    ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", nat_uri, "-f", "0x14000000"],
-                )
-
-        # Cho video ổn định ít nhất 5s để các máy cấu hình thấp load xong
+# Cho video ổn định ít nhất 5s để các máy cấu hình thấp load xong
         if elapsed >= 5:
             time.sleep(0.5)
             log("✅ Giao diện video TikTok đã sẵn sàng!")
@@ -507,7 +482,7 @@ def find_tiktok_comment_icon_coords(
 
     # 3. Tọa độ chuẩn hiệu chuẩn thực tế:
     # Mặc định ưu tiên Layout B (y = 57.5%, tương ứng máy S5) để không bao giờ chạm vào nút Bookmark ở 64%!
-    return int(width * 0.925), int(height * 0.575)
+    return int(width * 0.925), int(height * 0.643)
 
 
 def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
@@ -832,14 +807,14 @@ def post_tiktok_comment(
             if attempt == 1:
                 target_x, target_y = comment_x, comment_y
             elif attempt == 2:
-                target_x, target_y = int(width * 0.925), int(height * 0.615)
-                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ Layout S1 ({target_x}, {target_y})...")
+                target_x, target_y = int(width * 0.925), int(height * 0.643)
+                log(f"Lần 1 chưa mở được, chuyển sang tọa độ chuẩn ({target_x}, {target_y})...")
             elif attempt == 3:
-                target_x, target_y = int(width * 0.925), int(height * 0.575)
-                log(f"Thử lại mở khung bình luận lần 3 tại Layout B ({target_x}, {target_y})...")
+                target_x, target_y = int(width * 0.925), int(height * 0.665)
+                log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
             else:
-                target_x, target_y = int(width * 0.925), int(height * 0.525)
-                log(f"Thử lại mở khung bình luận lần 4 tại Layout C ({target_x}, {target_y})...")
+                target_x, target_y = int(width * 0.925), int(height * 0.620)
+                log(f"Thử lại mở khung bình luận lần 4 tại ({target_x}, {target_y})...")
 
             adb.tap(device_id, target_x, target_y)
             time.sleep(random.uniform(1.8, 2.2))
@@ -1537,7 +1512,7 @@ def build_execution_tasks(
                 break
 
         if found:
-            if url and getattr(found, "url", "") != url:
+            if url:
                 found.url = url
             result.append(found)
         else:
@@ -1552,7 +1527,7 @@ def build_execution_tasks(
             if fallback_cand:
                 if not getattr(fallback_cand, "content", "").strip():
                     fallback_cand.content = clean_text
-                if url and not getattr(fallback_cand, "url", "").strip():
+                if url:
                     fallback_cand.url = url
                 result.append(fallback_cand)
             else:

@@ -75,8 +75,8 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         self.assertTrue(dismissed)
         self.assertIn(111, keyevents)
         self.assertIn((540, 230), taps)  # Backdrop tap at y = height * 0.12
-        self.assertEqual(1, len(swipes))  # Pulled down
-        self.assertEqual((540, 614, 540, 1536), swipes[0])
+        self.assertEqual(0, len(swipes))  # Tuyệt đối không swipe kéo bảng để tránh lướt nhầm video
+        self.assertIn(4, keyevents)
 
     def test_perform_tiktok_micro_interactions_comment_dismisses_safely(self):
         from unittest.mock import patch
@@ -99,9 +99,9 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         self.assertIn((993, 1209), taps)
         # 2. Backdrop tapped to dismiss (540, 230)
         self.assertIn((540, 230), taps)
-        # 3. Pull down swipe occurred
-        self.assertEqual(1, len(swipes))
-        self.assertEqual((540, 614, 540, 1536), swipes[0])
+        # 3. Đóng an toàn qua Back & Backdrop, tuyệt đối không swipe kéo bảng
+        self.assertEqual(0, len(swipes))
+        self.assertIn(4, keyevents)
         # 4. Keyboard closed
         self.assertIn(111, keyevents)
 

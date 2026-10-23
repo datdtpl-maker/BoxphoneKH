@@ -415,7 +415,7 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         adb_mock.execute_adb.return_value = (1, "", "")
         x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
         self.assertEqual(x, int(1080 * 0.925))
-        self.assertEqual(y, int(1920 * 0.575))
+        self.assertEqual(y, int(1920 * 0.643))
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
