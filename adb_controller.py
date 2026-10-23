@@ -6822,7 +6822,8 @@ class ADBController:
         # 48% có thể trúng thanh sort Latest/Popular ở profile có header dài.
         # Các mức dưới đây nằm sâu trong lưới clip ở những layout đã quan sát.
         for attempt, y_ratio in enumerate((0.68, 0.76, 0.62), start=1):
-            coords = (random.choice(columns), int(height * y_ratio))
+            col_x = columns[(attempt - 1) % len(columns)]
+            coords = (col_x, int(height * y_ratio))
             print(
                 f"[Device {device_id[:6]}] Mở clip profile target tại "
                 f"{coords} (lần {attempt}/3)."
@@ -7519,8 +7520,119 @@ class ADBController:
 
         return False
 
+    def _extract_tiktok_profile_video_candidates(self, root, width, height):
+        """Trích xuất danh sách tọa độ các ô video trên profile, ưu tiên video mới nhất (bỏ qua bài Đã ghim lên đầu)."""
+        if root is None:
+            return [], False
+
+        pinned_markers = ("da ghim", "đã ghim", "pinned", "ghim")
+        pinned_centers = []
+        for elem in root.iter():
+            raw_t = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            norm_t = self._normalize_tiktok_text(raw_t)
+            if norm_t and any(
+                norm_t == m or norm_t.startswith(f"{m} ") or f" {m}" in norm_t
+                for m in pinned_markers
+            ):
+                c = self._element_center(elem)
+                if c:
+                    pinned_centers.append(c)
+
+        parent_map = {child: parent for parent in root.iter() for child in parent}
+        raw_items = []
+
+        def is_tile_pinned(target_elem, coords):
+            for sub in target_elem.iter():
+                raw_sub = f"{sub.get('text', '')} {sub.get('content-desc', '')}"
+                norm_sub = self._normalize_tiktok_text(raw_sub)
+                if norm_sub and any(
+                    norm_sub == m or norm_sub.startswith(f"{m} ") or f" {m}" in norm_sub
+                    for m in pinned_markers
+                ):
+                    return True
+            bounds = target_elem.get("bounds", "")
+            m = re.findall(r"\d+", bounds)
+            if len(m) >= 4:
+                x1, y1, x2, y2 = map(int, m[:4])
+                for px, py in pinned_centers:
+                    if x1 <= px <= x2 and y1 <= py <= y2:
+                        return True
+            for px, py in pinned_centers:
+                if abs(px - coords[0]) <= int(width * 0.16) and abs(py - coords[1]) <= int(height * 0.14):
+                    return True
+            return False
+
+        def add_candidate(target_elem):
+            coords = self._element_center(target_elem)
+            if not coords or not (int(height * 0.25) < coords[1] < int(height * 0.90)):
+                return
+            for idx, (old_pinned, (ex, ey)) in enumerate(raw_items):
+                if abs(coords[0] - ex) < 30 and abs(coords[1] - ey) < 30:
+                    if not old_pinned and is_tile_pinned(target_elem, coords):
+                        raw_items[idx] = (True, (ex, ey))
+                    return
+            raw_items.append((is_tile_pinned(target_elem, coords), coords))
+
+        # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473' hoặc icon Play)
+        view_count_re = re.compile(r"^\s*(▷\s*)?(\d+[\.,]?\d*[kKmM]?)\s*$")
+        for elem in root.iter():
+            text = (elem.get("text", "") or "").strip()
+            desc = (elem.get("content-desc", "") or "").strip()
+            match_text = text or desc
+            if match_text and view_count_re.match(match_text):
+                clickable = elem
+                while clickable is not None and clickable.get("clickable", "").lower() != "true":
+                    clickable = parent_map.get(clickable)
+                add_candidate(clickable if clickable is not None else elem)
+
+        # 2. Quét các item trong GridView/RecyclerView
+        for grid in root.iter():
+            cls = grid.get("class", "").lower()
+            if "gridview" not in cls and "recyclerview" not in cls:
+                continue
+            for item in list(grid):
+                if item.get("clickable", "").lower() != "true":
+                    continue
+                add_candidate(item)
+
+        # 3. Quét theo resource-id và desc đã biết
+        for elem in root.iter():
+            resource_id = elem.get("resource-id", "").lower()
+            desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
+            is_known_video = (
+                "user_video_view" in resource_id
+                or resource_id.endswith(":id/eti")
+                or resource_id.endswith(":id/erf")
+                or resource_id.endswith(":id/cover")
+                or "video_tile" in resource_id
+                or "video_item" in resource_id
+                or desc.startswith("video by ")
+            )
+            if not is_known_video:
+                continue
+            clickable = elem
+            while (
+                clickable is not None
+                and clickable.get("clickable", "").lower() != "true"
+            ):
+                clickable = parent_map.get(clickable)
+            add_candidate(clickable if clickable is not None else elem)
+
+        # Sắp xếp ưu tiên: Video KHÔNG ghim (mới nhất) lên trước -> Hàng trên cùng -> Cột trái sang phải
+        row_step = max(1, int(height * 0.08))
+        raw_items.sort(
+            key=lambda item: (
+                1 if item[0] else 0,
+                item[1][1] // row_step,
+                item[1][0],
+            )
+        )
+        candidates = [coords for _, coords in raw_items]
+        has_unpinned = any(not is_pinned for is_pinned, _ in raw_items)
+        return candidates, has_unpinned
+
     def click_random_tiktok_profile_video(self, device_id, channel_name):
-        """Tìm một clip trên profile, kể cả khi phải cuộn mới thấy lưới."""
+        """Tìm và mở ưu tiên video mới nhất trên đầu profile kênh (chỉ cuộn nhẹ nếu header che khuất lưới)."""
         width, height = self.get_effective_screen_size(device_id)
         max_scan_attempts = 5
         trusted_target_tap = self._has_recent_tiktok_target_tap(
@@ -7542,108 +7654,45 @@ class ADBController:
                     time.sleep(0.8)
                     continue
 
-            # Lăn xuống ngẫu nhiên khi vào profile kênh (từ 1 đến 3 lần) để dàn đều dòng chảy
-            if attempt == 0 and profile_confirmed:
-                scroll_count = random.randint(1, 3)
+            candidates, has_unpinned = self._extract_tiktok_profile_video_candidates(
+                root, width, height
+            )
+
+            # Chỉ cuộn nhẹ 1 lần nếu phần tiểu sử/header dài đang che mất lưới video
+            # hoặc hàng đầu tiên chỉ toàn video Đã ghim (cần lộ hàng video mới nhất ngay bên dưới)
+            if not candidates or (not has_unpinned and attempt == 0):
                 print(
-                    f"[Device {device_id[:6]}][TikTok] Lăn xuống {scroll_count} lần "
-                    f"trong profile để chọn clip ngẫu nhiên..."
+                    f"[Device {device_id[:6]}][TikTok] Cuộn nhẹ để lộ hàng video mới nhất trên đầu Kênh..."
                 )
-                for s_i in range(scroll_count):
-                    self.swipe(
-                        device_id,
-                        width // 2,
-                        int(height * 0.72) + random.randint(-15, 15),
-                        width // 2,
-                        int(height * 0.36) + random.randint(-15, 15),
-                        duration=random.randint(500, 650),
-                    )
-                    time.sleep(0.8)
+                self.swipe(
+                    device_id,
+                    width // 2,
+                    int(height * 0.72),
+                    width // 2,
+                    int(height * 0.40),
+                    duration=500,
+                )
+                time.sleep(0.8)
                 scrolled_root = self._get_tiktok_ui_root(
                     device_id, "tt_profile_videos_scrolled"
                 )
                 if scrolled_root is not None:
                     root = scrolled_root
+                    candidates, has_unpinned = self._extract_tiktok_profile_video_candidates(
+                        root, width, height
+                    )
 
-            candidates = []
-            candidate_set = set()
-            parent_map = {child: parent for parent in root.iter() for child in parent}
-
-            # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473' hoặc icon Play)
-            view_count_re = re.compile(r"^\s*(▷\s*)?(\d+[\.,]?\d*[kKmM]?)\s*$")
-            for elem in root.iter():
-                text = (elem.get("text", "") or "").strip()
-                desc = (elem.get("content-desc", "") or "").strip()
-                match_text = text or desc
-                if match_text and view_count_re.match(match_text):
-                    clickable = elem
-                    while clickable is not None and clickable.get("clickable", "").lower() != "true":
-                        clickable = parent_map.get(clickable)
-                    target_elem = clickable if clickable is not None else elem
-                    coords = self._element_center(target_elem)
-                    if coords and int(height * 0.25) < coords[1] < int(height * 0.90):
-                        if coords not in candidate_set:
-                            candidates.append(coords)
-                            candidate_set.add(coords)
-
-            # 2. Quét các item trong GridView/RecyclerView
-            for grid in root.iter():
-                cls = grid.get("class", "").lower()
-                if "gridview" not in cls and "recyclerview" not in cls:
-                    continue
-                for item in list(grid):
-                    if item.get("clickable", "").lower() != "true":
-                        continue
-                    coords = self._element_center(item)
-                    if coords and int(height * 0.25) < coords[1] < int(height * 0.90):
-                        if coords not in candidate_set:
-                            candidates.append(coords)
-                            candidate_set.add(coords)
-
-            # 3. Quét theo resource-id và desc đã biết
-            for elem in root.iter():
-                resource_id = elem.get("resource-id", "").lower()
-                desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
-                is_known_video = (
-                    "user_video_view" in resource_id
-                    or resource_id.endswith(":id/eti")
-                    or resource_id.endswith(":id/erf")
-                    or resource_id.endswith(":id/cover")
-                    or "video_tile" in resource_id
-                    or "video_item" in resource_id
-                    or desc.startswith("video by ")
-                )
-                if not is_known_video:
-                    continue
-
-                clickable = elem
-                while (
-                    clickable is not None
-                    and clickable.get("clickable", "").lower() != "true"
-                ):
-                    clickable = parent_map.get(clickable)
-                target_elem = clickable if clickable is not None else elem
-                coords = self._element_center(target_elem)
-                if (
-                    coords
-                    and int(height * 0.25) < coords[1] < int(height * 0.90)
-                    and coords not in candidate_set
-                ):
-                    candidates.append(coords)
-                    candidate_set.add(coords)
-
-            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok:
-            # Nếu UIAutomator không bóc tách được từng item con do custom rendering,
-            # các tọa độ tâm này CHẮC CHẮN rơi chính xác 100% vào giữa video thumbnail
+            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok (ưu tiên từ hàng 1 cột 1 - video mới nhất):
             if not candidates:
-                for col_ratio in (0.17, 0.50, 0.83):
-                    for row_ratio in (0.42, 0.60, 0.78):
+                for row_ratio in (0.42, 0.60, 0.78):
+                    for col_ratio in (0.17, 0.50, 0.83):
                         pt = (int(width * col_ratio), int(height * row_ratio))
                         candidates.append(pt)
 
-            coords = random.choice(candidates)
+            # Luôn ưu tiên click vào video mới nhất đầu danh sách để dòng chảy đi qua trọn vẹn các video mới nhất
+            coords = candidates[0]
             print(
-                f"[Device {device_id[:6]}][TikTok] Click vào video tại tọa độ {coords}..."
+                f"[Device {device_id[:6]}][TikTok] Click ưu tiên vào video mới nhất tại tọa độ {coords}..."
             )
             self.tap(device_id, coords[0], coords[1])
             time.sleep(2.8)
@@ -7651,8 +7700,8 @@ class ADBController:
             if self.is_tiktok_video_player(device_id):
                 return True
 
-            # Thử tap lần 2 với 1 ô khác trong lưới
-            retry_coords = random.choice(candidates)
+            # Thử tap lần 2 với video mới nhất kế tiếp trong hàng đầu
+            retry_coords = candidates[1] if len(candidates) > 1 else candidates[0]
             self.tap(device_id, retry_coords[0], retry_coords[1])
             time.sleep(2.8)
             if self.is_tiktok_video_player(device_id):
@@ -7865,13 +7914,35 @@ class ADBController:
         status_callback=None,
         is_cancelled=None,
         clip_signature=None,
+        is_newest_clip=False,
     ):
-        """Thực hiện ma trận vi tương tác ngẫu nhiên (Thả tim, Bookmark, Share, Comment) trên clip TikTok."""
+        """Thực hiện ma trận vi tương tác (Thả tim, Bookmark, Share, Comment) trên clip TikTok, ưu tiên mạnh cho video mới nhất."""
         cx = width // 2
         ui_checked = False
         content_sig = None
         ui_liked = False
         ui_bookmarked = False
+
+        like_rate = (
+            max(config.INTERACTION_LIKE_RATE, getattr(config, "TIKTOK_NEWEST_LIKE_RATE", 0.90))
+            if is_newest_clip
+            else config.INTERACTION_LIKE_RATE
+        )
+        bookmark_rate = (
+            max(config.INTERACTION_BOOKMARK_RATE, getattr(config, "TIKTOK_NEWEST_BOOKMARK_RATE", 0.35))
+            if is_newest_clip
+            else config.INTERACTION_BOOKMARK_RATE
+        )
+        share_rate = (
+            max(config.INTERACTION_SHARE_RATE, getattr(config, "TIKTOK_NEWEST_SHARE_RATE", 0.15))
+            if is_newest_clip
+            else config.INTERACTION_SHARE_RATE
+        )
+        comment_rate = (
+            max(config.INTERACTION_COMMENT_RATE, getattr(config, "TIKTOK_NEWEST_COMMENT_RATE", 0.30))
+            if is_newest_clip
+            else config.INTERACTION_COMMENT_RATE
+        )
 
         def ensure_ui_state():
             nonlocal ui_checked, content_sig, ui_liked, ui_bookmarked
@@ -7887,22 +7958,20 @@ class ADBController:
                     pass
 
         # 1. Thả Tim / Like (Double-Tap vào giữa màn hình)
-        if random.random() < config.INTERACTION_LIKE_RATE:
-            already_liked = bool(
-                clip_signature
-                and interaction_tracker.has_interacted(
+        if random.random() < like_rate:
+            ensure_ui_state()
+            if ui_liked:
+                already_liked = True
+            elif content_sig:
+                already_liked = interaction_tracker.has_interacted(
+                    device_id, "tiktok", content_sig, "like"
+                )
+            elif clip_signature:
+                already_liked = interaction_tracker.has_interacted(
                     device_id, "tiktok", clip_signature, "like"
                 )
-            )
-            if not already_liked:
-                ensure_ui_state()
-                if ui_liked or (
-                    content_sig
-                    and interaction_tracker.has_interacted(
-                        device_id, "tiktok", content_sig, "like"
-                    )
-                ):
-                    already_liked = True
+            else:
+                already_liked = False
 
             if already_liked:
                 if clip_signature:
@@ -7916,7 +7985,7 @@ class ADBController:
                 if status_callback:
                     status_callback(
                         device_id,
-                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature or content_sig}' đã từng thả tim trước đây • Bỏ qua, tránh mất tim.",
+                        f"[TikTok Vi tương tác] ⏭️ Clip '{content_sig or clip_signature}' đã từng thả tim trước đây • Bỏ qua, tránh mất tim.",
                     )
             else:
                 like_x = cx + random.randint(-40, 40)
@@ -7934,27 +8003,28 @@ class ADBController:
                     )
                 if status_callback:
                     status_callback(
-                        device_id, "[TikTok Vi tương tác] ❤️ Thả tim ngẫu nhiên vào clip..."
+                        device_id,
+                        "[TikTok Vi tương tác] ❤️ Ưu tiên thả tim vào video mới nhất..."
+                        if is_newest_clip
+                        else "[TikTok Vi tương tác] ❤️ Thả tim ngẫu nhiên vào clip...",
                     )
                 time.sleep(0.5)
 
         # 2. Lưu Bookmark / Yêu thích (Tín hiệu thuật toán SEO mạnh nhất)
-        if random.random() < config.INTERACTION_BOOKMARK_RATE:
-            already_bookmarked = bool(
-                clip_signature
-                and interaction_tracker.has_interacted(
+        if random.random() < bookmark_rate:
+            ensure_ui_state()
+            if ui_bookmarked:
+                already_bookmarked = True
+            elif content_sig:
+                already_bookmarked = interaction_tracker.has_interacted(
+                    device_id, "tiktok", content_sig, "bookmark"
+                )
+            elif clip_signature:
+                already_bookmarked = interaction_tracker.has_interacted(
                     device_id, "tiktok", clip_signature, "bookmark"
                 )
-            )
-            if not already_bookmarked:
-                ensure_ui_state()
-                if ui_bookmarked or (
-                    content_sig
-                    and interaction_tracker.has_interacted(
-                        device_id, "tiktok", content_sig, "bookmark"
-                    )
-                ):
-                    already_bookmarked = True
+            else:
+                already_bookmarked = False
 
             if already_bookmarked:
                 if clip_signature:
@@ -7968,7 +8038,7 @@ class ADBController:
                 if status_callback:
                     status_callback(
                         device_id,
-                        f"[TikTok Vi tương tác] ⏭️ Clip '{clip_signature or content_sig}' đã lưu Bookmark trước đây • Bỏ qua, tránh mất Bookmark.",
+                        f"[TikTok Vi tương tác] ⏭️ Clip '{content_sig or clip_signature}' đã lưu Bookmark trước đây • Bỏ qua, tránh mất Bookmark.",
                     )
             else:
                 bm_x = int(width * 0.91) + random.randint(-10, 10)
@@ -7990,7 +8060,7 @@ class ADBController:
                 time.sleep(0.6)
 
         # 3. Chia sẻ ➔ Copy Link (Kích hoạt đề xuất Viral)
-        if random.random() < config.INTERACTION_SHARE_RATE:
+        if random.random() < share_rate:
             share_x = int(width * 0.91) + random.randint(-10, 10)
             share_y = int(height * 0.84) + random.randint(-15, 15)
             self.tap(device_id, share_x, share_y)
@@ -8011,7 +8081,7 @@ class ADBController:
             time.sleep(0.5)
 
         # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ mở xem lướt 1.5-2.5s rồi ĐÓNG NGAY, tuyệt đối không gửi bình luận
-        if random.random() < config.INTERACTION_COMMENT_RATE:
+        if random.random() < comment_rate:
             cm_x = int(width * 0.92)
             cm_y = int(height * 0.63)
             self.tap(device_id, cm_x, cm_y)
@@ -8367,7 +8437,7 @@ class ADBController:
             check_cancelled()
 
             update_status(
-                "[TikTok B3] Đã xác minh đúng profile • mở ngẫu nhiên một clip..."
+                "[TikTok B3] Đã xác minh đúng profile • ưu tiên mở video mới nhất..."
             )
             clip_opened = False
             for clip_attempt in range(3):
@@ -8405,6 +8475,10 @@ class ADBController:
             )
             step3_elapsed = 0
             channel_video = 1
+            priority_newest_count = getattr(
+                config, "TIKTOK_NEWEST_VIDEO_PRIORITY_COUNT", 6
+            )
+            session_day = time.strftime("%Y%m%d")
             while step3_elapsed < step3_total:
                 check_cancelled()
                 if self.recover_tiktok_if_blocked_by_captcha_or_link(
@@ -8420,6 +8494,7 @@ class ADBController:
                                 if self.find_and_click_tiktok_channel(device_id, target_channel):
                                     self.click_random_tiktok_profile_video(device_id, target_channel)
 
+                is_newest_clip = channel_video <= priority_newest_count
                 watch_duration = min(
                     random.randint(
                         config.TIKTOK_STEP3_VIDEO_MIN,
@@ -8438,7 +8513,7 @@ class ADBController:
                     time.sleep(1.0)
                     check_cancelled()
 
-                # 2. Thực hiện vi tương tác (Thả tim, Bookmark, Share, Xem lướt bình luận)
+                # 2. Thực hiện vi tương tác (Thả tim, Bookmark, Share, Xem lướt bình luận) - ưu tiên cao cho các video mới nhất
                 try:
                     self.perform_tiktok_micro_interactions(
                         device_id,
@@ -8446,7 +8521,8 @@ class ADBController:
                         height,
                         status_callback=update_status,
                         is_cancelled=check_cancelled,
-                        clip_signature=f"{target_channel}_clip_{channel_video}",
+                        clip_signature=f"{target_channel}_{session_day}_clip_{channel_video}",
+                        is_newest_clip=is_newest_clip,
                     )
                 except Exception:
                     pass
@@ -8457,8 +8533,13 @@ class ADBController:
                     time.sleep(1.0)
                     check_cancelled()
 
-                # Tăng Loop Rate ngẫu nhiên (xem lặp lại video 1 lần)
-                if random.random() < config.INTERACTION_LOOP_RATE:
+                # Tăng Loop Rate (ưu tiên cao hơn cho các video mới nhất)
+                loop_rate = (
+                    max(config.INTERACTION_LOOP_RATE, getattr(config, "TIKTOK_NEWEST_LOOP_RATE", 0.35))
+                    if is_newest_clip
+                    else config.INTERACTION_LOOP_RATE
+                )
+                if random.random() < loop_rate:
                     loop_delay = random.randint(6, 12)
                     update_status(f"[TikTok B3] 🔁 Xem lặp lại clip {channel_video} (+{loop_delay}s Loop Rate)...")
                     for _ in range(loop_delay):
@@ -8490,10 +8571,9 @@ class ADBController:
                     self.tap(device_id, width // 2, int(height * 0.12))
                     time.sleep(0.2)
 
-                    # Dàn đều dòng chảy video trên Kênh:
-                    # 85% vuốt tiếp sang clip sau trong playlist của Kênh
-                    # 15% (khi đã xem từ clip 2) thỉnh thoảng vuốt lùi lại clip trước rồi xem tiếp
-                    if channel_video > 1 and random.random() < 0.15:
+                    # Đi thẳng qua trọn vẹn nhóm video mới nhất trên đầu kênh trước,
+                    # sau đó mới thỉnh thoảng lướt lùi ngẫu nhiên 15%
+                    if channel_video > priority_newest_count and random.random() < 0.15:
                         update_status(
                             f"[TikTok B3] 🔄 Lướt lại clip trước trong dòng chảy Kênh..."
                         )

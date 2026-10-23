@@ -226,6 +226,85 @@ class TestTrafficBoostAndScheduler(unittest.TestCase):
         is_player = self.adb.is_tiktok_video_player("dev-tt")
         self.assertTrue(is_player, "Must recognize TikTok player when action buttons have counts in front")
 
+    def test_click_profile_video_prioritizes_newest_unpinned_clip_without_scrolling_past_top(self):
+        """Verify click_random_tiktok_profile_video skips pinned video, does not scroll past top row, and clicks newest video first."""
+        import xml.etree.ElementTree as ET
+        from unittest.mock import patch
+
+        profile_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" />
+              <node class="android.widget.Button" text="Đã follow" />
+              <node class="android.widget.GridView" bounds="[0,780][1080,1920]">
+                <node class="android.widget.FrameLayout" clickable="true"
+                      resource-id="com.ss.android.ugc.trill:id/erf"
+                      bounds="[0,780][358,1260]">
+                  <node class="android.widget.TextView" text="Đã ghim" bounds="[20,795][150,835]" />
+                </node>
+                <node class="android.widget.FrameLayout" clickable="true"
+                      resource-id="com.ss.android.ugc.trill:id/erf"
+                      bounds="[361,780][718,1260]">
+                  <node class="android.widget.TextView" text="215" bounds="[380,1200][460,1245]" />
+                </node>
+                <node class="android.widget.FrameLayout" clickable="true"
+                      resource-id="com.ss.android.ugc.trill:id/erf"
+                      bounds="[0,1265][358,1745]">
+                  <node class="android.widget.TextView" text="1,820" bounds="[20,1680][120,1730]" />
+                </node>
+              </node>
+            </hierarchy>
+            """
+        )
+        taps = []
+        swipes = []
+        self.adb.get_effective_screen_size = lambda _dev: (1080, 1920)
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": profile_root
+        self.adb.is_tiktok_video_player = lambda _dev: True
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+        self.adb.swipe = lambda *_args, **_kw: swipes.append("scrolled")
+
+        with patch("adb_controller.time.sleep", return_value=None):
+            ok = self.adb.click_random_tiktok_profile_video("dev-tt", "Khải Hoàn Skincare PT")
+
+        self.assertTrue(ok)
+        self.assertEqual([], swipes, "Must NOT scroll past top row when newest unpinned videos are visible")
+        self.assertEqual([(539, 1020)], taps, "Must click the first unpinned newest video (middle column of row 1)")
+
+    def test_newest_clip_priority_like_rate_and_new_content_override(self):
+        """Verify is_newest_clip uses higher like rate and likes new video content even if old positional clip_1 was in history."""
+        import xml.etree.ElementTree as ET
+        from unittest.mock import patch
+        import interaction_tracker
+
+        # Even if positional key was recorded before, a new video with new caption must be liked
+        interaction_tracker.record_interaction("dev-newest-test", "tiktok", "kenh_clip_1", "like")
+
+        new_video_root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.TextView" text="Video mới nhất vừa đăng hôm nay chăm sóc da Phan Thiết" bounds="[40,1450][720,1580]" />
+              <node class="android.widget.ImageView" content-desc="Thích video" selected="false" bounds="[940,1020][1040,1120]" />
+            </hierarchy>
+            """
+        )
+        taps = []
+        self.adb._get_tiktok_ui_root = lambda _dev, _p="": new_video_root
+        self.adb.tap = lambda _dev, x, y: taps.append((x, y))
+
+        # random=0.75 is > normal INTERACTION_LIKE_RATE (0.25) but < TIKTOK_NEWEST_LIKE_RATE (0.90)
+        with patch("adb_controller.random.random", side_effect=[0.75, 0.99, 0.99, 0.99]), \
+             patch("adb_controller.time.sleep", return_value=None):
+            self.adb.perform_tiktok_micro_interactions(
+                "dev-newest-test",
+                1080,
+                1920,
+                clip_signature="kenh_clip_1",
+                is_newest_clip=True,
+            )
+
+        self.assertEqual(2, len(taps), "Must double-tap like on newest video using priority rate")
+
 
 if __name__ == "__main__":
     unittest.main()

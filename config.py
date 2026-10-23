@@ -170,6 +170,20 @@ INTERACTION_SHARE_RATE = float(os.getenv("INTERACTION_SHARE_RATE", "0.02"))
 INTERACTION_COMMENT_RATE = float(os.getenv("INTERACTION_COMMENT_RATE", "0.10"))
 INTERACTION_LOOP_RATE = float(os.getenv("INTERACTION_LOOP_RATE", "0.15"))
 
+# Ưu tiên Like & Tương tác mạnh vào các Video Mới Nhất của Kênh TikTok
+TIKTOK_NEWEST_VIDEO_PRIORITY_COUNT = int(
+    os.getenv("TIKTOK_NEWEST_VIDEO_PRIORITY_COUNT", "6")
+)
+TIKTOK_NEWEST_LIKE_RATE = float(os.getenv("TIKTOK_NEWEST_LIKE_RATE", "0.90"))
+TIKTOK_NEWEST_BOOKMARK_RATE = float(
+    os.getenv("TIKTOK_NEWEST_BOOKMARK_RATE", "0.35")
+)
+TIKTOK_NEWEST_SHARE_RATE = float(os.getenv("TIKTOK_NEWEST_SHARE_RATE", "0.15"))
+TIKTOK_NEWEST_COMMENT_RATE = float(
+    os.getenv("TIKTOK_NEWEST_COMMENT_RATE", "0.30")
+)
+TIKTOK_NEWEST_LOOP_RATE = float(os.getenv("TIKTOK_NEWEST_LOOP_RATE", "0.35"))
+
 # Tùy chọn Tăng Traffic Đột Phá - Mặc định tắt click video từ Search để tránh video ngoài kênh
 TIKTOK_SEARCH_CLICK_VIDEO_ENABLED = os.getenv(
     "TIKTOK_SEARCH_CLICK_VIDEO_ENABLED", "0"
