@@ -139,5 +139,42 @@ class GuiNotionSyncTests(unittest.TestCase):
         show.assert_called_once()
 
 
+    def test_auto_sync_notion_on_startup_silently_applies_active_schedule(self):
+        app = GUIApp.__new__(GUIApp)
+        app.ent_notion_token = _Entry("token-123")
+        app.ent_notion_source_id = _Entry("source-456")
+        app.ent_tt_seed = _Entry()
+        app.ent_tt_channel = _Entry()
+        app.ent_fb_seed = _Entry()
+        app.ent_fb_target = _Entry()
+        app.btn_complete_notion = _Button()
+        app.run_in_thread = lambda action: action()
+        app.after = lambda _delay, callback: callback()
+        logs = []
+        app.log_message = lambda msg: logs.append(msg)
+
+        schedule = NotionKeywordSchedule(
+            page_id="auto-id",
+            title="Tuần Auto",
+            start_date=date(2026, 8, 12),
+            end_date=date(2026, 8, 18),
+            active=True,
+            tiktok_seed_keywords="từ khóa tiktok từ notion",
+            tiktok_target_channels="Kênh TikTok Notion",
+            facebook_seed_keywords="từ khóa facebook từ notion",
+            facebook_target_pages="Page FB Notion",
+        )
+
+        with patch("gui_app.fetch_enabled_keyword_schedules", return_value=[schedule]):
+            app._auto_sync_notion_on_startup()
+
+        self.assertEqual("từ khóa tiktok từ notion", app.ent_tt_seed.value)
+        self.assertEqual("Kênh TikTok Notion", app.ent_tt_channel.value)
+        self.assertEqual("từ khóa facebook từ notion", app.ent_fb_seed.value)
+        self.assertEqual("Page FB Notion", app.ent_fb_target.value)
+        self.assertEqual(schedule, app._active_notion_schedule)
+        self.assertTrue(any("Tuần Auto" in log for log in logs))
+
+
 if __name__ == "__main__":
     unittest.main()

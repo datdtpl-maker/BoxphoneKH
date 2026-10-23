@@ -27,6 +27,7 @@ from notion_keyword_sync import (
     mark_schedule_completed,
     mark_schedule_processing,
     mark_schedule_scanned,
+    select_active_schedule,
 )
 
 # Bright operations dashboard with a lightweight iOS-inspired glass treatment.
@@ -1625,6 +1626,8 @@ class GUIApp(ctk.CTk):
         self.start_bot_service()
         # Khởi chạy luồng đếm giờ tự động theo khung giờ vàng
         self._start_auto_scheduler()
+        # Tự động đồng bộ từ khóa Notion đang áp dụng hôm nay khi khởi động tool
+        self.after(2000, self._auto_sync_notion_on_startup)
 
     def _apply_commercial_layout(self):
         """Compose the commercial operations shell without touching workflows."""
@@ -2504,6 +2507,60 @@ class GUIApp(ctk.CTk):
                 )
 
         self.run_in_thread(update_scan_time)
+
+    def _auto_sync_notion_on_startup(self):
+        """Tự động đồng bộ lịch từ khóa đang áp dụng từ Notion khi mở tool."""
+        token = (
+            self.ent_notion_token.get().strip()
+            if hasattr(self, "ent_notion_token")
+            else config.NOTION_API_TOKEN
+        )
+        source_id = (
+            self.ent_notion_source_id.get().strip()
+            if hasattr(self, "ent_notion_source_id")
+            else config.NOTION_DATA_SOURCE_ID
+        )
+        if not token or not source_id:
+            return
+
+        def worker():
+            try:
+                schedules = fetch_enabled_keyword_schedules(token, source_id)
+                if not schedules:
+                    return
+                try:
+                    schedule = select_active_schedule(schedules)
+                except Exception:
+                    schedule = schedules[0]
+                if schedule:
+                    self.after(
+                        0,
+                        lambda s=schedule, t=token: self._apply_notion_schedule_silently(s, t),
+                    )
+            except Exception as exc:
+                self.log_message(f"[Notion] Tự động nạp từ khóa: {exc}")
+
+        self.run_in_thread(worker)
+
+    def _apply_notion_schedule_silently(self, schedule, token):
+        """Nạp dữ liệu lịch Notion vào giao diện trong nền (không bật popup modal)."""
+        self._apply_notion_schedule(schedule)
+        self._active_notion_schedule = schedule
+        self._active_notion_token = token
+        if hasattr(self, "btn_complete_notion"):
+            self.btn_complete_notion.configure(
+                state="normal",
+                text=f"Hoàn thành: {schedule.title[:18]}",
+                fg_color="#047857",
+                hover_color="#065f46",
+            )
+        period = (
+            f"{schedule.start_date:%d/%m/%Y} - "
+            f"{schedule.end_date:%d/%m/%Y}"
+        )
+        self.log_message(
+            f"[Notion] ✅ Đã tự động nạp từ khóa áp dụng: '{schedule.title}' ({period}) vào tool."
+        )
 
     def complete_notion_schedule_action(self):
         schedule = self._active_notion_schedule

@@ -49,12 +49,46 @@ class NotionKeywordSchedule:
     pump_status: str = ""
 
 
+PROPERTY_FALLBACKS = {
+    "TikTok - Từ khóa nhiệm vụ": (
+        "TikTok - Từ khóa mồi",
+        "Từ khóa TikTok",
+        "TikTok Keywords",
+        "Từ khóa nhiệm vụ TikTok",
+    ),
+    "TikTok - Kênh mục tiêu": (
+        "Kênh TikTok mục tiêu",
+        "Kênh TikTok",
+        "TikTok Target",
+        "TikTok Channel",
+    ),
+    "Facebook - Từ khóa mồi": (
+        "Facebook - Từ khóa nhiệm vụ",
+        "Từ khóa Facebook",
+        "Facebook Keywords",
+        "Từ khóa mồi Facebook",
+    ),
+    "Facebook - Page mục tiêu": (
+        "Page Facebook mục tiêu",
+        "Page mục tiêu",
+        "Facebook Target",
+        "Facebook Page",
+    ),
+    "Tên lịch": ("Tiêu đề", "Title", "Name", "Tên nhiệm vụ"),
+    "Thời gian áp dụng": ("Thời gian", "Date", "Timeline"),
+    "Đang áp dụng": ("Áp dụng", "Active", "Bật"),
+}
+
+
 def _property(properties, name):
-    if name not in properties:
-        raise NotionSyncError(
-            "invalid_schema", f"Bảng Notion thiếu cột bắt buộc: {name}."
-        )
-    return properties[name]
+    if name in properties:
+        return properties[name]
+    for alt in PROPERTY_FALLBACKS.get(name, ()):
+        if alt in properties:
+            return properties[alt]
+    raise NotionSyncError(
+        "invalid_schema", f"Bảng Notion thiếu cột bắt buộc: {name}."
+    )
 
 
 def _plain_text(prop, kind="rich_text"):

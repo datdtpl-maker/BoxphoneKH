@@ -178,5 +178,26 @@ class NotionKeywordSyncTests(unittest.TestCase):
         self.assertEqual(["Tuần B", "Tuần A"], [item.title for item in schedules])
 
 
+    def test_property_fallbacks_allow_column_name_variations(self):
+        page = {
+            "id": "page-id",
+            "properties": {
+                "Tiêu đề": {"title": [{"plain_text": "Lịch biến thể"}]},
+                "Thời gian": {"date": {"start": "2026-08-12", "end": "2026-08-18"}},
+                "Áp dụng": {"checkbox": True},
+                "TikTok - Từ khóa mồi": {"rich_text": [{"plain_text": "mụn, phục hồi da"}]},
+                "Kênh TikTok": {"rich_text": [{"plain_text": "Khải Hoàn Skincare PT"}]},
+                "Từ khóa Facebook": {"rich_text": [{"plain_text": "trị mụn phan thiết"}]},
+                "Facebook Page": {"rich_text": [{"plain_text": "Khải Hoàn Skincare"}]},
+            },
+        }
+        schedule = parse_schedule_page(page)
+        self.assertEqual("Lịch biến thể", schedule.title)
+        self.assertEqual("mụn, phục hồi da", schedule.tiktok_seed_keywords)
+        self.assertEqual("Khải Hoàn Skincare PT", schedule.tiktok_target_channels)
+        self.assertEqual("trị mụn phan thiết", schedule.facebook_seed_keywords)
+        self.assertEqual("Khải Hoàn Skincare", schedule.facebook_target_pages)
+
+
 if __name__ == "__main__":
     unittest.main()
