@@ -399,13 +399,37 @@ class ADBController:
                 device_id, threading.RLock()
             )
 
+    def is_screen_landscape(self, device_id):
+        """Kiểm tra màn hình thiết bị có đang bị xoay ngang (Landscape) hay không."""
+        code, output, _ = self.execute_adb(
+            device_id, ["shell", "dumpsys", "window", "displays"]
+        )
+        if code == 0 and output:
+            cur_match = re.search(r"cur=(\d+)x(\d+)", output)
+            if cur_match:
+                w, h = int(cur_match.group(1)), int(cur_match.group(2))
+                if w > h:
+                    return True
+            rot_match = re.search(r"mRotation=([0-3])", output)
+            if rot_match and rot_match.group(1) in ("1", "3"):
+                return True
+
+        code_in, out_in, _ = self.execute_adb(
+            device_id, ["shell", "dumpsys", "input"]
+        )
+        if code_in == 0 and out_in:
+            orient_match = re.search(r"SurfaceOrientation:\s*([0-3])", out_in)
+            if orient_match and orient_match.group(1) in ("1", "3"):
+                return True
+        return False
+
     def _read_portrait_lock_state(self, device_id):
         state_script = (
             "printf 'ACCELEROMETER_ROTATION='; "
             "settings get system accelerometer_rotation; "
             "printf 'USER_ROTATION='; "
             "settings get system user_rotation; "
-            "dumpsys window | grep -E 'm(Current)?Rotation' | head -n 1 || true; "
+            "dumpsys window displays | grep -E 'mRotation|cur=' | head -n 3 || true; "
             "dumpsys input | grep SurfaceOrientation || true"
         )
         code, output, _ = self.execute_adb(
@@ -419,13 +443,17 @@ class ADBController:
         user_rotation = re.search(r"USER_ROTATION=\s*([0-3])", output)
         orientation = re.search(r"SurfaceOrientation:\s*([0-3])", output)
         win_rot = re.search(r"m(?:Current)?Rotation=(?:ROTATION_)?([0-3])", output)
+        cur_match = re.search(r"cur=(\d+)x(\d+)", output)
         if not accelerometer or not user_rotation:
             return None
         acc_ok = accelerometer.group(1) == "0"
         user_ok = user_rotation.group(1) == "0"
         orient_ok = orientation is None or orientation.group(1) == "0"
         win_ok = win_rot is None or win_rot.group(1) == "0"
-        return acc_ok and user_ok and orient_ok and win_ok
+        cur_ok = True
+        if cur_match:
+            cur_ok = int(cur_match.group(1)) <= int(cur_match.group(2))
+        return acc_ok and user_ok and orient_ok and win_ok and cur_ok
 
     def lock_portrait(self, device_id, retries=2, force=False):
         """Khóa cứng màn hình dọc (Portrait), vô hiệu hóa hoàn toàn tự động xoay."""
@@ -434,6 +462,7 @@ class ADBController:
             now = time.monotonic()
             with self._portrait_state_guard:
                 confirmed_at = self._portrait_confirmed_at.get(device_id)
+
             if (
                 not force
                 and confirmed_at is not None
@@ -452,11 +481,15 @@ class ADBController:
                 "settings put system accelerometer_rotation 0; "
                 "settings put system user_rotation 0; "
                 "settings put secure show_rotation_suggestions 0; "
+                "settings put system hide_rotation_lock_toggle_for_accessibility 0 2>/dev/null || true; "
+                "settings put system lock_screen_allow_rotation 0 2>/dev/null || true; "
+                "settings put system call_auto_rotation 0 2>/dev/null || true; "
                 "content insert --uri content://settings/system "
                 "--bind name:s:accelerometer_rotation --bind value:i:0 2>/dev/null || true; "
                 "content insert --uri content://settings/system "
                 "--bind name:s:user_rotation --bind value:i:0 2>/dev/null || true; "
-                "cmd window set-user-rotation lock 0 2>/dev/null || wm set-user-rotation lock 0 2>/dev/null || true"
+                "cmd window set-user-rotation lock 0 2>/dev/null || wm set-user-rotation lock 0 2>/dev/null || wm user-rotation lock 0 2>/dev/null || true; "
+                "cmd window set-fixed-to-user-rotation enabled 2>/dev/null || cmd window set-ignore-orientation-request true 2>/dev/null || true"
             )
             attempts = max(1, int(retries))
             applied = False
@@ -472,8 +505,8 @@ class ADBController:
                             time.monotonic()
                         )
                     return True
-                if state is False and attempt == attempts - 1:
-                    # Nếu màn hình vẫn bị xoay do video/activity xoay ngang, gửi phím Back
+                if state is False:
+                    # Nếu màn hình vẫn bị xoay do video/activity xoay ngang, gửi phím Back / Escape
                     self.keyevent(device_id, 4)
                     time.sleep(0.3)
                     self.execute_adb(device_id, ["shell", "sh", "-c", apply_script])
@@ -997,25 +1030,85 @@ class ADBController:
         """Mở ứng dụng Facebook (thử com.facebook.katana trước, dự phòng com.facebook.lite)"""
         self.dismiss_system_usb_storage_popup(device_id)
         self.lock_portrait(device_id, retries=2, force=True)
-        code, stdout, stderr = self.execute_adb(
-            device_id,
-            ["shell", "monkey", "-p", config.FACEBOOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"]
-        )
+        code, stdout, stderr = self.launch_app(device_id, config.FACEBOOK_PACKAGE)
         if code != 0 or "Error" in (stdout or ""):
-            self.execute_adb(
-                device_id,
-                ["shell", "monkey", "-p", "com.facebook.lite", "-c", "android.intent.category.LAUNCHER", "1"]
-            )
+            self.launch_app(device_id, "com.facebook.lite")
         self.lock_portrait(device_id, retries=2, force=True)
         time.sleep(1.0)
         self.dismiss_system_usb_storage_popup(device_id)
         self.lock_portrait(device_id, retries=2, force=True)
+        if self.is_screen_landscape(device_id):
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
+            self.lock_portrait(device_id, retries=2, force=True)
         return True
 
     def launch_app(self, device_id, package_name):
-        """Khởi chạy một ứng dụng bằng package name"""
-        # Sử dụng monkey để khởi chạy nhanh app từ launcher
-        return self.execute_adb(device_id, ["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
+        """Khởi chạy một ứng dụng bằng package name an toàn, không kích hoạt sự kiện xoay màn hình ngẫu nhiên."""
+        self.lock_portrait(device_id, retries=2, force=True)
+        known_components = {
+            config.FACEBOOK_PACKAGE: f"{config.FACEBOOK_PACKAGE}/.LoginActivity",
+            "com.facebook.lite": "com.facebook.lite/.MainActivity",
+            config.TIKTOK_PACKAGE: f"{config.TIKTOK_PACKAGE}/com.ss.android.ugc.aweme.splash.SplashActivity",
+            config.TIKTOK_PACKAGE_ALT: f"{config.TIKTOK_PACKAGE_ALT}/com.ss.android.ugc.aweme.splash.SplashActivity",
+        }
+        target_cmp = known_components.get(package_name)
+        if target_cmp:
+            code, stdout, stderr = self.execute_adb(
+                device_id,
+                [
+                    "shell", "am", "start",
+                    "-n", target_cmp,
+                    "-a", "android.intent.action.MAIN",
+                    "-c", "android.intent.category.LAUNCHER",
+                ],
+            )
+            if code == 0 and "Error" not in (stdout or ""):
+                self.lock_portrait(device_id, retries=2, force=True)
+                return code, stdout, stderr
+
+        code, resolve_out, _ = self.execute_adb(
+            device_id,
+            [
+                "shell", "cmd", "package", "resolve-activity",
+                "--brief", "-c", "android.intent.category.LAUNCHER", package_name,
+            ],
+        )
+        if code == 0 and resolve_out:
+            lines = [
+                l.strip()
+                for l in resolve_out.splitlines()
+                if "/" in l and not l.startswith("priority=")
+            ]
+            if lines:
+                cmp_name = lines[-1]
+                code, stdout, stderr = self.execute_adb(
+                    device_id,
+                    [
+                        "shell", "am", "start",
+                        "-n", cmp_name,
+                        "-a", "android.intent.action.MAIN",
+                        "-c", "android.intent.category.LAUNCHER",
+                    ],
+                )
+                if code == 0 and "Error" not in (stdout or ""):
+                    self.lock_portrait(device_id, retries=2, force=True)
+                    return code, stdout, stderr
+
+        res = self.execute_adb(
+            device_id,
+            [
+                "shell", "monkey", "-p", package_name,
+                "-c", "android.intent.category.LAUNCHER",
+                "--pct-rotation", "0",
+                "--pct-syskeys", "0",
+                "--pct-appswitch", "0",
+                "--pct-anyevent", "0",
+                "1",
+            ],
+        )
+        self.lock_portrait(device_id, retries=2, force=True)
+        return res
 
     def clear_input_field(self, device_id, max_chars=40):
         """Xóa toàn bộ ký tự trong ô input đang focus."""
@@ -1189,7 +1282,7 @@ class ADBController:
     def ensure_facebook_ready(self, device_id):
         """Giữ Facebook hiện tại hoặc mở app nếu chưa ở foreground."""
         self.dismiss_system_usb_storage_popup(device_id)
-        self.lock_portrait(device_id)
+        self.lock_portrait(device_id, retries=2)
         if self.is_facebook_in_foreground(device_id):
             ready = self.ensure_facebook_home(device_id)
             self.lock_portrait(device_id, retries=3)
@@ -1205,6 +1298,10 @@ class ADBController:
             return False
         ready = self.ensure_facebook_home(device_id)
         self.lock_portrait(device_id, retries=3)
+        if self.is_screen_landscape(device_id):
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
+            self.lock_portrait(device_id, retries=3)
         return ready
 
     def is_facebook_home(self, device_id):
@@ -3446,6 +3543,10 @@ class ADBController:
 
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
+            if self.is_screen_landscape(device_id):
+                self.keyevent(device_id, 4)
+                time.sleep(0.3)
+                self.lock_portrait(device_id, retries=2, force=True)
             # Tự động thu gọn thanh thông báo và thoát Messenger/Bài viết mới nếu bị mở nhầm
             try:
                 self.collapse_statusbar_if_expanded(
@@ -3775,7 +3876,7 @@ class ADBController:
     ):
         """Ổn định TikTok sau khi chuyển app và xác minh Home trước thao tác."""
         for attempt in range(max(1, attempts)):
-            self.lock_portrait(device_id, retries=3)
+            self.lock_portrait(device_id, retries=3, force=True)
             if not self.wait_for_tiktok_foreground(device_id):
                 if status_callback:
                     status_callback(
@@ -3784,13 +3885,17 @@ class ADBController:
                         f"({attempt + 1}/{max(1, attempts)})...",
                     )
                 self.launch_tiktok(device_id)
-                self.lock_portrait(device_id, retries=3)
+                self.lock_portrait(device_id, retries=3, force=True)
                 time.sleep(1.0)
             if not self.wait_for_tiktok_foreground(device_id):
                 continue
             if not self.ensure_tiktok_home_feed(device_id):
                 continue
-            self.lock_portrait(device_id, retries=3)
+            self.lock_portrait(device_id, retries=3, force=True)
+            if self.is_screen_landscape(device_id):
+                self.keyevent(device_id, 4)
+                time.sleep(0.3)
+                self.lock_portrait(device_id, retries=3, force=True)
             if self.wait_for_tiktok_foreground(device_id):
                 return True
         return False
@@ -3864,6 +3969,10 @@ class ADBController:
         video_index = 1
         while time.monotonic() < deadline:
             self.lock_portrait(device_id, retries=3)
+            if self.is_screen_landscape(device_id):
+                self.keyevent(device_id, 4)
+                time.sleep(0.3)
+                self.lock_portrait(device_id, retries=2, force=True)
             if is_cancelled and is_cancelled():
                 raise RuntimeError("Bị dừng bởi người dùng")
             if not self.is_tiktok_in_foreground(device_id):
@@ -4696,22 +4805,32 @@ class ADBController:
         return 1080, 1920 # Mặc định nếu lỗi
 
     def get_effective_screen_size(self, device_id):
-        """Lấy kích thước tọa độ đang được Android dùng sau khi áp dụng wm override."""
+        """Lấy kích thước tọa độ đang được Android dùng sau khi áp dụng wm override (luôn đảm bảo chiều dọc)."""
         output = self._get_wm_size_output(device_id)
         override = re.search(
             r"Override size:\s*(\d+)x(\d+)", output, re.IGNORECASE
         )
         if override:
-            return int(override.group(1)), int(override.group(2))
-        physical = re.search(
-            r"Physical size:\s*(\d+)x(\d+)", output, re.IGNORECASE
-        )
-        if physical:
-            return int(physical.group(1)), int(physical.group(2))
-        size = re.search(r"size:\s*(\d+)x(\d+)", output)
-        if size:
-            return int(size.group(1)), int(size.group(2))
-        return 1080, 1920
+            w, h = int(override.group(1)), int(override.group(2))
+        else:
+            physical = re.search(
+                r"Physical size:\s*(\d+)x(\d+)", output, re.IGNORECASE
+            )
+            if physical:
+                w, h = int(physical.group(1)), int(physical.group(2))
+            else:
+                size = re.search(r"size:\s*(\d+)x(\d+)", output)
+                if size:
+                    w, h = int(size.group(1)), int(size.group(2))
+                else:
+                    w, h = 1080, 1920
+        if w > h:
+            try:
+                self.lock_portrait(device_id, force=True)
+            except Exception:
+                pass
+            w, h = min(w, h), max(w, h)
+        return w, h
 
     def find_element_coords_by_text(self, device_id, target_text):
         """Dump XML và tìm tọa độ của phần tử khớp với target_text"""
@@ -6521,21 +6640,25 @@ class ADBController:
     def launch_tiktok(self, device_id):
         """Mở ứng dụng TikTok (thử com.ss.android.ugc.trill trước, dự phòng com.zhiliaoapp.musically)"""
         self.dismiss_system_usb_storage_popup(device_id)
-        self.lock_portrait(device_id, retries=3)
-        code, stdout, stderr = self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"])
-        if code != 0 or "Error" in stdout:
-            self.execute_adb(device_id, ["shell", "monkey", "-p", config.TIKTOK_PACKAGE_ALT, "-c", "android.intent.category.LAUNCHER", "1"])
+        self.lock_portrait(device_id, retries=3, force=True)
+        code, stdout, stderr = self.launch_app(device_id, config.TIKTOK_PACKAGE)
+        if code != 0 or "Error" in (stdout or ""):
+            self.launch_app(device_id, config.TIKTOK_PACKAGE_ALT)
         # TikTok bật lại accelerometer_rotation khi Splash/Main activity đổi.
-        self.lock_portrait(device_id, retries=3)
+        self.lock_portrait(device_id, retries=3, force=True)
         time.sleep(1.0)
-        self.lock_portrait(device_id, retries=3)
+        self.lock_portrait(device_id, retries=3, force=True)
         time.sleep(2.5)
-        self.lock_portrait(device_id, retries=3)
+        self.lock_portrait(device_id, retries=3, force=True)
         # Tự động từ chối popup USB MTP và vị trí nếu hiển thị lúc mở app
         self.dismiss_system_usb_storage_popup(device_id)
         self.dismiss_tiktok_location_popup(device_id)
         self.dismiss_tiktok_blocking_popup(device_id)
-        self.lock_portrait(device_id, retries=3)
+        self.lock_portrait(device_id, retries=3, force=True)
+        if self.is_screen_landscape(device_id):
+            self.keyevent(device_id, 4)
+            time.sleep(0.3)
+            self.lock_portrait(device_id, retries=3, force=True)
 
     def get_tiktok_foreground_activity(self, device_id):
         """Return the focused TikTok activity even when UIAutomator is busy."""

@@ -73,7 +73,7 @@ class OrientationLockTests(unittest.TestCase):
         controller.dismiss_tiktok_location_popup = lambda _device_id: False
         locks = []
         controller.lock_portrait = (
-            lambda device_id, retries=2:
+            lambda device_id, retries=2, **kwargs:
             locks.append((device_id, retries)) or True
         )
 

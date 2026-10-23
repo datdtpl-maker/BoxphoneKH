@@ -2409,7 +2409,9 @@ class GUIApp(ctk.CTk):
 
             def _open(d):
                 try:
+                    main.adb.lock_portrait(d, force=True)
                     main.adb.launch_tiktok(d)
+                    main.adb.lock_portrait(d, force=True)
                     return True
                 except Exception as e:
                     print(f"Lỗi mở TikTok máy {d}: {e}")
@@ -2441,7 +2443,9 @@ class GUIApp(ctk.CTk):
 
             def _open(d):
                 try:
+                    main.adb.lock_portrait(d, force=True)
                     main.adb.launch_facebook(d)
+                    main.adb.lock_portrait(d, force=True)
                     return True
                 except Exception as e:
                     print(f"Lỗi mở Facebook máy {d}: {e}")
@@ -3794,7 +3798,7 @@ class GUIApp(ctk.CTk):
 
         def action():
             self.bulk_disable_rotation(
-                target_devices=target_devices, sync=True
+                target_devices=target_devices, sync=True, force=True
             )
             if adaptive:
                 results = run_adaptive(
@@ -3855,7 +3859,7 @@ class GUIApp(ctk.CTk):
 
         def action():
             self.bulk_disable_rotation(
-                target_devices=target_devices, sync=True
+                target_devices=target_devices, sync=True, force=True
             )
             self.prepare_social_targets(
                 target_devices,
@@ -4163,7 +4167,7 @@ class GUIApp(ctk.CTk):
 
         def action():
             self.bulk_disable_rotation(
-                target_devices=target_devices, sync=True
+                target_devices=target_devices, sync=True, force=True
             )
             self.prepare_social_targets(
                 target_devices,
@@ -4244,7 +4248,7 @@ class GUIApp(ctk.CTk):
 
         def action():
             self.bulk_disable_rotation(
-                target_devices=target_devices, sync=True
+                target_devices=target_devices, sync=True, force=True
             )
             self.prepare_social_targets(
                 target_devices,
@@ -4562,7 +4566,7 @@ class GUIApp(ctk.CTk):
 
         def action():
             self.bulk_disable_rotation(
-                target_devices=target_devices, sync=True
+                target_devices=target_devices, sync=True, force=True
             )
             self.prepare_social_targets(
                 target_devices,
