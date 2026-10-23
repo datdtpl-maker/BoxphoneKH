@@ -142,5 +142,64 @@ class DomMultiResolutionAccuracyTests(unittest.TestCase):
         self.assertEqual((1360, 1860), coords.get("share"))
 
 
+    def test_channel_target_101_not_mun_matching(self):
+        """Kiểm tra so khớp kênh TikTok Khải Hoàn & 101 Nốt Mụn (@khaihoan.101notmun)."""
+        target = "Khải Hoàn & 101 Nốt Mụn"
+        self.assertTrue(self.controller._match_tiktok_channel_name("Khải Hoàn 101 Nốt Mụn", target))
+        self.assertTrue(self.controller._match_tiktok_channel_name("@khaihoan.101notmun", target))
+        self.assertTrue(self.controller._match_tiktok_channel_name("khaihoan.101notmun", target))
+        self.assertTrue(self.controller._match_tiktok_channel_name("Khải Hoàn & 101 Nốt Mụn Official", target))
+
+        # Phải phân biệt rõ ràng, không nhận nhầm kênh Khải Hoàn Skincare PT hay cá nhân khác
+        self.assertFalse(self.controller._match_tiktok_channel_name("Khải Hoàn Skincare PT", target))
+        self.assertFalse(self.controller._match_tiktok_channel_name("@khaihoanskincare", target))
+        self.assertFalse(self.controller._match_tiktok_channel_name("Trần Khải Hoàn", target))
+        self.assertFalse(self.controller._match_tiktok_channel_name("honkhi418", target))
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_channel_target_101_not_mun_click_fhd_1080(self, _sleep):
+        """Kiểm tra nhận diện và click đúng card Kênh Khải Hoàn & 101 Nốt Mụn trên 1080x1920."""
+        search_top_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.EditText" bounds="[80,50][900,140]" text="Khải Hoàn &amp; 101 Nốt Mụn" />
+          <node text="Top" selected="true" bounds="[180,160][300,220]" />
+          <node class="android.widget.RelativeLayout" clickable="true"
+                bounds="[0,260][1080,620]" resource-id="card_target_channel">
+            <node class="android.widget.TextView" clickable="false"
+                  bounds="[250,310][750,370]" text="Khải Hoàn &amp; 101 Nốt Mụn" />
+            <node class="android.widget.TextView" text="@khaihoan.101notmun" />
+            <node class="android.widget.Button" text="Follow" bounds="[850,310][1040,370]" />
+          </node>
+        </hierarchy>
+        """)
+        profile_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" />
+          <node class="android.widget.Button" text="Tin nhắn" />
+          <node resource-id="com.ss.android.ugc.trill:id/user_video_view" />
+        </hierarchy>
+        """)
+        roots = iter([search_top_root, profile_root])
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots, profile_root)
+        self.controller.get_effective_screen_size = lambda _dev: (1080, 1920)
+        taps = []
+        self.controller.tap = lambda _dev, x, y: taps.append((x, y))
+
+        success = self.controller.find_and_click_tiktok_channel("dev-1080", "Khải Hoàn & 101 Nốt Mụn")
+        self.assertTrue(success)
+        self.assertTrue(len(taps) >= 1)
+        tap_x, tap_y = taps[0]
+        # Tâm thẻ card là (540, 440), nằm trong phạm vi hiển thị hợp lệ
+        self.assertEqual(440, tap_y)
+        self.assertEqual(540, tap_x)
+
+    def test_facebook_page_name_resolution_comma_separated(self):
+        """Kiểm tra chọn chính xác tên Page canonical khi cấu hình danh sách Page phân tách dấu phẩy."""
+        resolved_skincare = self.controller._resolve_facebook_exact_page_name("Khải Hoàn Skincare")
+        self.assertIn("Khải Hoàn Skincare", resolved_skincare)
+        resolved_nhathuoc = self.controller._resolve_facebook_exact_page_name("Nhà thuốc Khải Hoàn")
+        self.assertIn("Nhà thuốc Khải Hoàn", resolved_nhathuoc)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1435,10 +1435,15 @@ class ADBController:
         if not target_tokens:
             return None
 
-        configured_names = (
+        configured_names = []
+        for raw in (
             config.FACEBOOK_TARGET_PAGE_EXACT_DEFAULT,
             config.FACEBOOK_CANONICAL_PAGE_NAME,
-        )
+        ):
+            if raw:
+                configured_names.extend(
+                    [p.strip() for p in raw.split(",") if p.strip()]
+                )
         matching_names = []
         for candidate in configured_names:
             candidate = (candidate or "").strip()
@@ -1861,11 +1866,12 @@ class ADBController:
                         top_tier_candidates.sort()
 
                         if randomize_matching_pages:
-                            # Gom cụm theo vị trí thẻ card (tọa độ Y cách nhau >= 60px để phân biệt các page khác nhau)
+                            # Gom cụm theo vị trí thẻ card (tọa độ Y cách nhau theo tỷ lệ chiều cao màn hình để phân biệt chính xác giữa 1080p và 1440p)
+                            card_separation_y = max(60, int(height * 0.03))
                             distinct_cards = []
                             for c in top_tier_candidates:
                                 if not any(
-                                    abs(c[5] - d[5]) < 60 for d in distinct_cards
+                                    abs(c[5] - d[5]) < card_separation_y for d in distinct_cards
                                 ):
                                     distinct_cards.append(c)
 
@@ -3864,7 +3870,7 @@ class ADBController:
                 target_phrase
             ).split()
             all_tokens_set = set(all_text.split())
-            core_tokens = [t for t in target_tokens if t in ("khai", "hoan", "skincare")]
+            core_tokens = [t for t in target_tokens if t in ("khai", "hoan", "skincare", "101", "not", "mun")]
             if not core_tokens:
                 core_tokens = target_tokens[:2]
             has_core = all(token in all_tokens_set for token in core_tokens)
