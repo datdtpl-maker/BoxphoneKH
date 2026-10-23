@@ -405,6 +405,7 @@ class ADBController:
             "settings get system accelerometer_rotation; "
             "printf 'USER_ROTATION='; "
             "settings get system user_rotation; "
+            "dumpsys window | grep -E 'm(Current)?Rotation' | head -n 1 || true; "
             "dumpsys input | grep SurfaceOrientation || true"
         )
         code, output, _ = self.execute_adb(
@@ -417,16 +418,17 @@ class ADBController:
         )
         user_rotation = re.search(r"USER_ROTATION=\s*([0-3])", output)
         orientation = re.search(r"SurfaceOrientation:\s*([0-3])", output)
+        win_rot = re.search(r"m(?:Current)?Rotation=(?:ROTATION_)?([0-3])", output)
         if not accelerometer or not user_rotation:
             return None
-        return (
-            accelerometer.group(1) == "0"
-            and user_rotation.group(1) == "0"
-            and (orientation is None or orientation.group(1) == "0")
-        )
+        acc_ok = accelerometer.group(1) == "0"
+        user_ok = user_rotation.group(1) == "0"
+        orient_ok = orientation is None or orientation.group(1) == "0"
+        win_ok = win_rot is None or win_rot.group(1) == "0"
+        return acc_ok and user_ok and orient_ok and win_ok
 
     def lock_portrait(self, device_id, retries=2, force=False):
-        """Khóa dọc với tối đa hai lệnh ADB và gom các lần gọi sát nhau."""
+        """Khóa cứng màn hình dọc (Portrait), vô hiệu hóa hoàn toàn tự động xoay."""
         device_lock = self._get_portrait_device_lock(device_id)
         with device_lock:
             now = time.monotonic()
@@ -435,7 +437,7 @@ class ADBController:
             if (
                 not force
                 and confirmed_at is not None
-                and now - confirmed_at < self._portrait_cache_seconds
+                and now - confirmed_at < min(5.0, self._portrait_cache_seconds)
             ):
                 return True
 
@@ -451,10 +453,10 @@ class ADBController:
                 "settings put system user_rotation 0; "
                 "settings put secure show_rotation_suggestions 0; "
                 "content insert --uri content://settings/system "
-                "--bind name:s:accelerometer_rotation --bind value:i:0; "
+                "--bind name:s:accelerometer_rotation --bind value:i:0 2>/dev/null || true; "
                 "content insert --uri content://settings/system "
-                "--bind name:s:user_rotation --bind value:i:0; "
-                "wm set-user-rotation lock 0 >/dev/null 2>&1 || true"
+                "--bind name:s:user_rotation --bind value:i:0 2>/dev/null || true; "
+                "cmd window set-user-rotation lock 0 2>/dev/null || wm set-user-rotation lock 0 2>/dev/null || true"
             )
             attempts = max(1, int(retries))
             applied = False
@@ -470,6 +472,11 @@ class ADBController:
                             time.monotonic()
                         )
                     return True
+                if state is False and attempt == attempts - 1:
+                    # Nếu màn hình vẫn bị xoay do video/activity xoay ngang, gửi phím Back
+                    self.keyevent(device_id, 4)
+                    time.sleep(0.3)
+                    self.execute_adb(device_id, ["shell", "sh", "-c", apply_script])
                 if attempt < attempts - 1:
                     time.sleep(0.1)
             return applied
@@ -989,7 +996,7 @@ class ADBController:
     def launch_facebook(self, device_id):
         """Mở ứng dụng Facebook (thử com.facebook.katana trước, dự phòng com.facebook.lite)"""
         self.dismiss_system_usb_storage_popup(device_id)
-        self.lock_portrait(device_id, retries=2)
+        self.lock_portrait(device_id, retries=2, force=True)
         code, stdout, stderr = self.execute_adb(
             device_id,
             ["shell", "monkey", "-p", config.FACEBOOK_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"]
@@ -999,10 +1006,10 @@ class ADBController:
                 device_id,
                 ["shell", "monkey", "-p", "com.facebook.lite", "-c", "android.intent.category.LAUNCHER", "1"]
             )
-        self.lock_portrait(device_id, retries=2)
+        self.lock_portrait(device_id, retries=2, force=True)
         time.sleep(1.0)
         self.dismiss_system_usb_storage_popup(device_id)
-        self.lock_portrait(device_id, retries=2)
+        self.lock_portrait(device_id, retries=2, force=True)
         return True
 
     def launch_app(self, device_id, package_name):
@@ -2857,7 +2864,13 @@ class ADBController:
                 end_idx = stdout.find("</hierarchy>")
                 if start_idx != -1 and end_idx != -1:
                     clean_xml = stdout[start_idx : end_idx + len("</hierarchy>")]
-                    return ET.fromstring(clean_xml)
+                    fb_root = ET.fromstring(clean_xml)
+                    if fb_root is not None and fb_root.attrib.get("rotation") in ("1", "3"):
+                        print(f"[Device {device_id[:6]}][Facebook] Màn hình bị xoay ngang ({fb_root.attrib.get('rotation')}) • Ép khóa dọc ngay lập tức...")
+                        self.lock_portrait(device_id, retries=3, force=True)
+                        self.keyevent(device_id, 4)
+                        time.sleep(0.5)
+                    return fb_root
             except Exception:
                 pass
 
@@ -6912,7 +6925,7 @@ class ADBController:
         ]
 
     def _match_tiktok_channel_name(self, candidate, target):
-        """So khớp tên kênh thông minh, tuyệt đối không nhầm người khác (như 'Trần Khải Hoàn')."""
+        """So khớp tên kênh thông minh, tuyệt đối không nhầm người khác (như 'Trần Khải Hoàn' hay 'honkhi418')."""
         if not candidate or not target:
             return False
         c_tokens = self._clean_channel_tokens(candidate)
@@ -6923,13 +6936,19 @@ class ADBController:
         c_compact = "".join(c_tokens)
         t_compact = "".join(t_tokens)
 
-        # 1. Trùng khớp chuỗi liền (compact) hoặc tiếp đầu ngữ bắt đầu bằng target
+        # 1. Trùng khớp chính xác chuỗi liền
         if t_compact == c_compact:
             return True
-        if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 10:
+
+        # 2. Candidate bắt đầu bằng target và hậu tố kèm theo (ví dụ: "Official", "@handle", "Shop")
+        if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 25:
             return True
 
-        # 2. Kiểm tra các từ khóa đặc trưng (distinctive tokens)
+        # 3. Handle rút gọn: target bắt đầu bằng candidate (ví dụ @khaihoanskincare từ Khải Hoàn Skincare PT)
+        if t_compact.startswith(c_compact) and len(c_compact) >= 8 and len(c_compact) >= len(t_compact) - 6:
+            return True
+
+        # 4. Kiểm tra các từ khóa đặc trưng (distinctive tokens)
         # Ví dụ: "101", "skincare", "pt", "not", "mun"
         distinctive = {
             token for token in t_tokens
@@ -7407,31 +7426,34 @@ class ADBController:
                 other_tab_selected = elem
                 other_tab_name = text_raw or desc_raw
 
-        # Nếu tab Top đã được chọn thì tuyệt đối không chạm vào thanh tab
-        if top_selected:
+        # Nếu tab Top đã được chọn rõ ràng thì không chạm
+        if top_selected and not force:
             return False
 
-        # Nếu phát hiện tab khác đang được chọn (Ảnh, Video, Người dùng...)
-        if other_tab_selected is not None:
-            if top_coords is None:
-                if top_elem is not None:
-                    top_coords = self._element_center(top_elem)
-                else:
-                    other_coords = self._element_center(other_tab_selected)
-                    tab_y = other_coords[1] if other_coords else (detected_tab_ys[0] if detected_tab_ys else int(screen_height * 0.15))
-                    if hoi_coords:
-                        top_coords = (hoi_coords[0] + int(screen_width * 0.14), tab_y)
-                    else:
-                        top_coords = (int(screen_width * 0.22), tab_y)
+        # Nếu không force và không có tab nào khác đang được chọn, coi như đã ở Top
+        if not force and other_tab_selected is None:
+            return False
 
-            if top_coords:
-                print(
-                    f"[Device {device_id[:6]}][TikTok] Đang ở tab '{other_tab_name}' • "
-                    f"Bấm chọn lại tab 'Top' tại {top_coords}..."
-                )
-                self.tap(device_id, top_coords[0], top_coords[1])
-                time.sleep(1.8)
-                return True
+        if top_coords is None:
+            if top_elem is not None:
+                top_coords = self._element_center(top_elem)
+            else:
+                other_coords = self._element_center(other_tab_selected) if other_tab_selected is not None else None
+                tab_y = other_coords[1] if other_coords else (detected_tab_ys[0] if detected_tab_ys else int(screen_height * 0.11))
+                if hoi_coords:
+                    top_coords = (hoi_coords[0] + int(screen_width * 0.14), tab_y)
+                else:
+                    top_coords = (int(screen_width * 0.16), tab_y)
+
+        if top_coords:
+            reason = f"Đang ở tab '{other_tab_name}'" if other_tab_selected is not None else "Bắt buộc chọn tab Top"
+            print(
+                f"[Device {device_id[:6]}][TikTok] {reason} • "
+                f"Bấm chọn lại tab 'Top' tại {top_coords}..."
+            )
+            self.tap(device_id, top_coords[0], top_coords[1])
+            time.sleep(1.8)
+            return True
 
         return False
 
@@ -7747,8 +7769,8 @@ class ADBController:
                     return
             raw_items.append((is_tile_pinned(target_elem, coords), coords))
 
-        # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473' hoặc icon Play)
-        view_count_re = re.compile(r"^\s*(▷\s*)?(\d+[\.,]?\d*[kKmM]?)\s*$")
+        # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473', '1.2K lượt xem' hoặc icon Play)
+        view_count_re = re.compile(r"^\s*(?:▷\s*)?(\d+[\.,]?\d*[kKmM]?)(?:\s*(?:lượt xem|views|lần|đã phát))?\s*$", re.IGNORECASE)
         for elem in root.iter():
             text = (elem.get("text", "") or "").strip()
             desc = (elem.get("content-desc", "") or "").strip()
@@ -7773,6 +7795,7 @@ class ADBController:
         for elem in root.iter():
             resource_id = elem.get("resource-id", "").lower()
             desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
+            desc_lower = (elem.get("content-desc") or "").strip().lower()
             is_known_video = (
                 "user_video_view" in resource_id
                 or resource_id.endswith(":id/eti")
@@ -7780,7 +7803,12 @@ class ADBController:
                 or resource_id.endswith(":id/cover")
                 or "video_tile" in resource_id
                 or "video_item" in resource_id
+                or "post_item" in resource_id
+                or "feed_item" in resource_id
                 or desc.startswith("video by ")
+                or desc_lower.startswith("video")
+                or "đã phát" in desc_lower
+                or "lượt xem" in desc_lower
             )
             if not is_known_video:
                 continue
@@ -7856,12 +7884,14 @@ class ADBController:
                         root, width, height
                     )
 
-            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok (ưu tiên từ hàng 1 cột 1 - video mới nhất):
+            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok (Row 1 nằm ở khoảng 60%-64% chiều cao màn hình ngay dưới bio):
             if not candidates:
-                for row_ratio in (0.42, 0.60, 0.78):
-                    for col_ratio in (0.17, 0.50, 0.83):
-                        pt = (int(width * col_ratio), int(height * row_ratio))
-                        candidates.append(pt)
+                grid_top = int(height * 0.54)
+                for row_offset in (int(height * 0.08), int(height * 0.26), int(height * 0.44)):
+                    row_y = grid_top + row_offset
+                    if row_y < int(height * 0.92):
+                        for col_ratio in (0.17, 0.50, 0.83):
+                            candidates.append((int(width * col_ratio), row_y))
 
             # Luôn ưu tiên click vào video mới nhất đầu danh sách để dòng chảy đi qua trọn vẹn các video mới nhất
             coords = candidates[0]
@@ -8594,9 +8624,10 @@ class ADBController:
                 time.sleep(3.5)
                 check_cancelled()
 
-                # Mặc định TikTok luôn mở kết quả ở tab Top, chờ tải xong và click kênh mục tiêu
-                update_status(f"[TikTok B3] Đang tải kết quả trang Top & Mở Kênh '{target_channel}'...")
-                time.sleep(2.5)
+                # BẮT BUỘC: Đảm bảo chuyển đúng tab Top trước khi tìm card Kênh
+                update_status(f"[TikTok B3] Đảm bảo đang ở tab Top & Tải kết quả Kênh '{target_channel}'...")
+                self.ensure_tiktok_search_top_tab(device_id, force=True)
+                time.sleep(2.0)
                 check_cancelled()
 
                 # Click vào card kênh mục tiêu đã cấu hình.

@@ -1614,7 +1614,7 @@ class GUIApp(ctk.CTk):
         self.after(800, self.refresh_devices_action)
         # Tăng thời gian cache khóa dọc lên 5 phút để không spam ADB mỗi phút
         if hasattr(main, "adb"):
-            main.adb._portrait_cache_seconds = 300.0
+            main.adb._portrait_cache_seconds = 10.0
         # Thiết bị Box Phone có thể kết nối muộn hoặc tự bật lại cảm biến xoay.
         # Kiểm tra định kỳ mỗi 10 phút (thay vì 60s) để chống nghẽn PC khi treo máy qua đêm.
         self.after(45000, self._portrait_guard_tick)
@@ -3044,6 +3044,7 @@ class GUIApp(ctk.CTk):
         sync=False,
         skip_busy=False,
         skip_if_running=False,
+        force=False,
     ):
         if target_devices is None:
             target_devices = main.get_ordered_devices()
@@ -3064,6 +3065,8 @@ class GUIApp(ctk.CTk):
                     ):
                         return True
                     with main.adb.device_workflow_scope(d):
+                        if force:
+                            return main.adb.lock_portrait(d, force=True)
                         return main.adb.lock_portrait(d)
                 except Exception:
                     return False
@@ -3093,7 +3096,7 @@ class GUIApp(ctk.CTk):
         self.log_message(
             f"[Hệ thống] 🔒 Đang gửi lệnh khóa cứng màn hình dọc (Portrait) cho {len(devices)} máy..."
         )
-        self.bulk_disable_rotation(devices, sync=False)
+        self.bulk_disable_rotation(devices, sync=False, force=True)
         self.log_message("[Hệ thống] ✅ Đã hoàn tất khóa xoay dọc toàn bộ thiết bị.")
 
     def prepare_social_targets(
