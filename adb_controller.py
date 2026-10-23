@@ -4682,6 +4682,7 @@ class ADBController:
 
             home_search_coords = None
             header_search_coords = None
+            width, height = self.get_effective_screen_size(device_id)
             try:
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
@@ -4704,7 +4705,7 @@ class ADBController:
                     x1, y1, x2, y2 = map(int, match.groups())
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
-                    if not (30 < cy < 250):
+                    if not (30 < cy < max(250, int(height * 0.14))):
                         continue
 
                     home_markers = (
@@ -4965,8 +4966,8 @@ class ADBController:
             x1, y1, x2, y2 = map(int, match.groups())
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
-            # Loại thanh tìm kiếm/bộ lọc và thanh điều hướng cuối màn hình.
-            if cx <= 0 or not 220 < cy < 1800:
+            # Loại thanh tìm kiếm/bộ lọc và thanh điều hướng cuối màn hình (thích ứng 1080p và 1440p).
+            if cx <= 0 or not 220 < cy < 2400:
                 continue
 
             product_coords = (cx, cy)
@@ -5486,8 +5487,9 @@ class ADBController:
                             x1, y1, x2, y2 = map(int, m.groups())
                             cy = (y1 + y2) // 2
                             cx = (x1 + x2) // 2
+                            _w, _h = self.get_effective_screen_size(device_id)
                             # Đảm bảo vị trí nằm dưới header tìm kiếm (y > 200) và không chạm vùng phễu lọc góc trên bên phải
-                            if 200 < cy < 1600:
+                            if 200 < cy < max(1600, int(_h * 0.85)):
                                 coords = (cx, cy)
                                 print(f"[Device {device_id[:6]}] Tìm thấy nút/thẻ Shop '{val}' tại ({cx}, {cy}).")
                                 break
@@ -5540,8 +5542,9 @@ class ADBController:
                             x1, y1, x2, y2 = map(int, m.groups())
                             cy = (y1 + y2) // 2
                             cx = (x1 + x2) // 2
+                            _w, _h = self.get_effective_screen_size(device_id)
                             # Ô tìm kiếm trong Shop luôn nằm ở vùng thanh tiêu đề đỉnh (y < 200)
-                            if 30 < cy < 200:
+                            if 30 < cy < max(200, int(_h * 0.12)):
                                 coords = (cx, cy)
                                 print(f"[Device {device_id[:6]}] Phát hiện ô tìm kiếm trong Shop tại ({cx}, {cy}).")
                                 break
@@ -6516,9 +6519,11 @@ class ADBController:
                 if not match:
                     continue
                 x1, y1, x2, y2 = map(int, match.groups())
+                cx = (x1 + x2) // 2
                 cy = (y1 + y2) // 2
-                if cy < 300:
-                    return (x1 + x2) // 2, cy
+                width, height = self.get_effective_screen_size(device_id)
+                if cy < max(300, int(height * 0.15)) and cx >= int(width * 0.65):
+                    return cx, cy
             return None
         except (OSError, ET.ParseError):
             return None
@@ -6646,7 +6651,7 @@ class ADBController:
 
                 x1, y1, x2, y2 = map(int, match.groups())
                 cy = (y1 + y2) // 2
-                if cy > 350:
+                if cy > max(350, int(_height * 0.16)):
                     continue
                 # Nút ba chấm nằm sát mép phải và cũng có thể chứa chữ
                 # "search" trong resource-id. Ô nhập thật luôn bắt đầu ở nửa
@@ -7069,14 +7074,17 @@ class ADBController:
             text = self._normalize_tiktok_text(
                 f"{elem.get('text', '')} {elem.get('content-desc', '')}"
             )
+            screen_width, screen_height = self.get_effective_screen_size(device_id)
+            top_bar_y_max = max(320, int(screen_height * 0.18))
+            top_bar_y_min = max(180, int(screen_height * 0.10))
             bounds_match = re.match(
                 r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
                 elem.get("bounds", ""),
             )
             in_top_search_bar = bool(
                 bounds_match
-                and int(bounds_match.group(2)) < 180
-                and int(bounds_match.group(4)) <= 320
+                and int(bounds_match.group(2)) < top_bar_y_min
+                and int(bounds_match.group(4)) <= top_bar_y_max
                 and (
                     "textview" in class_name
                     or elem.get("clickable", "").casefold() == "true"
@@ -7111,7 +7119,7 @@ class ADBController:
                         bounds_node.get("bounds", ""),
                     )
                     bounds_node = parent_map.get(bounds_node)
-                if match and int(match.group(2)) >= 180:
+                if match and int(match.group(2)) >= max(180, int(screen_height * 0.09)):
                     result_content_seen = True
 
         return query_matches and (
@@ -7379,6 +7387,7 @@ class ADBController:
             "anh", "video", "nguoi dung", "tai khoan", "am thanh", "cua hang", "dia diem",
         )
 
+        parent_map = {child: parent for parent in root.iter() for child in parent}
         for elem in root.iter():
             text_raw = (elem.get("text") or "").strip()
             desc_raw = (elem.get("content-desc") or "").strip()
@@ -7395,7 +7404,16 @@ class ADBController:
 
             detected_tab_ys.append((y1 + y2) // 2)
 
-            selected = (elem.get("selected") or "").lower() == "true"
+            # Kiểm tra trạng thái selected trên chính node hoặc container cha
+            elem_selected = (elem.get("selected") or "").lower() == "true" or (elem.get("checked") or "").lower() == "true"
+            curr = elem
+            for _ in range(4):
+                if curr is None:
+                    break
+                if (curr.get("selected") or "").lower() == "true" or (curr.get("checked") or "").lower() == "true":
+                    elem_selected = True
+                    break
+                curr = parent_map.get(curr)
 
             # Phát hiện tab Hỏi (Ask AI) nằm bên trái tab Top
             if norm_t in ("hoi", "ask") or norm_d in ("hoi", "ask"):
@@ -7413,7 +7431,7 @@ class ADBController:
             if is_top:
                 top_elem = elem
                 top_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                if selected:
+                if elem_selected:
                     top_selected = True
 
             is_other = any(
@@ -7422,7 +7440,7 @@ class ADBController:
             )
             if is_other:
                 any_other_tab_detected = True
-            if selected and is_other:
+            if elem_selected and is_other:
                 other_tab_selected = elem
                 other_tab_name = text_raw or desc_raw
 
@@ -7578,10 +7596,11 @@ class ADBController:
                     int(clickable_bounds.group(4)) - int(clickable_bounds.group(2))
                     if clickable_bounds else 0
                 )
+                card_height_threshold = max(360, int(screen_height * 0.18))
                 compact_identity_card = bool(
-                    inferred_identity_coords or (clickable_bounds and card_height <= 360)
+                    inferred_identity_coords or (clickable_bounds and card_height <= card_height_threshold)
                 )
-                clickable_is_too_broad = bool(clickable_bounds and card_height > 360)
+                clickable_is_too_broad = bool(clickable_bounds and card_height > card_height_threshold)
                 if (
                     identity_coords
                     and (
@@ -7762,8 +7781,9 @@ class ADBController:
             coords = self._element_center(target_elem)
             if not coords or not (int(height * 0.25) < coords[1] < int(height * 0.90)):
                 return
+            dedup_dist = max(30, int(width * 0.04))
             for idx, (old_pinned, (ex, ey)) in enumerate(raw_items):
-                if abs(coords[0] - ex) < 30 and abs(coords[1] - ey) < 30:
+                if abs(coords[0] - ex) < dedup_dist and abs(coords[1] - ey) < dedup_dist:
                     if not old_pinned and is_tile_pinned(target_elem, coords):
                         raw_items[idx] = (True, (ex, ey))
                     return
@@ -8031,12 +8051,13 @@ class ADBController:
         return False
 
     def _extract_tiktok_clip_interaction_state(self, root, width, height):
-        """Trích xuất chữ ký nội dung clip (content_sig), trạng thái Đã thả tim (ui_liked) và Đã lưu Bookmark (ui_bookmarked) từ UI TikTok."""
+        """Trích xuất chữ ký nội dung clip (content_sig), trạng thái Đã thả tim (ui_liked), Đã lưu Bookmark (ui_bookmarked) và tọa độ DOM các nút tương tác từ UI TikTok."""
         if root is None:
-            return None, False, False
+            return None, False, False, {}
 
         ui_liked = False
         ui_bookmarked = False
+        button_coords = {}
         caption_parts = []
 
         for elem in root.iter():
@@ -8061,12 +8082,13 @@ class ADBController:
                 or elem.get("checked", "").lower() == "true"
             )
 
-            # 1. Cột nút tương tác bên phải (x >= 72% bề ngang màn hình)
-            if cx >= int(width * 0.72) and int(height * 0.30) <= cy <= int(height * 0.88):
+            # 1. Cột nút tương tác bên phải (x >= 70% bề ngang màn hình, y từ 28% đến 92%)
+            if cx >= int(width * 0.70) and int(height * 0.28) <= cy <= int(height * 0.92):
                 if any(
                     k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
                     for k in ("like", "thích", "thich", "heart", "tim")
                 ):
+                    button_coords["like"] = (cx, cy)
                     if is_selected or any(
                         k in desc or k in txt or k in norm_desc or k in norm_txt
                         for k in (
@@ -8080,6 +8102,7 @@ class ADBController:
                     k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
                     for k in ("bookmark", "lưu", "luu", "yêu thích", "yeu thich", "favorite", "collect", "save")
                 ):
+                    button_coords["bookmark"] = (cx, cy)
                     if is_selected or any(
                         k in desc or k in txt or k in norm_desc or k in norm_txt
                         for k in (
@@ -8088,6 +8111,18 @@ class ADBController:
                         )
                     ):
                         ui_bookmarked = True
+
+                if any(
+                    k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
+                    for k in ("comment", "bình luận", "binh luan")
+                ):
+                    button_coords["comment"] = (cx, cy)
+
+                if any(
+                    k in desc or k in txt or k in rid or k in norm_desc or k in norm_txt
+                    for k in ("share", "chia sẻ", "chia se")
+                ):
+                    button_coords["share"] = (cx, cy)
 
             # 2. Vùng mô tả/caption bên trái phía dưới để tạo chữ ký bài đăng cố định
             elif cx < int(width * 0.72) and int(height * 0.50) <= cy <= int(height * 0.90):
@@ -8108,7 +8143,7 @@ class ADBController:
             combined = " ".join(caption_parts[:4])
             content_sig = "tt_post_" + hashlib.md5(combined.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
-        return content_sig, ui_liked, ui_bookmarked
+        return content_sig, ui_liked, ui_bookmarked, button_coords
 
     def perform_tiktok_micro_interactions(
         self,
@@ -8126,6 +8161,7 @@ class ADBController:
         content_sig = None
         ui_liked = False
         ui_bookmarked = False
+        button_coords = {}
 
         like_rate = (
             max(config.INTERACTION_LIKE_RATE, getattr(config, "TIKTOK_NEWEST_LIKE_RATE", 0.90))
@@ -8149,15 +8185,17 @@ class ADBController:
         )
 
         def ensure_ui_state():
-            nonlocal ui_checked, content_sig, ui_liked, ui_bookmarked
+            nonlocal ui_checked, content_sig, ui_liked, ui_bookmarked, button_coords
             if not ui_checked:
                 ui_checked = True
                 try:
                     root = self._get_tiktok_ui_root(device_id, "tt_micro")
                     if root is not None:
-                        content_sig, ui_liked, ui_bookmarked = (
-                            self._extract_tiktok_clip_interaction_state(root, width, height)
-                        )
+                        state_res = self._extract_tiktok_clip_interaction_state(root, width, height)
+                        if len(state_res) == 4:
+                            content_sig, ui_liked, ui_bookmarked, button_coords = state_res
+                        else:
+                            content_sig, ui_liked, ui_bookmarked = state_res[:3]
                 except Exception:
                     pass
 
@@ -8245,8 +8283,12 @@ class ADBController:
                         f"[TikTok Vi tương tác] ⏭️ Clip '{content_sig or clip_signature}' đã lưu Bookmark trước đây • Bỏ qua, tránh mất Bookmark.",
                     )
             else:
-                bm_x = int(width * 0.91) + random.randint(-10, 10)
-                bm_y = int(height * 0.74) + random.randint(-15, 15)
+                bm_coords = button_coords.get("bookmark") if button_coords else None
+                if bm_coords:
+                    bm_x, bm_y = bm_coords
+                else:
+                    bm_x = int(width * 0.91) + random.randint(-10, 10)
+                    bm_y = int(height * 0.74) + random.randint(-15, 15)
                 self.tap(device_id, bm_x, bm_y)
                 if clip_signature:
                     interaction_tracker.record_interaction(
@@ -8265,8 +8307,13 @@ class ADBController:
 
         # 3. Chia sẻ ➔ Copy Link (Kích hoạt đề xuất Viral)
         if random.random() < share_rate:
-            share_x = int(width * 0.91) + random.randint(-10, 10)
-            share_y = int(height * 0.84) + random.randint(-15, 15)
+            ensure_ui_state()
+            share_coords = button_coords.get("share") if button_coords else None
+            if share_coords:
+                share_x, share_y = share_coords
+            else:
+                share_x = int(width * 0.91) + random.randint(-10, 10)
+                share_y = int(height * 0.84) + random.randint(-15, 15)
             self.tap(device_id, share_x, share_y)
             time.sleep(1.2)
             # Bấm icon Copy Link
@@ -8286,8 +8333,13 @@ class ADBController:
 
         # 4. Đọc bình luận (Tăng Dwell Time) - Chỉ mở xem lướt 1.5-2.5s rồi ĐÓNG NGAY, tuyệt đối không gửi bình luận
         if random.random() < comment_rate:
-            cm_x = int(width * 0.92)
-            cm_y = int(height * 0.63)
+            ensure_ui_state()
+            cm_coords = button_coords.get("comment") if button_coords else None
+            if cm_coords:
+                cm_x, cm_y = cm_coords
+            else:
+                cm_x = int(width * 0.92)
+                cm_y = int(height * 0.63)
             self.tap(device_id, cm_x, cm_y)
             time.sleep(random.uniform(1.8, 2.5))
             
