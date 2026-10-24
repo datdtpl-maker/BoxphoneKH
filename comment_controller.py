@@ -280,11 +280,12 @@ def wait_for_tiktok_video_ready(
             except Exception:
                 pass
 
-# Cho video ổn định ít nhất 5s để các máy cấu hình thấp load xong
-        if elapsed >= 5:
-            time.sleep(0.5)
-            log("✅ Giao diện video TikTok đã sẵn sàng!")
-            return True
+        # Cho video ổn định nhanh để tương tác ngay, chống trôi sang video khác
+        if elapsed >= 2:
+            if hasattr(adb, "is_tiktok_in_foreground") and adb.is_tiktok_in_foreground(device_id):
+                time.sleep(0.4)
+                log("✅ Giao diện video TikTok đã sẵn sàng!")
+                return True
 
         time.sleep(1.0)
 
@@ -1315,16 +1316,11 @@ def post_tiktok_comment(
                 can_retry=False,
             )
 
-        # 4. Dwell time: Xem video tự nhiên (KHÔNG SWIPE DỌC)
-        dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
-        log(f"Đang xem video tự nhiên trong {dwell_target}s trước khi bình luận...")
-        for remaining in range(dwell_target, 0, -1):
-            if is_cancelled and is_cancelled():
-                log("Dừng xem do người dùng yêu cầu.")
-                return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
-            if remaining % 4 == 0 or remaining <= 3:
-                log(f"Đang xem video ({remaining}s còn lại)...")
-            time.sleep(1.0)
+        # 4. Vào đúng link target: Tiến hành tương tác ngay lập tức chống trôi sang video khác
+        if dwell_time > 0:
+            time.sleep(min(1.0, float(dwell_time)))
+        else:
+            log("⚡ Vào đúng link target: Tiến hành tương tác ngay lập tức chống trôi sang video khác...")
 
         # 5. Xác định vị trí Like & Comment từ DOM
         like_info = ctrls.get("like")
@@ -1344,7 +1340,7 @@ def post_tiktok_comment(
         elif like_target:
             log(f"❤️ Tiến hành thả tim trước tại tọa độ DOM ({like_target[0]}, {like_target[1]})...")
             adb.tap(device_id, like_target[0], like_target[1])
-            time.sleep(random.uniform(1.0, 1.4))
+            time.sleep(random.uniform(0.4, 0.7))
         else:
             log("ℹ️ Không tìm thấy nút Like trên DOM • Bỏ qua bước thả tim an toàn, không bấm đoán.")
 

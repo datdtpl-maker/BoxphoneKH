@@ -1320,9 +1320,9 @@ class GUIApp(ctk.CTk):
 
         dwell_box = ctk.CTkFrame(time_row, fg_color="transparent")
         dwell_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(dwell_box, text="Xem tự nhiên trước cmt (giây):", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=muted).pack(anchor="w")
+        ctk.CTkLabel(dwell_box, text="Xem trước khi cmt (0s = tương tác ngay):", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=muted).pack(anchor="w")
         self.comment_dwell_entry = ctk.CTkEntry(dwell_box, font=body_font, height=32, corner_radius=8)
-        self.comment_dwell_entry.insert(0, "15")
+        self.comment_dwell_entry.insert(0, "0")
         self.comment_dwell_entry.pack(fill="x", pady=(2, 0))
 
         delay_box = ctk.CTkFrame(time_row, fg_color="transparent")
@@ -4809,9 +4809,9 @@ class GUIApp(ctk.CTk):
             return
 
         try:
-            dwell_time = max(5, int(self.comment_dwell_entry.get().strip()))
+            dwell_time = max(0, int(self.comment_dwell_entry.get().strip()))
         except ValueError:
-            dwell_time = 15
+            dwell_time = 0
 
         try:
             delay_between = max(2, int(self.comment_delay_entry.get().strip()))
