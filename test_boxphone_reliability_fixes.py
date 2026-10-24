@@ -150,7 +150,7 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
                 1920,
                 timeout=1.0,
             )
-            self.assertEqual(outcome, comment_controller.TaskOutcome.RETRYABLE_ERROR)
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
 
     def test_verify_tiktok_comment_posted_success_when_new(self):
         """Xác minh thành công khi bình luận mới xuất hiện trong stream và EditText đã sạch."""
@@ -458,6 +458,161 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
         )
 
         self.assertEqual(peak, 1)
+
+
+    # ==========================================================================
+    # TIÊU CHÍ NÂNG CAO 2, 3, 4, 5: XÁC MINH GỬI, BẢO VỆ TARGET & CHẶN AUDIT TRAIL
+    # ==========================================================================
+
+    def test_verify_comment_rejects_prior_duplicate_comment(self):
+        """Bình luận cũ đã có trên màn hình trước khi gửi (prior_stream) không được tính là thành công."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node class='android.widget.TextView' text='bình luận mẫu' />
+          <node class='android.widget.EditText' text='Thêm bình luận...' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        with patch("ui_automator_dom.dump_ui_tree", return_value=mock_root):
+            # prior_stream đã có 'bình luận mẫu' -> không thể coi đây là cmt mới gửi
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb, self.device_id, "bình luận mẫu", 1080, 1920, timeout=1.0, prior_stream={"bình luận mẫu"}
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_verify_comment_rejects_substring_partial_match(self):
+        """Text trên màn hình chỉ chứa chuỗi con không được coi là bình luận đã gửi thành công."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node class='android.widget.TextView' text='Hôm nay trời rất bình luận mẫu và đẹp' />
+          <node class='android.widget.EditText' text='' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        with patch("ui_automator_dom.dump_ui_tree", return_value=mock_root):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb, self.device_id, "bình luận mẫu", 1080, 1920, timeout=1.0
+            )
+            # Khớp chuỗi con -> không tính -> UNKNOWN_OUTCOME
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_verify_comment_ignores_keyboard_candidate_suggestions(self):
+        """Gợi ý bàn phím (IME candidates/suggestions) chứa text bình luận không được coi là đã gửi."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node package='com.google.android.inputmethod.latin' resource-id='candidate_view' text='bình luận mẫu' />
+          <node class='android.widget.EditText' text='' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        with patch("ui_automator_dom.dump_ui_tree", return_value=mock_root):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb, self.device_id, "bình luận mẫu", 1080, 1920, timeout=1.0
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_verify_comment_cleared_input_without_stream_returns_unknown(self):
+        """Ô nhập trống nhưng không thấy text trên stream bình luận thì trả về UNKNOWN_OUTCOME chứ không báo SUCCESS."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node class='android.widget.EditText' text='Thêm bình luận...' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        with patch("ui_automator_dom.dump_ui_tree", return_value=mock_root):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb, self.device_id, "bình luận mẫu", 1080, 1920, timeout=1.0
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_verify_comment_server_lag_or_timeout_returns_unknown_not_retryable(self):
+        """Server phản hồi chậm / timeout sau khi gửi: trả về UNKNOWN_OUTCOME và không cho phép retry tự động."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node class='android.widget.EditText' text='bình luận mẫu' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        with patch("ui_automator_dom.dump_ui_tree", return_value=mock_root):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb, self.device_id, "bình luận mẫu", 1080, 1920, timeout=1.0
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_post_comment_without_send_button_fails_cleanly_without_enter(self):
+        """Khi DOM không có nút gửi bình luận, hệ thống báo UNSUPPORTED_UI và tuyệt đối không gửi Enter KeyEvent 66."""
+        with patch.object(self.adb, "execute_adb", return_value=(0, "mInputShown=true", "")) as mock_adb:
+            with patch("ui_automator_dom.find_tiktok_video_controls", return_value={"like": None, "comment": {"center": (1000, 1100)}}):
+                with patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True):
+                    with patch("comment_controller.find_comment_input_coords", return_value=(500, 1800)):
+                        with patch("comment_controller.ensure_comment_input_ready", return_value=True):
+                            with patch("comment_controller.find_send_button_coords", return_value=None):
+                                res = comment_controller.post_tiktok_comment(
+                                    self.adb, self.device_id, "https://www.tiktok.com/@test/video/1", "Test cmt", dwell_time=1
+                                )
+                                self.assertEqual(res.outcome, comment_controller.TaskOutcome.UNSUPPORTED_UI)
+                                self.assertFalse(res.can_retry)
+                                # Đảm bảo không có lệnh gửi keyevent 66 (Enter)
+                                for call in mock_adb.call_args_list:
+                                    args = call[0][1] if len(call[0]) > 1 else []
+                                    self.assertNotIn("66", args)
+
+    def test_target_error_state_fails_early_before_clicking(self):
+        """Màn hình video bị xóa hoặc không khả dụng: phát hiện qua DOM và trả về FATAL_ERROR ngay lập tức."""
+        import xml.etree.ElementTree as ET
+        xml_dom = """<hierarchy>
+          <node class='android.widget.TextView' text='Video không khả dụng' />
+        </hierarchy>"""
+        mock_root = ET.fromstring(xml_dom)
+        err = comment_controller.check_target_error_state(mock_root, "TikTok")
+        self.assertIsNotNone(err)
+        self.assertIn("không khả dụng", err)
+
+    def test_blocked_pending_audit_prevents_dispatch_across_restart(self):
+        """Tác vụ đang ở trạng thái PENDING_AUDIT phải bị chặn không cho dispatch kể cả khi restart tool."""
+        # 1. Ghi nhận tác vụ vào audit trail
+        comment_controller.record_unknown_comment_audit(
+            platform="TikTok",
+            device_id="dev-audit-1",
+            url="https://tiktok.com/@test/video/999",
+            content="Nội dung nguy cơ gửi lặp",
+            reason="Mất mạng sau khi gửi",
+        )
+        # 2. Xây dựng task execution
+        tasks = comment_controller.build_execution_tasks(
+            scanned_tasks=[],
+            platform="TikTok",
+            url="https://tiktok.com/@test/video/999",
+            comment_lines=["Nội dung nguy cơ gửi lặp", "Câu bình luận hợp lệ khác"],
+        )
+        self.assertEqual(len(tasks), 2)
+        # Task 1 phải bị chặn
+        self.assertTrue(getattr(tasks[0], "is_blocked", False))
+        self.assertIn("PENDING_AUDIT", getattr(tasks[0], "block_reason", ""))
+        # Task 2 bình thường
+        self.assertFalse(getattr(tasks[1], "is_blocked", False))
+
+        # 3. execute_comment_task cũng phải từ chối ngay lập tức
+        res = comment_controller.execute_comment_task(
+            self.adb,
+            "dev-audit-1",
+            "TikTok",
+            "https://tiktok.com/@test/video/999",
+            "Nội dung nguy cơ gửi lặp",
+        )
+        self.assertEqual(res.outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+        self.assertFalse(res.can_retry)
+        self.assertIn("chặn", res.message.lower())
+
+    def test_audit_trail_resolution_workflow(self):
+        """Quy trình đối soát: chuyển trạng thái từ PENDING_AUDIT sang RESOLVED_SUCCESS giải phóng khóa chặn."""
+        url = "https://tiktok.com/@test/video/resolved_test"
+        content = "Nội dung đối soát xong"
+        comment_controller.record_unknown_comment_audit("TikTok", "dev-1", url, content)
+        self.assertTrue(comment_controller.is_comment_blocked_by_audit("TikTok", url, content))
+
+        # Đối soát thủ công thành công
+        resolved = comment_controller.resolve_unknown_comment_audit(
+            "TikTok", url, content, "RESOLVED_SUCCESS", note="Đã kiểm tra tay thấy comment đã lên"
+        )
+        self.assertTrue(resolved)
+        # Sau khi resolved, không còn bị chặn PENDING_AUDIT nữa
+        self.assertFalse(comment_controller.is_comment_blocked_by_audit("TikTok", url, content))
 
 
 if __name__ == "__main__":

@@ -4917,6 +4917,12 @@ class GUIApp(ctk.CTk):
                     print("[GUI] Tác vụ bình luận đã bị hủy.")
                     break
 
+                if getattr(task, "is_blocked", False):
+                    self.log_message(
+                        f"⛔ [Bỏ qua STT {task.stt}] {getattr(task, 'block_reason', 'Tác vụ đang chờ đối soát.')}"
+                    )
+                    continue
+
                 device_id = devices[idx % total_devs]
                 device_name = main.get_device_name(device_id)
 

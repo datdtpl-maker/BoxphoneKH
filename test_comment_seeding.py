@@ -477,10 +477,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
 
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (0, "", "")
-        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.925))
-        # like_cy = 950, bm_cy = 1310 -> mid = (950 + 1310) // 2 = 1130
-        self.assertEqual(y, 1130)
+        coords = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertIsNone(coords)
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
@@ -516,9 +514,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
 
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (0, "", "")
-        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, 1000)
-        self.assertEqual(y, target_y)
+        coords = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertIsNone(coords)
 
     @patch("time.sleep", return_value=None)
     def test_wait_for_tiktok_video_ready(self, _sleep):

@@ -59,8 +59,9 @@ def is_bounds_visible_on_screen(
 def dump_ui_tree(adb, device_id: str, timeout: int = 5) -> Optional[ET.Element]:
     """Trích xuất và nạp cây UI Automator XML trực tiếp từ thiết bị serial tương ứng."""
     safe_dev = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
-    remote_xml = f"/sdcard/dump_dom_{safe_dev}.xml"
-    local_xml = os.path.join(tempfile.gettempdir(), f"dump_dom_{safe_dev}.xml")
+    token = f"{safe_dev}_{int(time.time() * 1000)}"
+    remote_xml = f"/sdcard/dump_dom_{token}.xml"
+    local_xml = os.path.join(tempfile.gettempdir(), f"dump_dom_{token}.xml")
 
     try:
         if os.path.exists(local_xml):
