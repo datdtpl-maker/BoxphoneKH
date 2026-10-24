@@ -495,6 +495,92 @@ def find_tiktok_comment_icon_via_template(
     return None
 
 
+import json
+from datetime import datetime
+
+UNKNOWN_AUDIT_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "unknown_comment_audit.json"
+)
+
+def record_unknown_comment_audit(
+    platform: str,
+    device_id: str,
+    url: str,
+    content: str,
+    reason: str = "Chưa đủ bằng chứng xác nhận bình luận hiển thị",
+) -> dict:
+    """Lưu vết các tác vụ có kết quả UNKNOWN_OUTCOME vào file audit bền vững để đối soát thủ công."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "platform": platform,
+        "device_id": device_id,
+        "url": url,
+        "content": content,
+        "reason": reason,
+        "status": "PENDING_AUDIT",
+    }
+    entries = []
+    if os.path.exists(UNKNOWN_AUDIT_FILE):
+        try:
+            with open(UNKNOWN_AUDIT_FILE, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+                if not isinstance(entries, list):
+                    entries = []
+        except Exception:
+            entries = []
+
+    exists = any(
+        e.get("url") == url and e.get("content") == content and e.get("status") == "PENDING_AUDIT"
+        for e in entries
+    )
+    if not exists:
+        entries.append(entry)
+        try:
+            with open(UNKNOWN_AUDIT_FILE, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return entry
+
+def is_comment_in_pending_audit(platform: str, url: str, content: str) -> bool:
+    """Kiểm tra xem tác vụ bình luận này có đang nằm trong danh sách cần đối soát hay không."""
+    if not os.path.exists(UNKNOWN_AUDIT_FILE):
+        return False
+    try:
+        with open(UNKNOWN_AUDIT_FILE, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+            if not isinstance(entries, list):
+                return False
+            c_plat = (platform or "").strip().casefold()
+            c_url = (url or "").strip()
+            c_text = (content or "").strip()
+            return any(
+                e.get("status") == "PENDING_AUDIT"
+                and (e.get("platform", "").strip().casefold() == c_plat)
+                and (e.get("url", "").strip() == c_url)
+                and (e.get("content", "").strip() == c_text)
+                for e in entries
+            )
+    except Exception:
+        return False
+
+def extract_stream_comments(root) -> set[str]:
+    """Trích xuất tất cả các đoạn text bình luận đang hiển thị trên stream."""
+    res = set()
+    if root is None:
+        return res
+    for elem in root.iter():
+        cls_name = (elem.get("class") or "").casefold()
+        if "edittext" not in cls_name:
+            txt = (elem.get("text") or "").strip().casefold()
+            desc = (elem.get("content-desc") or "").strip().casefold()
+            if txt and len(txt) > 1:
+                res.add(txt)
+            if desc and len(desc) > 1:
+                res.add(desc)
+    return res
+
+
 def find_tiktok_comment_icon_coords(
     adb, device_id: str, width: int, height: int
 ) -> tuple[int, int]:
@@ -599,9 +685,8 @@ def find_tiktok_comment_icon_coords(
             except Exception:
                 pass
 
-    # 3. Tọa độ chuẩn hiệu chuẩn thực tế:
-    # Mặc định ưu tiên Layout B (y = 57.5%, tương ứng máy S5) để không bao giờ chạm vào nút Bookmark ở 64%!
-    return int(width * 0.925), int(height * 0.643)
+    # Tuyệt đối không tự bịa tọa độ khi không nhận diện được icon bình luận TikTok
+    return None
 
 
 def is_tiktok_comment_sheet_open(adb, device_id: str, height: int) -> bool:
@@ -772,15 +857,8 @@ def find_comment_input_coords(
             except Exception:
                 pass
 
-    if is_tiktok:
-        # Tọa độ ô nhập "Thêm bình luận..." trên bottom sheet TikTok:
-        # x = 45% (ở giữa thanh nhập, né avatar bên trái và icon bên phải)
-        # y = 96.2% (tâm thanh input bar sát đáy màn hình của comment sheet)
-        return int(width * 0.450), int(height * 0.962)
-    else:
-        # Tọa độ ô nhập Facebook (Image 3: "Bình luận dưới tên..."):
-        # x = 40.0%, y = 92.7% (ở giữa thanh nhập, ngay trên bàn phím)
-        return int(width * 0.400), int(height * 0.927)
+    # Tuyệt đối không trả về tọa độ tỷ lệ cố định nếu không nhận diện được ô nhập
+    return None
 
 
 def ensure_comment_input_ready(
@@ -793,35 +871,57 @@ def ensure_comment_input_ready(
     status_callback=None,
 ) -> bool:
     """Chạm vào ô nhập, bật bàn phím XwIME và xóa sạch text/emoji thừa để sẵn sàng gõ."""
+    if input_x is None or input_y is None or input_x <= 0 or input_y <= 0:
+        return False
+
     if hasattr(adb, "ensure_ime"):
         try:
             adb.ensure_ime(device_id)
         except Exception:
             pass
 
-    # Danh sách các điểm chạm ưu tiên trên thanh ô nhập để kích hoạt bàn phím chắc chắn 100%
+    # Chỉ thử các điểm lân cận hợp lý quanh tọa độ ô nhập thực tế đã nhận diện
     candidates = [
         (input_x, input_y),
-        (input_x, int(input_y - height * 0.012)),
-        (input_x, int(input_y + height * 0.012)),
-        (int(width * 0.450), int(height * 0.962)),
+        (input_x, max(0, int(input_y - height * 0.012))),
+        (input_x, min(height - 1, int(input_y + height * 0.012))),
     ]
 
-    for idx, (tx, ty) in enumerate(candidates):
+    is_ready = False
+    for tx, ty in candidates:
         adb.tap(device_id, tx, ty)
         time.sleep(0.8)
 
-        # Kiểm tra xem ô nhập / bàn phím đã bật lên chưa
+        # 1. Kiểm tra qua dumpsys input_method
         code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
-        is_shown = "minputshown=true" in (out or "").casefold()
-        if not is_shown:
-            _, win_out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
-            is_shown = any(w in (win_out or "").casefold() for w in ("minputshown=true", "mhasfocus=true", "currentfocus"))
-
-        if is_shown:
+        out_cf = (out or "").casefold()
+        if "minputshown=true" in out_cf or "minputviewstarted=true" in out_cf:
+            is_ready = True
             break
-        if idx == 0 and (tx, ty) != candidates[1]:
-            continue
+
+        # 2. Kiểm tra qua dumpsys window (mInputShown)
+        _, win_out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "window", "windows"])
+        win_cf = (win_out or "").casefold()
+        if "minputshown=true" in win_cf:
+            is_ready = True
+            break
+
+        # 3. Kiểm tra DOM xem EditText có focused="true" không
+        try:
+            root = ui_automator_dom.dump_ui_tree(adb, device_id, timeout=2)
+            if root is not None:
+                for elem in root.iter():
+                    if "edittext" in (elem.get("class") or "").casefold():
+                        if elem.get("focused", "").casefold() == "true":
+                            is_ready = True
+                            break
+            if is_ready:
+                break
+        except Exception:
+            pass
+
+    if not is_ready:
+        return False
 
     # Đảm bảo xóa sạch 100% text hoặc emoji cũ/vô tình dán trong ô nhập trước khi gõ nội dung từ Notion
     try:
@@ -845,18 +945,20 @@ def verify_tiktok_comment_posted(
     width: int,
     height: int,
     timeout: float = 4.0,
+    prior_stream: Optional[set[str]] = None,
 ) -> TaskOutcome:
     """Xác minh bình luận TikTok đã được đăng thành công bằng bằng chứng cụ thể trên UI.
 
     Kiểm tra:
     1. Thông báo lỗi hoặc dialog cảnh báo (vi phạm, bị chặn, bình luận quá nhanh).
-    2. Comment text có xuất hiện trong danh sách hiển thị bình luận hay không.
+    2. Comment text có xuất hiện trong danh sách hiển thị bình luận hay không (khớp chính xác, không trùng bình luận cũ).
     3. Ô nhập EditText có được xóa sạch (cleared) sau khi gửi hay không.
     """
     clean_target = (comment_text or "").strip().casefold()
     if not clean_target:
         return TaskOutcome.UNKNOWN_OUTCOME
 
+    prior = set(prior_stream or ())
     start_time = time.time()
     while time.time() - start_time < timeout:
         root = ui_automator_dom.dump_ui_tree(adb, device_id)
@@ -880,30 +982,39 @@ def verify_tiktok_comment_posted(
             # 2. Tìm comment text trong danh sách bình luận
             found_in_stream = False
             edit_text_cleared = False
+            edit_text_still_has_target = False
+
             for elem in root.iter():
                 cls_name = (elem.get("class") or "").casefold()
                 txt = (elem.get("text") or "").strip()
                 desc = (elem.get("content-desc") or "").strip()
+                txt_cf = txt.casefold()
+                desc_cf = desc.casefold()
 
                 if "edittext" in cls_name:
-                    if not txt or any(
-                        p in txt.casefold()
+                    if clean_target in txt_cf:
+                        edit_text_still_has_target = True
+                        edit_text_cleared = False
+                    elif not txt or any(
+                        p in txt_cf
                         for p in ("thêm bình luận", "add comment", "viết bình luận")
                     ):
                         edit_text_cleared = True
-                    elif clean_target in txt.casefold():
-                        edit_text_cleared = False
 
                 if "edittext" not in cls_name:
-                    if clean_target in txt.casefold() or clean_target in desc.casefold():
-                        found_in_stream = True
-                        break
+                    # Trùng khớp chính xác nội dung bình luận
+                    if txt_cf == clean_target or desc_cf == clean_target:
+                        if not prior or txt_cf not in prior:
+                            found_in_stream = True
 
-            if found_in_stream:
+            if found_in_stream and (edit_text_cleared or not edit_text_still_has_target):
                 return TaskOutcome.SUCCESS
 
+            if edit_text_still_has_target and (time.time() - start_time > timeout - 1.0):
+                return TaskOutcome.RETRYABLE_ERROR
+
             if edit_text_cleared:
-                time.sleep(1.0)
+                time.sleep(0.5)
                 continue
 
         time.sleep(0.8)
@@ -918,12 +1029,14 @@ def verify_facebook_comment_posted(
     width: int,
     height: int,
     timeout: float = 4.0,
+    prior_stream: Optional[set[str]] = None,
 ) -> TaskOutcome:
     """Xác minh bình luận Facebook đã được đăng thành công bằng bằng chứng cụ thể trên UI."""
     clean_target = (comment_text or "").strip().casefold()
     if not clean_target:
         return TaskOutcome.UNKNOWN_OUTCOME
 
+    prior = set(prior_stream or ())
     start_time = time.time()
     while time.time() - start_time < timeout:
         root = ui_automator_dom.dump_ui_tree(adb, device_id)
@@ -944,30 +1057,38 @@ def verify_facebook_comment_posted(
 
             found_in_stream = False
             edit_text_cleared = False
+            edit_text_still_has_target = False
+
             for elem in root.iter():
                 cls_name = (elem.get("class") or "").casefold()
                 txt = (elem.get("text") or "").strip()
                 desc = (elem.get("content-desc") or "").strip()
+                txt_cf = txt.casefold()
+                desc_cf = desc.casefold()
 
                 if "edittext" in cls_name:
-                    if not txt or any(
-                        p in txt.casefold()
+                    if clean_target in txt_cf:
+                        edit_text_still_has_target = True
+                        edit_text_cleared = False
+                    elif not txt or any(
+                        p in txt_cf
                         for p in ("viết bình luận", "bình luận dưới tên", "write a comment")
                     ):
                         edit_text_cleared = True
-                    elif clean_target in txt.casefold():
-                        edit_text_cleared = False
 
                 if "edittext" not in cls_name:
-                    if clean_target in txt.casefold() or clean_target in desc.casefold():
-                        found_in_stream = True
-                        break
+                    if txt_cf == clean_target or desc_cf == clean_target:
+                        if not prior or txt_cf not in prior:
+                            found_in_stream = True
 
-            if found_in_stream:
+            if found_in_stream and (edit_text_cleared or not edit_text_still_has_target):
                 return TaskOutcome.SUCCESS
 
+            if edit_text_still_has_target and (time.time() - start_time > timeout - 1.0):
+                return TaskOutcome.RETRYABLE_ERROR
+
             if edit_text_cleared:
-                time.sleep(1.0)
+                time.sleep(0.5)
                 continue
 
         time.sleep(0.8)
@@ -1002,9 +1123,10 @@ def post_tiktok_comment(
         return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
     width, height = adb.get_effective_screen_size(device_id)
-    target_channel = ui_automator_dom.extract_tiktok_channel_from_url(url)
-    target_video_id = extract_tiktok_video_id(url)
-    item_key = target_video_id or target_channel or url
+    canonical_url = resolve_canonical_url(url)
+    target_channel = ui_automator_dom.extract_tiktok_channel_from_url(canonical_url) or ui_automator_dom.extract_tiktok_channel_from_url(url)
+    target_video_id = extract_tiktok_video_id(canonical_url) or extract_tiktok_video_id(url)
+    item_key = target_video_id or target_channel or canonical_url or url
 
     # 0. Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm
     log("Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm...")
@@ -1056,30 +1178,45 @@ def post_tiktok_comment(
         ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
         dom_channel = ctrls.get("channel_name", "")
 
-        target_verified = True
+        target_verified = False
         if target_channel:
             if dom_channel:
-                if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                if ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                    target_verified = True
+                else:
                     log(f"⚠️ Video đang phát ('{dom_channel}') chưa khớp Kênh mục tiêu ('{target_channel}') • Mở lại Intent...")
                     open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
                     time.sleep(2.5)
                     root = ui_automator_dom.dump_ui_tree(adb, device_id)
                     ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
                     dom_channel = ctrls.get("channel_name", "")
-                    if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                    if ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                        target_verified = True
+                    else:
                         log(f"❌ Kênh trên thiết bị ('{dom_channel}') không khớp với kênh mục tiêu ('{target_channel}')!")
-                        target_verified = False
             else:
-                # Nếu không đọc được tên kênh, kiểm tra xem có video player hoặc nút like/comment không
-                if not ctrls.get("like") and not ctrls.get("comment"):
+                if ctrls.get("like") or ctrls.get("comment"):
+                    target_verified = True
+                else:
                     log("⚠️ Không nhận diện được giao diện video mục tiêu • Thử nạp lại Intent...")
                     open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
                     time.sleep(2.5)
                     root = ui_automator_dom.dump_ui_tree(adb, device_id)
                     ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
-                    if not ctrls.get("like") and not ctrls.get("comment"):
+                    if ctrls.get("like") or ctrls.get("comment"):
+                        target_verified = True
+                    else:
                         log("❌ Không đủ bằng chứng giao diện video mục tiêu!")
-                        target_verified = False
+        else:
+            if ctrls.get("like") or ctrls.get("comment"):
+                target_verified = True
+            else:
+                open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+                time.sleep(2.5)
+                root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+                if ctrls.get("like") or ctrls.get("comment"):
+                    target_verified = True
 
         if not target_verified:
             return CommentTaskResult(
@@ -1167,8 +1304,14 @@ def post_tiktok_comment(
 
     # 8. Chạm vào ô nhập bình luận bằng DOM live
     log("Chạm vào ô nhập bình luận...")
-    input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
-    ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
+    input_target = find_comment_input_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
+    if not input_target:
+        log("❌ Không tìm thấy tọa độ ô nhập bình luận TikTok!")
+        return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không tìm thấy ô nhập bình luận TikTok", can_retry=True)
+    input_x, input_y = input_target
+    if not ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback):
+        log("❌ Không kích hoạt được ô nhập bình luận TikTok!")
+        return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không kích hoạt được ô nhập bình luận", can_retry=True)
     time.sleep(random.uniform(0.8, 1.2))
 
     # 9. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
@@ -1184,21 +1327,31 @@ def post_tiktok_comment(
     if is_cancelled and is_cancelled():
         return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
+    # Chụp snapshot comment stream trước khi bấm gửi để chống false positive
+    pre_send_root = ui_automator_dom.dump_ui_tree(adb, device_id)
+    prior_stream = extract_stream_comments(pre_send_root)
+
     # 10. Gửi bình luận: thực hiện duy nhất 1 phương thức phù hợp
     log("Tìm nút gửi bình luận...")
-    send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
-    if send_x and send_y:
+    send_target = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
+    if send_target:
+        send_x, send_y = send_target
         log(f"Chạm nút gửi TikTok tại ({send_x}, {send_y})...")
         adb.tap(device_id, send_x, send_y)
     else:
-        log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
-        adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+        code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
+        if "minputshown=true" in (out or "").casefold():
+            log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
+            adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+        else:
+            log("❌ Không tìm thấy nút gửi và ô nhập không có focus để gửi KeyEvent!")
+            return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không tìm thấy nút gửi bình luận", can_retry=True)
 
     time.sleep(random.uniform(2.0, 2.8))
 
     # 11. XÁC MINH KẾT QUẢ BÌNH LUẬN (VERIFY OUTCOME)
     log("Đang xác minh kết quả đăng bình luận trên thiết bị...")
-    outcome = verify_tiktok_comment_posted(adb, device_id, comment_text, width, height)
+    outcome = verify_tiktok_comment_posted(adb, device_id, comment_text, width, height, prior_stream=prior_stream)
     log(f"Kết quả xác minh bình luận: {outcome.value}")
 
     if outcome == TaskOutcome.SUCCESS:
@@ -1210,7 +1363,12 @@ def post_tiktok_comment(
         except Exception:
             pass
 
-    # 12. Dọn dẹp an toàn
+    if outcome == TaskOutcome.UNKNOWN_OUTCOME:
+        log("CẢNH BÁO: Kết quả bình luận chưa rõ (UNKNOWN_OUTCOME) • Ghi nhận audit trail và giữ nguyên màn hình để đối soát thủ công.")
+        record_unknown_comment_audit("TikTok", device_id, url, comment_text)
+        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
+
+    # 12. Dọn dẹp an toàn khi hoàn tất hoặc gặp lỗi dứt điểm
     try:
         adb.keyevent(device_id, 4)
         time.sleep(0.4)
@@ -1226,9 +1384,6 @@ def post_tiktok_comment(
     if outcome == TaskOutcome.SUCCESS:
         log("Đã đăng bình luận TikTok thành công và xác minh chính xác!")
         return CommentTaskResult(TaskOutcome.SUCCESS, "Đã đăng bình luận TikTok thành công", can_retry=False)
-    elif outcome == TaskOutcome.UNKNOWN_OUTCOME:
-        log("CẢNH BÁO: Kết quả bình luận chưa rõ (UNKNOWN_OUTCOME) • Cần đối soát thủ công, không tự retry.")
-        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
     elif outcome == TaskOutcome.FATAL_ERROR:
         log("Lỗi: Tài khoản hoặc bình luận bị chặn/hạn chế.")
         return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Tài khoản bị chặn hoặc hạn chế", can_retry=False)
@@ -1324,9 +1479,8 @@ def find_facebook_comment_icon_coords(
             except Exception:
                 pass
 
-    # Tọa độ hiệu chuẩn thực tế (Mặc định Case 1: Bài viết 1 ảnh trên Feed):
-    # x = 21.4%, y = 92.4% (nằm ngay tâm quả bóng chat bình luận giữa nút Thích và Chia sẻ)
-    return int(width * 0.214), int(height * 0.924)
+    # Tuyệt đối không trả về tọa độ đoán khi không nhận diện được nút bình luận Facebook
+    return None
 
 
 def is_facebook_comment_sheet_open(adb, device_id: str, height: int) -> bool:
@@ -1413,6 +1567,8 @@ def post_facebook_comment(
         return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
     width, height = adb.get_effective_screen_size(device_id)
+    canonical_url = resolve_canonical_url(url)
+    item_key = canonical_url or url
 
     # 0. Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm
     log("Chuẩn bị thiết bị: Đóng app cũ và dọn dẹp đa nhiệm...")
@@ -1506,6 +1662,13 @@ def post_facebook_comment(
                 time.sleep(1.0)
                 root = ui_automator_dom.dump_ui_tree(adb, device_id)
                 fb_ctrls = ui_automator_dom.find_facebook_target_controls(root, width, height)
+                if fb_ctrls.get("status") == "AMBIGUOUS_TARGET":
+                    log("CẢNH BÁO: Phát hiện nhiều bài viết trên màn hình mà không phân biệt được mục tiêu (AMBIGUOUS_TARGET). Dừng tác vụ an toàn.")
+                    return CommentTaskResult(
+                        TaskOutcome.AMBIGUOUS_TARGET,
+                        "Màn hình chứa nhiều bài viết mơ hồ, không xác định được mục tiêu",
+                        can_retry=False,
+                    )
                 comment_info = fb_ctrls.get("comment")
                 comment_coords = comment_info.get("center") if comment_info else None
                 if not comment_coords:
@@ -1540,8 +1703,14 @@ def post_facebook_comment(
 
     # 4. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
-    input_x, input_y = find_comment_input_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
-    ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback)
+    input_target = find_comment_input_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
+    if not input_target:
+        log("❌ Không tìm thấy tọa độ ô nhập bình luận Facebook!")
+        return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không tìm thấy ô nhập bình luận Facebook", can_retry=True)
+    input_x, input_y = input_target
+    if not ensure_comment_input_ready(adb, device_id, input_x, input_y, width, height, status_callback=status_callback):
+        log("❌ Không kích hoạt được ô nhập bình luận Facebook!")
+        return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không kích hoạt được ô nhập bình luận", can_retry=True)
     time.sleep(random.uniform(0.8, 1.2))
 
     # 5. Gõ nội dung bình luận từ Notion (Unicode Tiếng Việt qua XwIME)
@@ -1557,21 +1726,30 @@ def post_facebook_comment(
     if is_cancelled and is_cancelled():
         return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
+    pre_send_root = ui_automator_dom.dump_ui_tree(adb, device_id)
+    prior_stream = extract_stream_comments(pre_send_root)
+
     # 6. Gửi bình luận: thực hiện duy nhất 1 phương thức phù hợp
     log("Tìm nút gửi bình luận Facebook...")
-    send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
-    if send_x and send_y:
+    send_target = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
+    if send_target:
+        send_x, send_y = send_target
         log(f"Chạm nút gửi Facebook tại ({send_x}, {send_y})...")
         adb.tap(device_id, send_x, send_y)
     else:
-        log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
-        adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+        code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "input_method"])
+        if "minputshown=true" in (out or "").casefold():
+            log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
+            adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
+        else:
+            log("❌ Không tìm thấy nút gửi và ô nhập không có focus để gửi KeyEvent!")
+            return CommentTaskResult(TaskOutcome.UNSUPPORTED_UI, "Không tìm thấy nút gửi bình luận", can_retry=True)
 
     time.sleep(random.uniform(2.0, 2.8))
 
     # 7. XÁC MINH KẾT QUẢ BÌNH LUẬN (VERIFY OUTCOME)
     log("Đang xác minh kết quả đăng bình luận Facebook...")
-    outcome = verify_facebook_comment_posted(adb, device_id, comment_text, width, height)
+    outcome = verify_facebook_comment_posted(adb, device_id, comment_text, width, height, prior_stream=prior_stream)
     log(f"Kết quả xác minh bình luận: {outcome.value}")
 
     if outcome == TaskOutcome.SUCCESS:
@@ -1583,7 +1761,12 @@ def post_facebook_comment(
         except Exception:
             pass
 
-    # 8. Dọn dẹp an toàn
+    if outcome == TaskOutcome.UNKNOWN_OUTCOME:
+        log("CẢNH BÁO: Kết quả bình luận Facebook chưa rõ (UNKNOWN_OUTCOME) • Ghi nhận audit trail và giữ nguyên màn hình để đối soát thủ công.")
+        record_unknown_comment_audit("Facebook", device_id, url, comment_text)
+        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
+
+    # 8. Dọn dẹp an toàn khi hoàn tất hoặc gặp lỗi dứt điểm
     try:
         adb.keyevent(device_id, 4)
         time.sleep(0.4)
@@ -1598,9 +1781,6 @@ def post_facebook_comment(
     if outcome == TaskOutcome.SUCCESS:
         log("Đã đăng bình luận Facebook thành công và xác minh chính xác!")
         return CommentTaskResult(TaskOutcome.SUCCESS, "Đã đăng bình luận Facebook thành công", can_retry=False)
-    elif outcome == TaskOutcome.UNKNOWN_OUTCOME:
-        log("CẢNH BÁO: Kết quả bình luận Facebook chưa rõ (UNKNOWN_OUTCOME) • Cần đối soát thủ công, không tự retry.")
-        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
     elif outcome == TaskOutcome.FATAL_ERROR:
         log("Lỗi: Tài khoản bị chặn hoặc vi phạm tiêu chuẩn Facebook.")
         return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Tài khoản bị chặn hoặc hạn chế", can_retry=False)
@@ -1764,14 +1944,8 @@ def find_send_button_coords(
             except Exception:
                 pass
 
-    if is_tiktok:
-        # Tọa độ nút tròn đỏ mũi tên gửi TikTok hiệu chuẩn thực tế:
-        # x = 87.6% (tâm nút tròn đỏ), y = 62.4% (nằm dưới ô nhập ở góc phải)
-        return int(width * 0.876), int(height * 0.624)
-    else:
-        # Tọa độ nút gửi máy bay giấy xanh Facebook hiệu chuẩn thực tế:
-        # x = 95.0% (sát lề phải), y = 93.4% (ngang ô soạn thảo)
-        return int(width * 0.950), int(height * 0.934)
+    # Tuyệt đối không trả về tọa độ đoán cho nút gửi
+    return None
 
 
 def parse_comment_devices(selection_text: str, total_tasks: int, all_devices: list) -> list:
@@ -1921,10 +2095,15 @@ def build_execution_tasks(
     url: str,
     comment_lines: list[str],
 ) -> list:
-    """Chuẩn bị danh sách task thực thi theo đúng nội dung trong ô nhập bình luận.
-    Ưu tiên ghép với các task Notion đã quét để giữ nguyên page_id/row_id nhằm cập nhật Notion.
-    Tuyệt đối không lẫn lộn giữa các nền tảng khác nhau.
+    """Xây dựng danh sách tác vụ bình luận thực thi:
+    - Không mutate danh sách scanned_tasks ban đầu.
+    - Tạo bản sao độc lập (copy.copy) cho các task Notion đã quét.
+    - Nếu nội dung người dùng sửa khác Notion hoặc là câu mới, tạo task độc lập
+      với page_id="", row_id="", không gán bừa vào row Notion cũ.
     """
+    import copy
+    from notion_comment_sync import NotionCommentTask
+
     clean_p = (platform or "").strip().casefold()
     pool = [
         t for t in scanned_tasks
@@ -1933,49 +2112,35 @@ def build_execution_tasks(
     used_ids = set()
     result = []
 
-    from notion_comment_sync import NotionCommentTask
-
     for idx, text in enumerate(comment_lines):
         clean_text = text.strip()
         if not clean_text:
             continue
         found = None
         for cand in pool:
-            cand_id = getattr(cand, "row_id", "") or id(cand)
+            cand_id = getattr(cand, "row_id", "") or getattr(cand, "page_id", "") or id(cand)
             if cand_id not in used_ids and getattr(cand, "content", "").strip() == clean_text:
                 found = cand
                 used_ids.add(cand_id)
                 break
 
         if found:
+            task_copy = copy.copy(found)
             if url:
-                found.url = url
-            result.append(found)
+                task_copy.url = url
+            task_copy.stt = idx + 1
+            result.append(task_copy)
         else:
-            fallback_cand = None
-            for cand in pool:
-                cand_id = getattr(cand, "row_id", "") or id(cand)
-                if cand_id not in used_ids:
-                    fallback_cand = cand
-                    used_ids.add(cand_id)
-                    break
-
-            if fallback_cand:
-                if not getattr(fallback_cand, "content", "").strip():
-                    fallback_cand.content = clean_text
-                if url:
-                    fallback_cand.url = url
-                result.append(fallback_cand)
-            else:
-                result.append(
-                    NotionCommentTask(
-                        page_id="",
-                        stt=idx + 1,
-                        content=clean_text,
-                        url=url,
-                        platform=platform,
-                        status="Chưa comment",
-                    )
+            result.append(
+                NotionCommentTask(
+                    page_id="",
+                    row_id="",
+                    stt=idx + 1,
+                    content=clean_text,
+                    url=url,
+                    platform=platform,
+                    status="Chưa comment",
                 )
+            )
 
     return result

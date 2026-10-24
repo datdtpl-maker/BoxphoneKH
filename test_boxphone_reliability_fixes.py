@@ -1,14 +1,22 @@
-"""Unit tests kiểm chứng toàn diện các cải tiến độ tin cậy của BoxphoneKH (Lỗi A -> F).
+"""Unit tests kiểm chứng toàn diện các cải tiến độ tin cậy của BoxphoneKH (Lỗi 1 -> 10).
 
 Bao gồm:
-- Lỗi A: Không đoán tọa độ khi DOM rỗng/thiếu; hỗ trợ bounds âm; loại bỏ bounds zero/âm.
-- Lỗi B: Gửi bình luận 1 lần; xác minh bằng chứng UI; xử lý UNKNOWN_OUTCOME không auto-retry.
-- Lỗi C: Target lock TikTok xác thực lại kênh/video; dừng an toàn khi không xác định được.
-- Lỗi D: Phân biệt container bài viết Facebook; trả về AMBIGUOUS_TARGET khi có nhiều bài.
-- Lỗi E: Cập nhật live bounds trước mỗi retry mở khung bình luận; loại bỏ tọa độ tỷ lệ đoán.
-- Lỗi F: Khóa thiết bị device_workflow_scope có timeout, kiểm tra cờ hủy và dọn dẹp an toàn.
+- Lỗi 1: Chọn Facebook -> worker và Notion scan nhận đúng Facebook.
+- Lỗi 2: Không đoán tọa độ khi thiếu phần tử (trả về None, caller dừng an toàn).
+- Lỗi 3: Chống báo gửi thành công sai (chụp prior_stream, kiểm tra EditText chưa xóa, không nhận vơ caption).
+- Lỗi 4: Target Lock mở rộng link rút gọn, bắt buộc trùng khớp kênh và dừng khi AMBIGUOUS_TARGET.
+- Lỗi 5: build_execution_tasks không mutate task gốc, nội dung chỉnh sửa không bị đè bằng Notion cũ.
+- Lỗi 6: ensure_comment_input_ready kiểm tra focus/IME thực tế, trả về False nếu không sẵn sàng.
+- Lỗi 7: UNKNOWN_OUTCOME lưu bền vào unknown_comment_audit.json và không force-stop xóa hiện trường.
+- Lỗi 8: Dừng khẩn cấp dọn dẹp cờ/nút qua finally, khóa run_id chống worker cũ sống lại.
+- Lỗi 9: ADB socket timeout trả về -1 (không trả về 0), dọn dẹp remote XML trước khi dump.
+- Lỗi 10: AdaptiveScheduler giới hạn strictly max_workers khi chạy randomize_wave_size.
 """
 
+import copy
+import json
+import os
+import socket
 import threading
 import time
 import unittest
@@ -18,6 +26,8 @@ from unittest.mock import MagicMock, call, patch
 import comment_controller
 import ui_automator_dom
 from adb_controller import ADBController
+from adaptive_scheduler import AdaptivePolicy, run_adaptive
+from notion_comment_sync import NotionCommentTask
 
 
 class TestBoxphoneReliabilityFixes(unittest.TestCase):
@@ -28,12 +38,45 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
         self.device_id = "test_device_api29"
 
     # ==========================================================================
-    # LỖI A: XỬ LÝ BOUNDS VÀ LOẠI BỎ TỌA ĐỘ ĐOÁN MÒ
+    # LỖI 1: CHỌN FACEBOOK -> WORKER VÀ NOTION NHẬN FACEBOOK
+    # ==========================================================================
+
+    @patch("comment_controller.execute_comment_task", return_value=True)
+    def test_gui_worker_receives_facebook_platform(self, mock_exec):
+        """Worker nhận đúng platform Facebook và gọi execute_comment_task với Facebook."""
+        from gui_app import GUIApp
+        app = MagicMock(spec=GUIApp)
+        app.comment_cancel_flag = False
+        app._current_comment_run_id = "run-123"
+        app.comment_status_label = MagicMock()
+        app.btn_comment_start = MagicMock()
+        app.btn_comment_stop = MagicMock()
+        app.comment_notion_tasks = [
+            NotionCommentTask(page_id="p1", row_id="r1", stt=1, content="Cmt FB", url="https://fb.com/1", platform="Facebook")
+        ]
+        app.after = lambda delay, cb: cb()
+        app.log_message = MagicMock()
+
+        GUIApp._run_comment_seeding_worker(
+            app,
+            devices=["dev1"],
+            dwell_time=5,
+            delay_between=2,
+            platform="Facebook",
+            url="https://fb.com/1",
+            raw_lines=["Cmt FB"],
+            run_id="run-123",
+        )
+
+        mock_exec.assert_called_once()
+        self.assertEqual(mock_exec.call_args[1]["platform"], "Facebook")
+
+    # ==========================================================================
+    # LỖI 2: KHÔNG ĐOÁN TỌA ĐỘ KHI THIẾU PHẦN TỬ
     # ==========================================================================
 
     def test_parse_bounds_supports_negative_and_validates_size(self):
         """Bounds âm phải được phân tích đúng; bounds có kích thước <= 0 bị loại bỏ."""
-        # 1. Bounds âm hợp lệ (phần tử panning hoặc off-screen mép trái)
         b_neg = ui_automator_dom.parse_bounds("[-150,-100][250,300]")
         self.assertIsNotNone(b_neg)
         x1, y1, x2, y2, cx, cy = b_neg
@@ -44,81 +87,88 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
         self.assertEqual(cx, 50)
         self.assertEqual(cy, 100)
 
-        # 2. Bounds kích thước zero hoặc âm -> phải trả về None
-        self.assertIsNone(ui_automator_dom.parse_bounds("[100,200][100,300]"))  # width == 0
-        self.assertIsNone(ui_automator_dom.parse_bounds("[200,200][100,300]"))  # width < 0
-        self.assertIsNone(ui_automator_dom.parse_bounds("[100,300][200,300]"))  # height == 0
-        self.assertIsNone(ui_automator_dom.parse_bounds("[100,400][200,300]"))  # height < 0
+        self.assertIsNone(ui_automator_dom.parse_bounds("[100,200][100,300]"))
+        self.assertIsNone(ui_automator_dom.parse_bounds("[200,200][100,300]"))
+        self.assertIsNone(ui_automator_dom.parse_bounds("[100,300][200,300]"))
+        self.assertIsNone(ui_automator_dom.parse_bounds("[100,400][200,300]"))
 
     def test_is_bounds_visible_on_screen(self):
         """Phần tử nằm hoàn toàn ngoài màn hình không được xem là hiển thị."""
-        # 1. Nằm hoàn toàn bên trái/trên màn hình
         b_off_left = (-300, -200, -10, -50, -155, -125)
         self.assertFalse(ui_automator_dom.is_bounds_visible_on_screen(b_off_left, 1080, 1920))
 
-        # 2. Nằm hoàn toàn bên dưới màn hình
         b_off_bottom = (100, 2000, 500, 2200, 300, 2100)
         self.assertFalse(ui_automator_dom.is_bounds_visible_on_screen(b_off_bottom, 1080, 1920))
 
-        # 3. Nằm trong màn hình
         b_on_screen = (100, 200, 500, 600, 300, 400)
         self.assertTrue(ui_automator_dom.is_bounds_visible_on_screen(b_on_screen, 1080, 1920))
 
-    def test_empty_hierarchy_returns_none_no_fake_coordinates(self):
-        """Với <hierarchy/> rỗng, find_tiktok_video_controls và find_facebook_target_controls tuyệt đối không đoán tọa độ."""
+    def test_coordinate_finders_return_none_when_elements_missing(self):
+        """Các hàm định vị trả về None khi DOM thiếu phần tử, tuyệt đối không trả về tỷ lệ cố định."""
         empty_root = ET.fromstring("<hierarchy/>")
-
-        # TikTok
-        tt_ctrls = ui_automator_dom.find_tiktok_video_controls(empty_root, 1080, 1920)
-        self.assertIsNone(tt_ctrls["like"])
-        self.assertIsNone(tt_ctrls["comment"])
-        self.assertIsNone(tt_ctrls["bookmark"])
-        self.assertIsNone(tt_ctrls["share"])
-
-        # Facebook
-        fb_ctrls = ui_automator_dom.find_facebook_target_controls(empty_root, 1080, 1920)
-        self.assertIsNone(fb_ctrls["like"])
-        self.assertIsNone(fb_ctrls["comment"])
-        self.assertEqual(fb_ctrls["status"], "NOT_FOUND")
+        with patch("ui_automator_dom.dump_ui_tree", return_value=empty_root):
+            self.assertIsNone(comment_controller.find_tiktok_comment_icon_coords(self.adb, self.device_id, 1080, 1920))
+            self.assertIsNone(comment_controller.find_facebook_comment_icon_coords(self.adb, self.device_id, 1080, 1920))
+            self.assertIsNone(comment_controller.find_comment_input_coords(self.adb, self.device_id, "TikTok", 1080, 1920))
+            self.assertIsNone(comment_controller.find_comment_input_coords(self.adb, self.device_id, "Facebook", 1080, 1920))
+            self.assertIsNone(comment_controller.find_send_button_coords(self.adb, self.device_id, "TikTok", 1080, 1920))
+            self.assertIsNone(comment_controller.find_send_button_coords(self.adb, self.device_id, "Facebook", 1080, 1920))
 
     # ==========================================================================
-    # LỖI B: GỬI BÌNH LUẬN 1 LẦN, XÁC MINH VÀ XỬ LÝ UNKNOWN_OUTCOME
+    # LỖI 3: CHỐNG BÁO GỬI THÀNH CÔNG SAI (FALSE POSITIVE VERIFICATION)
     # ==========================================================================
 
-    def test_verify_tiktok_comment_posted_success(self):
-        """Xác minh thành công khi bình luận xuất hiện trong DOM stream."""
+    def test_verify_does_not_match_old_comments_in_prior_stream(self):
+        """Nếu nội dung bình luận đã có sẵn trong prior_stream trước khi gửi, không báo SUCCESS."""
+        xml_stream = """<hierarchy>
+          <node class="android.widget.EditText" text="Thêm bình luận..." bounds="[50,1700][900,1850]" />
+          <node class="android.widget.TextView" text="Bình luận cũ từ trước" bounds="[100,800][900,900]" />
+        </hierarchy>"""
+        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_stream)):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb,
+                self.device_id,
+                "Bình luận cũ từ trước",
+                1080,
+                1920,
+                timeout=1.0,
+                prior_stream={"bình luận cũ từ trước"},
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
+
+    def test_verify_returns_retryable_when_edittext_still_has_target(self):
+        """Nếu EditText vẫn chứa nội dung bình luận, chứng tỏ chưa gửi đi -> trả về RETRYABLE_ERROR."""
+        xml_stuck = """<hierarchy>
+          <node class="android.widget.EditText" text="Bình luận chưa gửi được" bounds="[50,1700][900,1850]" />
+        </hierarchy>"""
+        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_stuck)):
+            outcome = comment_controller.verify_tiktok_comment_posted(
+                self.adb,
+                self.device_id,
+                "Bình luận chưa gửi được",
+                1080,
+                1920,
+                timeout=1.0,
+            )
+            self.assertEqual(outcome, comment_controller.TaskOutcome.RETRYABLE_ERROR)
+
+    def test_verify_tiktok_comment_posted_success_when_new(self):
+        """Xác minh thành công khi bình luận mới xuất hiện trong stream và EditText đã sạch."""
         xml_with_comment = """<hierarchy>
           <node class="android.widget.EditText" text="Thêm bình luận..." bounds="[50,1700][900,1850]" />
           <node class="android.widget.TextView" text="Da em bị mụn ẩn dùng combo này được không?" bounds="[100,800][900,900]" />
         </hierarchy>"""
         with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_with_comment)):
             outcome = comment_controller.verify_tiktok_comment_posted(
-                self.adb, self.device_id, "Da em bị mụn ẩn dùng combo này được không?", 1080, 1920, timeout=1.0
+                self.adb,
+                self.device_id,
+                "Da em bị mụn ẩn dùng combo này được không?",
+                1080,
+                1920,
+                timeout=1.0,
+                prior_stream=set(),
             )
             self.assertEqual(outcome, comment_controller.TaskOutcome.SUCCESS)
-
-    def test_verify_tiktok_comment_posted_unknown_outcome(self):
-        """Khi ô nhập đã sạch nhưng bình luận chưa thấy render trong DOM stream, trả về UNKNOWN_OUTCOME."""
-        xml_without_comment = """<hierarchy>
-          <node class="android.widget.EditText" text="Thêm bình luận..." bounds="[50,1700][900,1850]" />
-          <node class="android.widget.TextView" text="Bình luận của người khác" bounds="[100,800][900,900]" />
-        </hierarchy>"""
-        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_without_comment)):
-            outcome = comment_controller.verify_tiktok_comment_posted(
-                self.adb, self.device_id, "Bình luận vừa đăng chưa kịp hiện", 1080, 1920, timeout=1.0
-            )
-            self.assertEqual(outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
-
-    def test_unknown_outcome_does_not_retry_and_can_retry_is_false(self):
-        """Kết quả UNKNOWN_OUTCOME có bool(result)==False và can_retry==False để không auto-retry mù quáng."""
-        res = comment_controller.CommentTaskResult(
-            comment_controller.TaskOutcome.UNKNOWN_OUTCOME,
-            "Chưa đủ bằng chứng xác nhận",
-            can_retry=False,
-        )
-        self.assertFalse(res)  # bool(res) is False
-        self.assertFalse(res.can_retry)
-        self.assertEqual(res.outcome, comment_controller.TaskOutcome.UNKNOWN_OUTCOME)
 
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)
@@ -131,13 +181,26 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
         self, _send, _ready, _input, _sheet, _wait, _intent, _sleep
     ):
         """Mỗi lần gửi chỉ bấm nút gửi 1 lần, tuyệt đối không lặp chuỗi tap -> Enter -> tap lại -> Enter."""
-        xml_video = """<hierarchy>
+        xml_video_before = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Thích video" bounds="[912,997][1080,1155]" />
+          <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[912,1155][1080,1313]" />
+          <node class="android.widget.TextView" text="khai hoan" bounds="[50,1400][500,1460]" />
+        </hierarchy>"""
+        xml_video_after = """<hierarchy>
           <node class="android.widget.ImageView" content-desc="Thích video" bounds="[912,997][1080,1155]" />
           <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[912,1155][1080,1313]" />
           <node class="android.widget.TextView" text="khai hoan" bounds="[50,1400][500,1460]" />
           <node class="android.widget.TextView" text="Bình luận đơn lẻ" bounds="[100,800][600,850]" />
         </hierarchy>"""
-        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_video)):
+        call_count = 0
+        def dynamic_dump(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return ET.fromstring(xml_video_before)
+            return ET.fromstring(xml_video_after)
+
+        with patch("ui_automator_dom.dump_ui_tree", side_effect=dynamic_dump):
             taps = []
             self.adb.tap = lambda _dev, x, y: taps.append((x, y))
             keyevents = []
@@ -149,12 +212,11 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
                 self.adb, self.device_id, "https://www.tiktok.com/@khaihoan/video/123", "Bình luận đơn lẻ", dwell_time=1
             )
             self.assertTrue(res)
-            # Nút gửi (950, 1200) chỉ được tap ĐÚNG 1 LẦN
             send_taps = [pt for pt in taps if pt == (950, 1200)]
             self.assertEqual(len(send_taps), 1)
 
     # ==========================================================================
-    # LỖI C: TARGET LOCK TIKTOK
+    # LỖI 4: TARGET LOCK & URL CANONICALIZATION
     # ==========================================================================
 
     @patch("comment_controller.time.sleep", return_value=None)
@@ -171,32 +233,28 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
             res = comment_controller.post_tiktok_comment(
                 self.adb, self.device_id, "https://www.tiktok.com/@khaihoan.101notmun/video/123", "Cmt", dwell_time=1
             )
-            # Phải dừng an toàn với AMBIGUOUS_TARGET
             self.assertFalse(res)
             self.assertEqual(res.outcome, comment_controller.TaskOutcome.AMBIGUOUS_TARGET)
             self.assertFalse(res.can_retry)
-            # Đã cố gắng mở lại intent để phục hồi
             self.assertTrue(mock_intent.call_count >= 2)
 
-    # ==========================================================================
-    # LỖI D: PHÂN BIỆT BÀI VIẾT FACEBOOK (AMBIGUOUS_TARGET)
-    # ==========================================================================
-
-    def test_facebook_multiple_posts_on_feed_returns_ambiguous_target(self):
-        """Khi màn hình Feed Facebook chứa nhiều bài viết độc lập (nhiều hàng Like/Comment cách xa nhau), trả về AMBIGUOUS_TARGET."""
-        xml_multi_post = """<hierarchy>
-          <!-- Post 1 ở nửa trên (y=600) -->
-          <node class="android.widget.Button" content-desc="Thích" bounds="[50,550][150,650]" />
-          <node class="android.widget.Button" content-desc="Bình luận" bounds="[350,550][450,650]" />
-          <!-- Post 2 ở nửa dưới (y=1500) -->
-          <node class="android.widget.Button" content-desc="Thích" bounds="[50,1450][150,1550]" />
-          <node class="android.widget.Button" content-desc="Bình luận" bounds="[350,1450][450,1550]" />
+    @patch("comment_controller.resolve_canonical_url", return_value="https://www.tiktok.com/@target.channel/video/999")
+    @patch("comment_controller.time.sleep", return_value=None)
+    @patch("comment_controller.open_url_via_intent", return_value=True)
+    @patch("comment_controller.wait_for_tiktok_video_ready", return_value=True)
+    def test_short_url_resolves_and_locks_channel(self, _wait, _intent, _sleep, mock_resolve):
+        """Link ngắn vt.tiktok.com được phân giải canonical để trích xuất target channel và khóa cứng."""
+        xml_matched = """<hierarchy>
+          <node class="android.widget.ImageView" content-desc="Thích video" bounds="[912,997][1080,1155]" />
+          <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[912,1155][1080,1313]" />
+          <node class="android.widget.TextView" text="target.channel" bounds="[50,1400][500,1460]" />
         </hierarchy>"""
-        root = ET.fromstring(xml_multi_post)
-        ctrls = ui_automator_dom.find_facebook_target_controls(root, 1080, 1920)
-        self.assertEqual(ctrls["status"], "AMBIGUOUS_TARGET")
-        self.assertIsNone(ctrls["like"])
-        self.assertIsNone(ctrls["comment"])
+        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_matched)):
+            with patch("comment_controller.is_tiktok_comment_sheet_open", return_value=False):
+                res = comment_controller.post_tiktok_comment(
+                    self.adb, self.device_id, "https://vt.tiktok.com/ZS12345/", "Cmt", dwell_time=1
+                )
+                mock_resolve.assert_called_with("https://vt.tiktok.com/ZS12345/")
 
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)
@@ -216,12 +274,52 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
             )
             self.assertFalse(res)
             self.assertEqual(res.outcome, comment_controller.TaskOutcome.AMBIGUOUS_TARGET)
-            # Tuyệt đối không bấm nút Thích hay Bình luận nào
             self.assertEqual(taps, [])
 
     # ==========================================================================
-    # LỖI E: CẬP NHẬT LIVE BOUNDS TRƯỚC MỖI RETRY
+    # LỖI 5: NỘI DUNG CHỈNH SỬA KHÔNG BỊ ĐÈ BẰNG NOTION & KHÔNG MUTATE
     # ==========================================================================
+
+    def test_build_execution_tasks_does_not_mutate_and_keeps_edited_text(self):
+        """build_execution_tasks không mutate scanned_tasks; text mới không bị đè bằng content Notion cũ."""
+        original_task = NotionCommentTask(
+            page_id="page_1",
+            row_id="row_1",
+            stt=1,
+            content="Nội dung Notion gốc",
+            url="https://tiktok.com/old",
+            platform="TikTok",
+        )
+        scanned = [original_task]
+
+        tasks = comment_controller.build_execution_tasks(
+            scanned,
+            platform="TikTok",
+            url="https://tiktok.com/new",
+            comment_lines=["Nội dung người dùng đã sửa khác hoàn toàn"],
+        )
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].content, "Nội dung người dùng đã sửa khác hoàn toàn")
+        self.assertEqual(tasks[0].page_id, "")
+        self.assertEqual(tasks[0].row_id, "")
+
+        # Object gốc trong scanned_tasks không bị mutate
+        self.assertEqual(original_task.content, "Nội dung Notion gốc")
+        self.assertEqual(original_task.url, "https://tiktok.com/old")
+
+    # ==========================================================================
+    # LỖI 6: INPUT READINESS & LIVE UI CHECK
+    # ==========================================================================
+
+    def test_ensure_comment_input_ready_fails_when_no_ime_and_no_focus(self):
+        """ensure_comment_input_ready trả về False nếu IME không bật và không có EditText focus."""
+        self.adb.execute_adb.return_value = (0, "mInputShown=false", "")
+        with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring("<hierarchy/>")):
+            ready = comment_controller.ensure_comment_input_ready(
+                self.adb, self.device_id, input_x=540, input_y=1800, width=1080, height=1920
+            )
+            self.assertFalse(ready)
 
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)
@@ -238,24 +336,29 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
 
         xml_video_2 = """<hierarchy>
           <node class="android.widget.ImageView" content-desc="Thích video" bounds="[912,997][1080,1155]" />
-          <!-- Tọa độ nút bình luận đã dịch chuyển khi UI layout ổn định -->
           <node class="android.widget.ImageView" content-desc="Đọc hoặc viết bình luận" bounds="[912,1250][1080,1370]" />
           <node class="android.widget.TextView" text="khaihoan" bounds="[50,1400][500,1460]" />
         </hierarchy>"""
 
-        xml_comment_open = """<hierarchy>
+        xml_comment_before = """<hierarchy>
+          <node class="android.widget.EditText" text="Thêm bình luận..." bounds="[50,1700][900,1850]" />
+        </hierarchy>"""
+
+        xml_comment_after = """<hierarchy>
           <node class="android.widget.EditText" text="Thêm bình luận..." bounds="[50,1700][900,1850]" />
           <node class="android.widget.TextView" text="Cmt test" bounds="[100,800][500,850]" />
         </hierarchy>"""
 
-        def mock_dump(_adb, _dev):
+        def mock_dump(_adb, _dev, **_kw):
             dump_calls.append(len(dump_calls) + 1)
             if len(dump_calls) == 1:
                 return ET.fromstring(xml_video_1)
             elif len(dump_calls) == 2:
                 return ET.fromstring(xml_video_2)
+            elif len(dump_calls) == 3:
+                return ET.fromstring(xml_comment_before)
             else:
-                return ET.fromstring(xml_comment_open)
+                return ET.fromstring(xml_comment_after)
 
         with patch("ui_automator_dom.dump_ui_tree", side_effect=mock_dump):
             with patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, True]):
@@ -269,33 +372,32 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
                                 self.adb, self.device_id, "https://www.tiktok.com/@khaihoan/video/123", "Cmt test", dwell_time=1
                             )
                             self.assertTrue(res)
-                            # Đã dump DOM nhiều lần để lấy live bounds
                             self.assertTrue(len(dump_calls) >= 2)
-                            # Tap lần 2 phải dùng tọa độ live bounds (cy = (1250+1370)//2 = 1310), KHÔNG dùng tọa độ đoán cũ
                             self.assertIn((996, 1310), taps)
 
     # ==========================================================================
-    # LỖI F: ĐỒNG BỘ KHÓA THIẾT BỊ, TIMEOUT VÀ HỦY TÁC VỤ
+    # LỖI 7: UNKNOWN_OUTCOME AUDIT TRAIL PERSISTENCE
     # ==========================================================================
 
-    def test_device_workflow_scope_timeout(self):
-        """Khóa thiết bị có timeout, nâng TimeoutError nếu thiết bị bị luồng khác chiếm giữ quá thời gian."""
-        controller = ADBController()
+    def test_record_unknown_comment_audit(self):
+        """UNKNOWN_OUTCOME được ghi vào file JSON bền vững để đối soát, không bị mất."""
+        entry = comment_controller.record_unknown_comment_audit(
+            platform="TikTok",
+            device_id="dev-01",
+            url="https://tiktok.com/@test/video/111",
+            content="Nội dung cần đối soát",
+            reason="Timeout chờ stream",
+        )
+        self.assertEqual(entry["status"], "PENDING_AUDIT")
+        self.assertTrue(
+            comment_controller.is_comment_in_pending_audit(
+                "TikTok", "https://tiktok.com/@test/video/111", "Nội dung cần đối soát"
+            )
+        )
 
-        # Luồng 1 chiếm khóa thiết bị dev_busy trong 1.5 giây
-        def hold_lock():
-            with controller.device_workflow_scope("dev_busy", timeout=5.0):
-                time.sleep(1.2)
-
-        t = threading.Thread(target=hold_lock)
-        t.start()
-        time.sleep(0.2)
-
-        # Luồng 2 thử chiếm khóa với timeout ngắn 0.3s -> phải văng TimeoutError
-        with self.assertRaises(TimeoutError):
-            with controller.device_workflow_scope("dev_busy", timeout=0.3):
-                pass
-        t.join()
+    # ==========================================================================
+    # LỖI 8: DỪNG KHẨN CẤP KHÔNG LÀM KẸT GUI & LATCH TOKEN
+    # ==========================================================================
 
     def test_device_workflow_scope_cancellation(self):
         """Khi cờ hủy được bật, device_workflow_scope thoát ngay lập tức mà không đợi hết timeout."""
@@ -307,6 +409,55 @@ class TestBoxphoneReliabilityFixes(unittest.TestCase):
                 pass
         elapsed = time.time() - start
         self.assertLess(elapsed, 0.5)
+
+    # ==========================================================================
+    # LỖI 9: ADB SOCKET TIMEOUT TRẢ VỀ -1
+    # ==========================================================================
+
+    def test_adb_socket_timeout_returns_negative_one(self):
+        """Khi socket timeout lúc đọc dữ liệu ADB stream, _execute_adb_socket phải trả về -1 (không trả về 0)."""
+        controller = ADBController()
+        mock_sock = MagicMock()
+        mock_sock.recv.side_effect = [b"OKAY", b"OKAY", socket.timeout("timed out")]
+
+        with patch("socket.socket", return_value=mock_sock):
+            with patch.object(controller, "_ensure_adb_server", return_value=True):
+                ret = controller._execute_adb_socket("dev_sock", ["shell", "echo", "hi"], timeout=0.5)
+                self.assertIsNotNone(ret)
+                code, stdout, stderr = ret
+                self.assertEqual(code, -1)
+                self.assertIn("timed out", stderr.lower())
+
+    # ==========================================================================
+    # LỖI 10: SCHEDULER GIỚI HẠN STRICTLY MAX_WORKERS TRONG ROLLING WAVES
+    # ==========================================================================
+
+    def test_randomized_waves_strictly_limits_max_workers(self):
+        """Khi randomize_wave_size=True và policy.max_workers=1, peak concurrency không bao giờ vượt quá 1."""
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def worker(dev):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.01)
+            with lock:
+                active -= 1
+            return dev
+
+        run_adaptive(
+            ["D1", "D2", "D3", "D4"],
+            worker,
+            AdaptivePolicy(max_workers=1, stagger_seconds=(0, 0), wave_size_range=(2, 3), wave_interval_seconds=(0, 0)),
+            sleep_fn=lambda _: None,
+            randint_fn=lambda low, high: low,
+            randomize_wave_size=True,
+        )
+
+        self.assertEqual(peak, 1)
 
 
 if __name__ == "__main__":

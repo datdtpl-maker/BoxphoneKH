@@ -58,11 +58,14 @@ class TestCommentController(unittest.TestCase):
         first_cmd = calls[0][0][1]
         self.assertIn("com.facebook.katana", first_cmd)
 
+    @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
+    @patch("comment_controller.ensure_comment_input_ready", return_value=True)
+    @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
     @patch("comment_controller.verify_tiktok_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
     @patch("ui_automator_dom.find_tiktok_video_controls", return_value={"like": {"center": (996, 1076), "is_liked": False}, "comment": {"center": (996, 1234)}, "channel_name": "a"})
     @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_tiktok_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify):
+    def test_post_tiktok_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify, _mock_input, _mock_ready, _mock_send):
         status_msgs = []
         res = comment_controller.post_tiktok_comment(
             self.adb,
@@ -77,11 +80,14 @@ class TestCommentController(unittest.TestCase):
         self.adb.input_text.assert_called_with(self.device_id, "Sản phẩm rất tốt!")
         self.assertTrue(any("thành công" in msg for msg in status_msgs))
 
+    @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
+    @patch("comment_controller.ensure_comment_input_ready", return_value=True)
+    @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
     @patch("comment_controller.verify_facebook_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
     @patch("ui_automator_dom.find_facebook_target_controls", return_value={"status": "FOUND", "like": {"center": (200, 1800), "is_liked": False}, "comment": {"center": (500, 1800)}})
     @patch("comment_controller.is_facebook_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_facebook_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify):
+    def test_post_facebook_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify, _mock_input, _mock_ready, _mock_send):
         status_msgs = []
         res = comment_controller.post_facebook_comment(
             self.adb,
@@ -388,14 +394,12 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
 
     def test_find_send_button_coords_calibrated(self):
         adb_mock = MagicMock()
-        adb_mock.execute_adb.return_value = (1, "", "") # fail dump to trigger calibrated
-        x, y = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.876))
-        self.assertEqual(y, int(1920 * 0.624))
+        adb_mock.execute_adb.return_value = (1, "", "")
+        coords = comment_controller.find_send_button_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
+        self.assertIsNone(coords)
 
-        x_fb, y_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
-        self.assertEqual(x_fb, int(1080 * 0.950))
-        self.assertEqual(y_fb, int(1920 * 0.934))
+        coords_fb = comment_controller.find_send_button_coords(adb_mock, "dev1", "Facebook", 1080, 1920)
+        self.assertIsNone(coords_fb)
 
     def test_clean_platform_url_and_extract_video_id(self):
         raw_tiktok = "https://www.tiktok.com/@khaihoanskincare/video/7682027295724490004?is_from_webapp=1&sender_device=pc"
@@ -412,16 +416,14 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
     def test_find_comment_input_coords_calibrated(self):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
-        x, y = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.450))
-        self.assertEqual(y, int(1920 * 0.962))
+        coords = comment_controller.find_comment_input_coords(adb_mock, "dev1", "TikTok", 1080, 1920)
+        self.assertIsNone(coords)
 
     def test_find_tiktok_comment_icon_coords_calibrated(self):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
-        x, y = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.925))
-        self.assertEqual(y, int(1920 * 0.643))
+        coords = comment_controller.find_tiktok_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertIsNone(coords)
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
@@ -586,18 +588,16 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
     def test_find_facebook_comment_icon_coords_calibrated(self):
         adb_mock = MagicMock()
         adb_mock.execute_adb.return_value = (1, "", "")
-        x, y = comment_controller.find_facebook_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
-        self.assertEqual(x, int(1080 * 0.214))
-        self.assertEqual(y, int(1920 * 0.924))
+        coords = comment_controller.find_facebook_comment_icon_coords(adb_mock, "dev1", 1080, 1920)
+        self.assertIsNone(coords)
 
     @patch("os.path.exists", return_value=True)
     @patch("xml.etree.ElementTree.parse")
     @patch("os.remove")
     def test_find_facebook_comment_icon_coords_landmark(self, _rm, mock_parse, _exists):
-        # Like button at cx=100, cy=1800; Share button at cx=500, cy=1800
-        # Comment icon should be at cx=(100+500)//2=300, cy=1800
         xml_feed = """<hierarchy>
           <node class='android.widget.Button' content-desc='Thích' bounds='[50,1750][150,1850]' />
+          <node class='android.widget.Button' content-desc='Bình luận' bounds='[250,1750][350,1850]' />
           <node class='android.widget.Button' content-desc='Chia sẻ' bounds='[450,1750][550,1850]' />
         </hierarchy>"""
         import xml.etree.ElementTree as ET

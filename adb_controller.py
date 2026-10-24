@@ -334,13 +334,17 @@ class ADBController:
 
                 # 3. Đọc dữ liệu stream từ socket
                 chunks = []
+                timed_out = False
                 while True:
                     try:
                         chunk = s.recv(8192)
                         if not chunk:
                             break
                         chunks.append(chunk)
-                    except (socket.timeout, BlockingIOError):
+                    except socket.timeout:
+                        timed_out = True
+                        break
+                    except BlockingIOError:
                         break
 
                 raw_bytes = b"".join(chunks)
@@ -350,6 +354,8 @@ class ADBController:
                     .replace("\r\n", "\n")
                     .strip()
                 )
+                if timed_out:
+                    return -1, stdout, "Command timed out"
                 return 0, stdout, ""
             except socket.timeout:
                 return -1, "", "Command timed out"

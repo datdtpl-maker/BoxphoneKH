@@ -1,3 +1,4 @@
+import comment_controller
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
@@ -244,9 +245,13 @@ class DomMultiResolutionAccuracyTests(unittest.TestCase):
         self.assertEqual(ctrls["like"]["center"], (1328, 1438))
         self.assertEqual(ctrls["comment"]["center"], (1328, 1648))
 
+    @patch("comment_controller.verify_tiktok_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
+    @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
+    @patch("comment_controller.ensure_comment_input_ready", return_value=True)
+    @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
     @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_tiktok_comment_skips_like_if_already_liked(self, _sleep, _sheet_open):
+    def test_post_tiktok_comment_skips_like_if_already_liked(self, _sleep, _sheet_open, _input, _ready, _send, _verify):
         """Kiểm tra post_tiktok_comment: Nếu video đã Like trên DOM thì KHÔNG bấm Like nữa, tuyệt đối không swipe."""
         import comment_controller
         from unittest.mock import MagicMock

@@ -4627,36 +4627,37 @@ class GUIApp(ctk.CTk):
     # ================= CÁC TÁC VỤ BƠM BÌNH LUẬN =================
     def _on_click_scan_notion_comments(self):
         """Quét danh sách bình luận 'Chưa comment' từ Notion Database."""
+        target_platform = self.comment_platform_combo.get().strip() or "TikTok"
         self.btn_comment_scan_notion.configure(
             state="disabled", text="Đang quét Notion..."
         )
         self.comment_scan_info_lbl.configure(
-            text="Đang kết nối Notion API để quét bình luận Chưa comment..."
+            text=f"Đang kết nối Notion API để quét bình luận [{target_platform}] Chưa comment..."
         )
 
         def worker():
             try:
                 tasks = notion_comment_sync.fetch_notion_comments(
-                    only_uncompleted=True, platform_filter="TikTok"
+                    only_uncompleted=True, platform_filter=target_platform
                 )
                 self.comment_notion_tasks = tasks
 
                 def update_ui():
                     if not tasks:
                         self.comment_scan_info_lbl.configure(
-                            text="Tất cả bình luận TikTok trên Notion đã Hoàn thành!"
+                            text=f"Tất cả bình luận {target_platform} trên Notion đã Hoàn thành!"
                         )
                         self.comment_task_preview.delete("1.0", "end")
                         self.comment_task_preview.insert(
                             "1.0",
-                            "Không còn câu bình luận TikTok nào ở trạng thái 'Chưa comment' trên Notion.",
+                            f"Không còn câu bình luận {target_platform} nào ở trạng thái 'Chưa comment' trên Notion.",
                         )
                         self.comment_url_entry.delete(0, "end")
                         self.comment_text_box.delete("1.0", "end")
                         return
 
-                    self.comment_platform_combo.set("TikTok")
-                    self._sync_comment_ui_for_platform("TikTok", update_url=True)
+                    self.comment_platform_combo.set(target_platform)
+                    self._sync_comment_ui_for_platform(target_platform, update_url=True)
 
                 self.after(0, update_ui)
             except Exception as exc:
@@ -4767,6 +4768,28 @@ class GUIApp(ctk.CTk):
             messagebox.showwarning("Cảnh báo", "Không có thiết bị nào đang kết nối!")
             return
 
+        selected_platform = self.comment_platform_combo.get().strip() or "TikTok"
+        selected_url = self.comment_url_entry.get().strip()
+        if not selected_url:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập Link bài viết/video mục tiêu!")
+            return
+
+        url_lower = selected_url.lower()
+        if selected_platform.lower() == "facebook":
+            if any(k in url_lower for k in ("tiktok.com", "vt.tiktok.com", "vm.tiktok.com")):
+                messagebox.showerror(
+                    "Lỗi tương thích",
+                    "Bạn đang chọn nền tảng Facebook nhưng link nhập vào là TikTok!\nVui lòng chọn đúng nền tảng hoặc đổi link."
+                )
+                return
+        elif selected_platform.lower() == "tiktok":
+            if any(k in url_lower for k in ("facebook.com", "fb.watch", "fb.com")):
+                messagebox.showerror(
+                    "Lỗi tương thích",
+                    "Bạn đang chọn nền tảng TikTok nhưng link nhập vào là Facebook!\nVui lòng chọn đúng nền tảng hoặc đổi link."
+                )
+                return
+
         raw_lines = [
             line.strip()
             for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
@@ -4795,53 +4818,59 @@ class GUIApp(ctk.CTk):
         except ValueError:
             delay_between = 8
 
+        import uuid
+        run_id = str(uuid.uuid4())
+        self._current_comment_run_id = run_id
+        self.comment_cancel_flag = False
+
         self.btn_comment_start.configure(state="disabled")
         self.btn_comment_stop.configure(state="normal")
-        self.comment_cancel_flag = False
 
         dev_names = ", ".join(main.get_device_name(d) for d in target_devices)
         print(
-            f"[GUI] Bắt đầu Bơm bình luận lần lượt trên {len(target_devices)} máy: [{dev_names}]..."
+            f"[GUI] Bắt đầu Bơm bình luận [{selected_platform}] lần lượt trên {len(target_devices)} máy: [{dev_names}]..."
         )
         self.run_in_thread(
             self._run_comment_seeding_worker,
             target_devices,
             dwell_time,
             delay_between,
+            selected_platform,
+            selected_url,
+            raw_lines,
+            run_id,
         )
 
     def stop_comment_seeding(self):
         """Dừng tiến trình bình luận."""
         self.comment_cancel_flag = True
+        self._current_comment_run_id = None
+        self.btn_comment_start.configure(state="normal")
+        self.btn_comment_stop.configure(state="disabled")
         self.comment_status_label.configure(
             text="Đang dừng tiến trình bình luận theo yêu cầu..."
         )
         print("[GUI] Đã gửi tín hiệu dừng tác vụ Bơm bình luận.")
 
     def _run_comment_seeding_worker(
-        self, devices, dwell_time, delay_between
+        self, devices, dwell_time, delay_between, platform="TikTok", url="", raw_lines=None, run_id=None
     ):
+        current_platform = platform or "TikTok"
+        current_url = (url or "").strip()
+        lines = list(raw_lines or [])
+
         all_tasks = list(getattr(self, "comment_notion_tasks", []))
         if not all_tasks:
-            # Tự động quét Notion nếu chưa quét trước đó
             try:
                 all_tasks = notion_comment_sync.fetch_notion_comments(
-                    only_uncompleted=True, platform_filter="TikTok"
+                    only_uncompleted=True, platform_filter=current_platform
                 )
                 self.comment_notion_tasks = all_tasks
             except Exception as e:
                 self.log_message(f"[Notion] Không thể quét tự động: {e}")
                 all_tasks = []
 
-        current_platform = "TikTok"
-        current_url = self.comment_url_entry.get().strip()
-        raw_lines = [
-            line.strip()
-            for line in self.comment_text_box.get("1.0", "end-1c").splitlines()
-            if line.strip()
-        ]
-
-        if not current_url or not raw_lines:
+        if not current_url or not lines:
             self.after(
                 0,
                 lambda: self.comment_status_label.configure(
@@ -4856,7 +4885,7 @@ class GUIApp(ctk.CTk):
             all_tasks,
             current_platform,
             current_url,
-            raw_lines,
+            lines,
         )
 
         total_tasks = len(tasks)
@@ -4866,121 +4895,130 @@ class GUIApp(ctk.CTk):
         self.after(
             0,
             lambda: self.comment_status_label.configure(
-                text=f"Bắt đầu chạy {total_tasks} bình luận trên {total_devs} máy..."
+                text=f"Bắt đầu chạy {total_tasks} bình luận [{current_platform}] trên {total_devs} máy..."
             ),
         )
-
-        for idx, task in enumerate(tasks):
-            if self.comment_cancel_flag:
-                print("[GUI] Tác vụ bình luận đã bị hủy.")
-                break
-
-            device_id = devices[idx % total_devs]
-            device_name = main.get_device_name(device_id)
-
-            def dev_cb(msg):
-                self.log_message(msg)
-                self.after(
-                    0, lambda m=msg: self.comment_status_label.configure(text=m)
-                )
-
-            self.log_message(
-                f"[Máy {device_name}] ({idx + 1}/{total_tasks}) [{task.platform}] "
-                f"STT {task.stt}: '{task.content}'..."
-            )
-
-            ok = False
-            for task_attempt in range(2):
-                if self.comment_cancel_flag:
-                    break
-                if task_attempt > 0:
-                    self.log_message(
-                        f"[Máy {device_name}] ⚠️ Lần 1 chưa hoàn tất bình luận • "
-                        f"Tự động chuẩn bị lại thiết bị và thử lại lần 2 cho STT {task.stt}..."
-                    )
-                    time.sleep(2.0)
-
-                try:
-                    with main.adb.device_workflow_scope(
-                        device_id,
-                        timeout=30.0,
-                        is_cancelled=lambda: self.comment_cancel_flag,
-                    ):
-                        ok = comment_controller.execute_comment_task(
-                            main.adb,
-                            device_id,
-                            platform=task.platform,
-                            url=task.url,
-                            comment_text=task.content,
-                            dwell_time=dwell_time,
-                            status_callback=dev_cb,
-                            is_cancelled=lambda: self.comment_cancel_flag,
-                        )
-                except TimeoutError as te:
-                    self.log_message(f"[Máy {device_name}] ❌ Lỗi khóa thiết bị: {te}")
-                    ok = comment_controller.CommentTaskResult(
-                        comment_controller.TaskOutcome.RETRYABLE_ERROR,
-                        str(te),
-                        can_retry=True,
-                    )
-
-                if ok:
-                    break
-
-                # Nếu kết quả là UNKNOWN_OUTCOME hoặc không thể retry (chưa rõ kết quả, ambiguous, v.v.):
-                # Không được tự ý retry lần 2 để tránh gửi lặp bình luận!
-                if isinstance(ok, comment_controller.CommentTaskResult) and not ok.can_retry:
-                    self.log_message(
-                        f"[Máy {device_name}] ⚠️ Không thể tự động thử lại STT {task.stt}: "
-                        f"{ok.outcome.value} ({ok.message}). Cần đối soát thủ công!"
-                    )
-                    break
-
-            if ok:
-                success_count += 1
-                if task.page_id or task.row_id:
-                    try:
-                        notion_comment_sync.mark_notion_comment_completed(
-                            task,
-                            device_name=device_name,
-                        )
-                        self.log_message(
-                            f"[Notion] ✅ STT {task.stt} đã chuyển sang 'Hoàn thành'!"
-                        )
-                    except Exception as e:
-                        self.log_message(
-                            f"[Notion] ❌ Lỗi cập nhật STT {task.stt}: {e}"
-                        )
-
-            if idx < total_tasks - 1 and not self.comment_cancel_flag:
-                next_dev_id = devices[(idx + 1) % total_devs]
-                next_dev_name = main.get_device_name(next_dev_id)
-                jitter_delay = max(3, delay_between) + random.randint(0, 2)
-                self.log_message(
-                    f"⏸ [Máy {device_name} xong] Nghỉ {jitter_delay}s trước khi chuyển sang Máy {next_dev_name}..."
-                )
-                for remaining in range(jitter_delay, 0, -1):
-                    if self.comment_cancel_flag:
-                        break
-                    self.after(
-                        0,
-                        lambda r=remaining, d=next_dev_name: self.comment_status_label.configure(
-                            text=f"⏸ Nghỉ {r}s... Chuẩn bị chạy tiếp trên Máy {d}."
-                        ),
-                    )
-                    time.sleep(1.0)
 
         def finish_ui():
             self.btn_comment_start.configure(state="normal")
             self.btn_comment_stop.configure(state="disabled")
-            self.comment_status_label.configure(
-                text=f"Hoàn thành: {success_count}/{total_tasks} bình luận đã đăng thành công."
-            )
+            if getattr(self, "comment_cancel_flag", False):
+                self.comment_status_label.configure(
+                    text=f"Đã dừng: {success_count}/{total_tasks} bình luận đã hoàn thành."
+                )
+            else:
+                self.comment_status_label.configure(
+                    text=f"Hoàn thành: {success_count}/{total_tasks} bình luận đã đăng thành công."
+                )
 
-        self.after(0, finish_ui)
-        print(
-            f"[GUI] Bơm bình luận hoàn tất: {success_count}/{total_tasks} bình luận thành công."
-        )
+        try:
+            for idx, task in enumerate(tasks):
+                if self.comment_cancel_flag or (run_id and getattr(self, "_current_comment_run_id", None) != run_id):
+                    print("[GUI] Tác vụ bình luận đã bị hủy.")
+                    break
+
+                device_id = devices[idx % total_devs]
+                device_name = main.get_device_name(device_id)
+
+                def dev_cb(msg):
+                    self.log_message(msg)
+                    self.after(
+                        0, lambda m=msg: self.comment_status_label.configure(text=m)
+                    )
+
+                self.log_message(
+                    f"[Máy {device_name}] ({idx + 1}/{total_tasks}) [{task.platform}] "
+                    f"STT {task.stt}: '{task.content}'..."
+                )
+
+                ok = False
+                for task_attempt in range(2):
+                    if self.comment_cancel_flag or (run_id and getattr(self, "_current_comment_run_id", None) != run_id):
+                        break
+                    if task_attempt > 0:
+                        self.log_message(
+                            f"[Máy {device_name}] ⚠️ Lần 1 chưa hoàn tất bình luận • "
+                            f"Tự động chuẩn bị lại thiết bị và thử lại lần 2 cho STT {task.stt}..."
+                        )
+                        time.sleep(2.0)
+
+                    try:
+                        with main.adb.device_workflow_scope(
+                            device_id,
+                            timeout=30.0,
+                            is_cancelled=lambda: self.comment_cancel_flag,
+                        ):
+                            ok = comment_controller.execute_comment_task(
+                                main.adb,
+                                device_id,
+                                platform=task.platform,
+                                url=task.url,
+                                comment_text=task.content,
+                                dwell_time=dwell_time,
+                                status_callback=dev_cb,
+                                is_cancelled=lambda: self.comment_cancel_flag,
+                            )
+                    except TimeoutError as te:
+                        self.log_message(f"[Máy {device_name}] ❌ Lỗi khóa thiết bị: {te}")
+                        ok = comment_controller.CommentTaskResult(
+                            comment_controller.TaskOutcome.RETRYABLE_ERROR,
+                            str(te),
+                            can_retry=True,
+                        )
+
+                    if ok:
+                        break
+
+                    if isinstance(ok, comment_controller.CommentTaskResult) and not ok.can_retry:
+                        self.log_message(
+                            f"[Máy {device_name}] ⚠️ Không thể tự động thử lại STT {task.stt}: "
+                            f"{ok.outcome.value} ({ok.message}). Cần đối soát thủ công!"
+                        )
+                        break
+
+                if ok:
+                    success_count += 1
+                    if task.page_id or task.row_id:
+                        try:
+                            updated = notion_comment_sync.mark_notion_comment_completed(
+                                task,
+                                device_name=device_name,
+                            )
+                            if updated:
+                                self.log_message(
+                                    f"[Notion] ✅ STT {task.stt} đã chuyển sang 'Hoàn thành'!"
+                                )
+                            else:
+                                self.log_message(
+                                    f"[Notion] ⚠️ Không thể đồng bộ trạng thái STT {task.stt} lên Notion."
+                                )
+                        except Exception as e:
+                            self.log_message(
+                                f"[Notion] ❌ Lỗi cập nhật STT {task.stt}: {e}"
+                            )
+
+                if idx < total_tasks - 1 and not self.comment_cancel_flag:
+                    next_dev_id = devices[(idx + 1) % total_devs]
+                    next_dev_name = main.get_device_name(next_dev_id)
+                    jitter_delay = max(3, delay_between) + random.randint(0, 2)
+                    self.log_message(
+                        f"⏸ [Máy {device_name} xong] Nghỉ {jitter_delay}s trước khi chuyển sang Máy {next_dev_name}..."
+                    )
+                    for remaining in range(jitter_delay, 0, -1):
+                        if self.comment_cancel_flag or (run_id and getattr(self, "_current_comment_run_id", None) != run_id):
+                            break
+                        self.after(
+                            0,
+                            lambda r=remaining, d=next_dev_name: self.comment_status_label.configure(
+                                text=f"⏸ Nghỉ {r}s... Chuẩn bị chạy tiếp trên Máy {d}."
+                            ),
+                        )
+                        time.sleep(1.0)
+        finally:
+            self.after(0, finish_ui)
+            print(
+                f"[GUI] Bơm bình luận hoàn tất: {success_count}/{total_tasks} bình luận thành công."
+            )
 
     def log_message(self, msg):
         print(f"[GUI] {msg}")

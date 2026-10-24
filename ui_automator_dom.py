@@ -69,6 +69,12 @@ def dump_ui_tree(adb, device_id: str, timeout: int = 5) -> Optional[ET.Element]:
             except Exception:
                 pass
 
+        # Dọn dẹp remote file cũ trước khi dump để không pull nhầm file cũ nếu dump lỗi
+        try:
+            adb.execute_adb(device_id, ["shell", "rm", "-f", remote_xml], timeout=timeout)
+        except Exception:
+            pass
+
         # 1. Thử dump nén siêu tốc
         code, _, _ = adb.execute_adb(
             device_id, ["shell", "uiautomator", "dump", "--compressed", remote_xml], timeout=timeout
@@ -79,14 +85,15 @@ def dump_ui_tree(adb, device_id: str, timeout: int = 5) -> Optional[ET.Element]:
             )
 
         if code == 0:
-            adb.execute_adb(device_id, ["pull", remote_xml, local_xml], timeout=timeout)
-            try:
-                sz = os.path.getsize(local_xml) if hasattr(os.path, "getsize") else 500
-            except Exception:
-                sz = 500
-            if os.path.exists(local_xml) and sz > 0:
-                tree = ET.parse(local_xml)
-                return tree.getroot()
+            pull_code, _, _ = adb.execute_adb(device_id, ["pull", remote_xml, local_xml], timeout=timeout)
+            if pull_code == 0 and os.path.exists(local_xml):
+                try:
+                    sz = os.path.getsize(local_xml) if hasattr(os.path, "getsize") else 500
+                except Exception:
+                    sz = 500
+                if sz > 0:
+                    tree = ET.parse(local_xml)
+                    return tree.getroot()
     except Exception:
         pass
     finally:
@@ -296,17 +303,7 @@ def find_tiktok_video_controls(
         if any(k in desc or k in txt for k in ("chia sẻ video", "share video")):
             share_coords = (cx, cy)
 
-    # Nếu DOM bắt được cả Like và Bookmark nhưng bị sót Comment:
-    # Icon Bình luận LUÔN nằm chính giữa Like và Bookmark
-    if comment_coords is None and like_coords is not None and bookmark_coords is not None:
-        mid_y = (like_coords[1] + bookmark_coords[1]) // 2
-        comment_coords = (int(width * 0.925), mid_y)
-    elif comment_coords is None and like_coords is not None:
-        comment_coords = (int(width * 0.925), like_coords[1] + int(height * 0.088))
-    elif comment_coords is None and bookmark_coords is not None:
-        comment_coords = (int(width * 0.925), bookmark_coords[1] - int(height * 0.088))
-    elif comment_coords is None and right_rail_elements:
-        comment_coords = right_rail_elements[0]
+    # Tuyệt đối không suy đoán tọa độ khi thiếu nút bình luận trên DOM
 
     # Tuyệt đối không tự bịa tọa độ Like/Comment khi không nhận diện được
     if like_coords is not None:
@@ -524,11 +521,7 @@ def find_facebook_target_controls(
     comment_coords = comment_info["coords"] if comment_info else None
     share_coords = share_info["coords"] if share_info else None
 
-    # Neo tọa độ nếu chỉ tìm thấy Like hoặc Share trong hàng này
-    if comment_coords is None and like_coords is not None and share_coords is not None:
-        comment_coords = ((like_coords[0] + share_coords[0]) // 2, (like_coords[1] + share_coords[1]) // 2)
-    elif comment_coords is None and like_coords is not None:
-        comment_coords = (like_coords[0] + int(width * 0.13), like_coords[1])
+    # Tuyệt đối không neo hay suy đoán tọa độ nút bình luận Facebook
 
     if like_coords is not None:
         res["like"] = {"center": like_coords, "is_liked": is_liked}

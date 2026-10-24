@@ -87,17 +87,35 @@ def run_adaptive(
             policy, "wave_interval_seconds", (60, 120)
         )
 
-        with ThreadPoolExecutor(max_workers=max(len(queued), 32)) as executor:
+        effective_max_workers = max(1, policy.max_workers)
+        with ThreadPoolExecutor(max_workers=effective_max_workers) as executor:
             while queued and not is_cancelled():
-                # 1. Chọn kích thước đợt (2 - 3 máy)
-                wave_min = wave_size_range[0]
-                wave_max = wave_size_range[1]
+                done_futs = [f for f in active_futures if f.done()]
+                for fut in done_futs:
+                    idx = active_futures.pop(fut)
+                    results[idx] = fut.result()
+
+                while len(active_futures) >= effective_max_workers and not is_cancelled():
+                    done, _ = wait(
+                        tuple(active_futures),
+                        timeout=0.25,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    for fut in done:
+                        idx = active_futures.pop(fut)
+                        results[idx] = fut.result()
+
+                if is_cancelled():
+                    break
+
+                wave_min = min(wave_size_range[0], effective_max_workers)
+                wave_max = min(wave_size_range[1], effective_max_workers)
                 wave_limit = min(wave_max, len(queued))
-                if len(queued) >= wave_min:
+                if len(queued) >= wave_min and wave_limit >= wave_min:
                     wave_size = randint_fn(wave_min, wave_limit)
                 else:
-                    wave_size = len(queued)
-                wave_size = max(1, min(wave_size, len(queued)))
+                    wave_size = min(len(queued), effective_max_workers)
+                wave_size = max(1, min(wave_size, len(queued), effective_max_workers))
 
                 current_wave = [queued.pop(0) for _ in range(wave_size)]
                 wave_number += 1
@@ -108,10 +126,23 @@ def run_adaptive(
                         total_devices,
                     )
 
-                # 2. Khởi chạy các máy trong đợt này (với độ trễ nhẹ 5-15s giữa các máy trong cùng đợt)
                 for index, device_id in current_wave:
                     if is_cancelled():
                         break
+
+                    while len(active_futures) >= effective_max_workers and not is_cancelled():
+                        done, _ = wait(
+                            tuple(active_futures),
+                            timeout=0.25,
+                            return_when=FIRST_COMPLETED,
+                        )
+                        for fut in done:
+                            idx = active_futures.pop(fut)
+                            results[idx] = fut.result()
+
+                    if is_cancelled():
+                        break
+
                     if has_started_any and policy.stagger_seconds[1] > 0:
                         stagger = randint_fn(*policy.stagger_seconds)
                         if stagger > 0:
@@ -132,7 +163,6 @@ def run_adaptive(
                     started_position += 1
                     has_started_any = True
 
-                # 3. Tính từ thời điểm đợt hiện tại mở: chờ 1 - 2 phút (60 - 120s) rồi mở đợt tiếp theo
                 if queued and not is_cancelled():
                     wave_interval = randint_fn(*wave_interval_range)
                     if wave_interval > 0:
