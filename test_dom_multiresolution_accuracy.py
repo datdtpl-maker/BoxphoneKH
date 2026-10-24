@@ -257,6 +257,7 @@ class DomMultiResolutionAccuracyTests(unittest.TestCase):
         xml_liked = """<hierarchy>
           <node class="android.widget.ImageView" content-desc="Video liked" bounds="[912,997][1080,1155]" />
           <node class="android.widget.ImageView" content-desc="Read or add comments" bounds="[912,1155][1080,1313]" />
+          <node class="android.widget.TextView" text="Bình luận test" bounds="[100,1400][500,1450]" />
         </hierarchy>"""
         with patch("ui_automator_dom.dump_ui_tree", return_value=ET.fromstring(xml_liked)):
             taps = []

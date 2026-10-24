@@ -20,18 +20,40 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def parse_bounds(bounds_str: str) -> Optional[Tuple[int, int, int, int, int, int]]:
-    """Phân tích chuỗi bounds '[x1,y1][x2,y2]' -> (x1, y1, x2, y2, cx, cy)."""
+    """Phân tích chuỗi bounds '[x1,y1][x2,y2]' -> (x1, y1, x2, y2, cx, cy).
+
+    Hỗ trợ đầy đủ tọa độ âm (off-screen / panning).
+    Kiểm tra tính hợp lệ: x2 > x1 và y2 > y1 (kích thước dương).
+    """
     if not bounds_str:
         return None
-    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds_str)
+    m = re.match(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", bounds_str)
     if not m:
-        nums = re.findall(r"\d+", bounds_str)
+        nums = re.findall(r"-?\d+", bounds_str)
         if len(nums) >= 4:
             x1, y1, x2, y2 = map(int, nums[:4])
+            if x2 <= x1 or y2 <= y1:
+                return None
             return x1, y1, x2, y2, (x1 + x2) // 2, (y1 + y2) // 2
         return None
     x1, y1, x2, y2 = map(int, m.groups())
+    if x2 <= x1 or y2 <= y1:
+        return None
     return x1, y1, x2, y2, (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def is_bounds_visible_on_screen(
+    b_info: Tuple[int, int, int, int, int, int], width: int, height: int
+) -> bool:
+    """Kiểm tra phần tử có giao cắt và hiển thị trên màn hình [0, 0][width, height] hay không."""
+    x1, y1, x2, y2, cx, cy = b_info
+    # Phải giao nhau với vùng hiển thị màn hình
+    if x2 <= 0 or y2 <= 0 or x1 >= width or y1 >= height:
+        return False
+    # Tâm phần tử phải nằm trong màn hình
+    if not (0 <= cx < width and 0 <= cy < height):
+        return False
+    return True
 
 
 def dump_ui_tree(adb, device_id: str, timeout: int = 5) -> Optional[ET.Element]:
@@ -73,6 +95,10 @@ def dump_ui_tree(adb, device_id: str, timeout: int = 5) -> Optional[ET.Element]:
                 os.remove(local_xml)
             except Exception:
                 pass
+        try:
+            adb.execute_adb(device_id, ["shell", "rm", "-f", remote_xml], timeout=timeout)
+        except Exception:
+            pass
     return None
 
 
@@ -197,7 +223,7 @@ def find_tiktok_video_controls(
     for elem in root.iter():
         bounds = elem.get("bounds", "")
         b_info = parse_bounds(bounds)
-        if not b_info:
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
             continue
         x1, y1, x2, y2, cx, cy = b_info
 
@@ -281,14 +307,18 @@ def find_tiktok_video_controls(
         comment_coords = (int(width * 0.925), bookmark_coords[1] - int(height * 0.088))
     elif comment_coords is None and right_rail_elements:
         comment_coords = right_rail_elements[0]
-    elif comment_coords is None:
-        comment_coords = (int(width * 0.925), int(height * 0.643))
 
-    if like_coords is None:
-        like_coords = (int(width * 0.925), int(height * 0.555))
+    # Tuyệt đối không tự bịa tọa độ Like/Comment khi không nhận diện được
+    if like_coords is not None:
+        res["like"] = {"node": like_node, "center": like_coords, "is_liked": is_liked}
+    else:
+        res["like"] = None
 
-    res["like"] = {"node": like_node, "center": like_coords, "is_liked": is_liked}
-    res["comment"] = {"node": comment_node, "center": comment_coords}
+    if comment_coords is not None:
+        res["comment"] = {"node": comment_node, "center": comment_coords}
+    else:
+        res["comment"] = None
+
     if bookmark_coords:
         res["bookmark"] = {"node": bookmark_node, "center": bookmark_coords, "is_bookmarked": is_bookmarked}
     if share_coords:
@@ -317,7 +347,7 @@ def find_tiktok_comment_sheet_elements(
     for elem in root.iter():
         bounds = elem.get("bounds", "")
         b_info = parse_bounds(bounds)
-        if not b_info:
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
             continue
         x1, y1, x2, y2, cx, cy = b_info
 
@@ -346,20 +376,12 @@ def find_tiktok_comment_sheet_elements(
             if cx > width * 0.65 and cy >= height * 0.40:
                 send_coords = (cx, cy)
 
-    if input_coords is None:
-        # Tọa độ thanh input bar sát đáy màn hình của comment sheet
-        input_coords = (int(width * 0.450), int(height * 0.955))
-
-    if send_coords is None:
-        # Tọa độ nút tròn đỏ gửi mặc định khi bàn phím mở
-        send_coords = (int(width * 0.880), int(height * 0.510))
-
-    if close_coords is None:
-        close_coords = (int(width * 0.940), int(height * 0.400))
-
-    res["input"] = {"center": input_coords}
-    res["send"] = {"center": send_coords}
-    res["close"] = {"center": close_coords}
+    if input_coords is not None:
+        res["input"] = {"center": input_coords}
+    if send_coords is not None:
+        res["send"] = {"center": send_coords}
+    if close_coords is not None:
+        res["close"] = {"center": close_coords}
     return res
 
 
@@ -370,8 +392,15 @@ def find_tiktok_comment_sheet_elements(
 def find_facebook_target_controls(
     root: Optional[ET.Element], width: int, height: int
 ) -> Dict[str, Any]:
-    """Xác định vị trí các nút Thích, Bình Luận, Chia Sẻ trên bài viết/Reels Facebook qua DOM."""
+    """Xác định vị trí các nút Thích, Bình Luận, Chia Sẻ trên bài viết/Reels Facebook qua DOM.
+
+    Phân biệt container bài viết:
+    - Nếu phát hiện nhiều bài viết khác nhau trên cùng màn hình mà không phân biệt được mục tiêu:
+      trả về status='AMBIGUOUS_TARGET' để dừng an toàn thay vì bấm nhầm.
+    - Tuyệt đối không trả tọa độ đoán mò khi không tìm thấy.
+    """
     res: Dict[str, Any] = {
+        "status": "NOT_FOUND",
         "like": None,
         "comment": None,
         "share": None,
@@ -380,20 +409,19 @@ def find_facebook_target_controls(
     if root is None:
         return res
 
-    like_coords = None
-    is_liked = False
-    comment_coords = None
-    share_coords = None
+    like_candidates = []
+    comment_candidates = []
+    share_candidates = []
 
     for elem in root.iter():
         bounds = elem.get("bounds", "")
         b_info = parse_bounds(bounds)
-        if not b_info:
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
             continue
         x1, y1, x2, y2, cx, cy = b_info
 
-        # Chỉ xét vùng tương tác ở nửa dưới màn hình
-        if cy < height * 0.45:
+        # Bỏ qua phần header / thanh tìm kiếm trên cùng (top 20%)
+        if cy < height * 0.20:
             continue
 
         desc = normalize_text(elem.get("content-desc", ""))
@@ -408,40 +436,108 @@ def find_facebook_target_controls(
         # 1. Phát hiện nút Thích / Like
         if any(k in combined for k in ("thích", "like", "bày tỏ cảm xúc", "react")):
             if not any(k in combined for k in ("bình luận", "chia sẻ", "share")):
-                like_coords = (cx, cy)
-                is_liked = (
-                    "đã thích" in desc
-                    or "liked" in desc
-                    or "đã bày tỏ" in desc
-                    or elem.get("selected", "").casefold() == "true"
-                    or elem.get("checked", "").casefold() == "true"
+                like_candidates.append(
+                    {
+                        "elem": elem,
+                        "coords": (cx, cy),
+                        "bounds": b_info,
+                        "is_liked": (
+                            "đã thích" in desc
+                            or "liked" in desc
+                            or "đã bày tỏ" in desc
+                            or elem.get("selected", "").casefold() == "true"
+                            or elem.get("checked", "").casefold() == "true"
+                        ),
+                    }
                 )
 
         # 2. Phát hiện nút Bình Luận
         if any(k in combined for k in ("bình luận", "comment", "viết bình luận")):
             if not any(k in combined for k in ("đã bình luận", "dưới tên")):
-                comment_coords = (cx, cy)
+                comment_candidates.append(
+                    {"elem": elem, "coords": (cx, cy), "bounds": b_info}
+                )
 
         # 3. Phát hiện nút Chia Sẻ
         if any(k in combined for k in ("chia sẻ", "share")):
-            share_coords = (cx, cy)
+            share_candidates.append(
+                {"elem": elem, "coords": (cx, cy), "bounds": b_info}
+            )
 
-    # Neo tọa độ nếu chỉ tìm thấy Like hoặc Share (Icon bình luận luôn nằm giữa Like và Share)
+    if not like_candidates and not comment_candidates:
+        return res
+
+    # Nhóm các nút Like và Comment theo hàng ngang (Reaction Row của từng bài viết)
+    rows: List[Dict[str, Any]] = []
+    for lk in like_candidates:
+        matched_row = None
+        for r in rows:
+            if abs(r["y"] - lk["coords"][1]) < height * 0.05:
+                matched_row = r
+                break
+        if matched_row is None:
+            matched_row = {"y": lk["coords"][1], "likes": [], "comments": [], "shares": []}
+            rows.append(matched_row)
+        matched_row["likes"].append(lk)
+
+    for cm in comment_candidates:
+        matched_row = None
+        for r in rows:
+            if abs(r["y"] - cm["coords"][1]) < height * 0.05:
+                matched_row = r
+                break
+        if matched_row is None:
+            matched_row = {"y": cm["coords"][1], "likes": [], "comments": [], "shares": []}
+            rows.append(matched_row)
+        matched_row["comments"].append(cm)
+
+    for sh in share_candidates:
+        for r in rows:
+            if abs(r["y"] - sh["coords"][1]) < height * 0.05:
+                r["shares"].append(sh)
+                break
+
+    valid_rows = [r for r in rows if r["likes"] or r["comments"]]
+
+    # Nếu phát hiện nhiều bài viết riêng biệt (mỗi bài có hàng Like/Comment riêng cách nhau trên màn hình)
+    if len(valid_rows) > 1:
+        distinct_y_levels = [r["y"] for r in valid_rows]
+        distinct_y_levels.sort()
+        has_multiple_posts = any(
+            distinct_y_levels[i + 1] - distinct_y_levels[i] > height * 0.10
+            for i in range(len(distinct_y_levels) - 1)
+        )
+        if has_multiple_posts:
+            res["status"] = "AMBIGUOUS_TARGET"
+            return res
+
+    target_row = valid_rows[0] if valid_rows else None
+    if not target_row:
+        return res
+
+    like_info = target_row["likes"][0] if target_row["likes"] else None
+    comment_info = target_row["comments"][0] if target_row["comments"] else None
+    share_info = target_row["shares"][0] if target_row["shares"] else None
+
+    like_coords = like_info["coords"] if like_info else None
+    is_liked = like_info["is_liked"] if like_info else False
+    comment_coords = comment_info["coords"] if comment_info else None
+    share_coords = share_info["coords"] if share_info else None
+
+    # Neo tọa độ nếu chỉ tìm thấy Like hoặc Share trong hàng này
     if comment_coords is None and like_coords is not None and share_coords is not None:
         comment_coords = ((like_coords[0] + share_coords[0]) // 2, (like_coords[1] + share_coords[1]) // 2)
     elif comment_coords is None and like_coords is not None:
         comment_coords = (like_coords[0] + int(width * 0.13), like_coords[1])
-    elif comment_coords is None:
-        comment_coords = (int(width * 0.50), int(height * 0.940))
 
-    if like_coords is None:
-        like_coords = (int(width * 0.20), int(height * 0.940))
-
-    res["like"] = {"center": like_coords, "is_liked": is_liked}
-    res["comment"] = {"center": comment_coords}
-    if share_coords:
+    if like_coords is not None:
+        res["like"] = {"center": like_coords, "is_liked": is_liked}
+    if comment_coords is not None:
+        res["comment"] = {"center": comment_coords}
+    if share_coords is not None:
         res["share"] = {"center": share_coords}
 
+    res["status"] = "FOUND" if (res["like"] or res["comment"]) else "NOT_FOUND"
     return res
 
 
@@ -463,7 +559,7 @@ def find_facebook_comment_sheet_elements(
     for elem in root.iter():
         bounds = elem.get("bounds", "")
         b_info = parse_bounds(bounds)
-        if not b_info:
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
             continue
         x1, y1, x2, y2, cx, cy = b_info
 
@@ -485,12 +581,9 @@ def find_facebook_comment_sheet_elements(
             if cx > width * 0.70 and cy > height * 0.50:
                 send_coords = (cx, cy)
 
-    if input_coords is None:
-        input_coords = (int(width * 0.400), int(height * 0.927))
+    if input_coords is not None:
+        res["input"] = {"center": input_coords}
+    if send_coords is not None:
+        res["send"] = {"center": send_coords}
 
-    if send_coords is None:
-        send_coords = (int(width * 0.950), int(height * 0.934))
-
-    res["input"] = {"center": input_coords}
-    res["send"] = {"center": send_coords}
     return res

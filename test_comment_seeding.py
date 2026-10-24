@@ -58,9 +58,11 @@ class TestCommentController(unittest.TestCase):
         first_cmd = calls[0][0][1]
         self.assertIn("com.facebook.katana", first_cmd)
 
+    @patch("comment_controller.verify_tiktok_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
+    @patch("ui_automator_dom.find_tiktok_video_controls", return_value={"like": {"center": (996, 1076), "is_liked": False}, "comment": {"center": (996, 1234)}, "channel_name": "a"})
     @patch("comment_controller.is_tiktok_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_tiktok_comment_flow(self, _mock_sleep, _mock_open):
+    def test_post_tiktok_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify):
         status_msgs = []
         res = comment_controller.post_tiktok_comment(
             self.adb,
@@ -71,12 +73,15 @@ class TestCommentController(unittest.TestCase):
             status_callback=status_msgs.append,
         )
         self.assertTrue(res)
+        self.assertEqual(res.outcome, comment_controller.TaskOutcome.SUCCESS)
         self.adb.input_text.assert_called_with(self.device_id, "Sản phẩm rất tốt!")
         self.assertTrue(any("thành công" in msg for msg in status_msgs))
 
+    @patch("comment_controller.verify_facebook_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
+    @patch("ui_automator_dom.find_facebook_target_controls", return_value={"status": "FOUND", "like": {"center": (200, 1800), "is_liked": False}, "comment": {"center": (500, 1800)}})
     @patch("comment_controller.is_facebook_comment_sheet_open", return_value=True)
     @patch("time.sleep", return_value=None)
-    def test_post_facebook_comment_flow(self, _mock_sleep, _mock_open):
+    def test_post_facebook_comment_flow(self, _mock_sleep, _mock_open, _mock_ctrls, _mock_verify):
         status_msgs = []
         res = comment_controller.post_facebook_comment(
             self.adb,
@@ -87,6 +92,7 @@ class TestCommentController(unittest.TestCase):
             status_callback=status_msgs.append,
         )
         self.assertTrue(res)
+        self.assertEqual(res.outcome, comment_controller.TaskOutcome.SUCCESS)
         self.adb.input_text.assert_called_with(self.device_id, "Tư vấn cho mình với nha!")
         self.assertIn(call(self.device_id, 4), self.adb.keyevent.call_args_list)
         self.assertIn(call(self.device_id, 3), self.adb.keyevent.call_args_list)
@@ -657,16 +663,18 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertAlmostEqual(coords[1], 1800, delta=15)
 
 
+    @patch("comment_controller.verify_tiktok_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
+    @patch("ui_automator_dom.find_tiktok_video_controls", return_value={"like": {"center": (996, 1076), "is_liked": False}, "comment": {"center": (996, 1234)}, "channel_name": "test"})
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)
     @patch("comment_controller.wait_for_tiktok_video_ready", return_value=True)
     @patch("comment_controller.find_tiktok_comment_icon_coords", return_value=(950, 1100))
-    @patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, False, False, False, True])
+    @patch("comment_controller.is_tiktok_comment_sheet_open", side_effect=[False, False, False, True])
     @patch("comment_controller.find_comment_input_coords", return_value=(540, 1800))
     @patch("comment_controller.ensure_comment_input_ready", return_value=True)
     @patch("comment_controller.find_send_button_coords", return_value=(950, 1200))
     def test_post_tiktok_comment_retries_intent_and_succeeds(
-        self, _send, _ready, _input, _sheet, _icon, _wait, mock_intent, _sleep
+        self, _send, _ready, _input, _sheet, _icon, _wait, mock_intent, _sleep, _ctrls, _verify
     ):
         """Nếu lần 1 chưa mở được sheet (4 attempt đầu False), tự động mở lại intent lần 2 và thành công."""
         adb = MagicMock()
@@ -699,6 +707,8 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         self.assertEqual(mock_intent.call_count, 2)
         adb.input_text.assert_not_called()
 
+    @patch("comment_controller.verify_facebook_comment_posted", return_value=comment_controller.TaskOutcome.SUCCESS)
+    @patch("ui_automator_dom.find_facebook_target_controls", return_value={"status": "FOUND", "like": {"center": (200, 1800), "is_liked": False}, "comment": {"center": (500, 1800)}})
     @patch("comment_controller.time.sleep", return_value=None)
     @patch("comment_controller.open_url_via_intent", return_value=True)
     @patch("comment_controller.find_facebook_comment_icon_coords", return_value=(500, 1850))
@@ -707,7 +717,7 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
     @patch("comment_controller.ensure_comment_input_ready", return_value=True)
     @patch("comment_controller.find_send_button_coords", return_value=(1000, 1800))
     def test_post_facebook_comment_retries_intent_and_succeeds(
-        self, _send, _ready, _input, _sheet, _icon, mock_intent, _sleep
+        self, _send, _ready, _input, _sheet, _icon, mock_intent, _sleep, _ctrls, _verify
     ):
         """Nếu lần 1 chưa mở được sheet Facebook, tự động mở lại link intent lần 2 và thành công."""
         adb = MagicMock()

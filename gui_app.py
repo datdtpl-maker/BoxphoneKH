@@ -1261,10 +1261,10 @@ class GUIApp(ctk.CTk):
         # Platform selector
         plat_box = ctk.CTkFrame(row_cfg, fg_color="transparent")
         plat_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(plat_box, text="Nền tảng (TikTok độc quyền):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(plat_box, text="Nền tảng (TikTok / Facebook):", font=label_font, text_color=text).pack(anchor="w", pady=(0, 2))
         self.comment_platform_combo = ctk.CTkComboBox(
             plat_box,
-            values=["TikTok"],
+            values=comment_controller.PLATFORM_CHOICES,
             command=self._on_comment_platform_changed,
             font=body_font,
             height=36,
@@ -4900,17 +4900,40 @@ class GUIApp(ctk.CTk):
                     )
                     time.sleep(2.0)
 
-                ok = comment_controller.execute_comment_task(
-                    main.adb,
-                    device_id,
-                    platform=task.platform,
-                    url=task.url,
-                    comment_text=task.content,
-                    dwell_time=dwell_time,
-                    status_callback=dev_cb,
-                    is_cancelled=lambda: self.comment_cancel_flag,
-                )
+                try:
+                    with main.adb.device_workflow_scope(
+                        device_id,
+                        timeout=30.0,
+                        is_cancelled=lambda: self.comment_cancel_flag,
+                    ):
+                        ok = comment_controller.execute_comment_task(
+                            main.adb,
+                            device_id,
+                            platform=task.platform,
+                            url=task.url,
+                            comment_text=task.content,
+                            dwell_time=dwell_time,
+                            status_callback=dev_cb,
+                            is_cancelled=lambda: self.comment_cancel_flag,
+                        )
+                except TimeoutError as te:
+                    self.log_message(f"[Máy {device_name}] ❌ Lỗi khóa thiết bị: {te}")
+                    ok = comment_controller.CommentTaskResult(
+                        comment_controller.TaskOutcome.RETRYABLE_ERROR,
+                        str(te),
+                        can_retry=True,
+                    )
+
                 if ok:
+                    break
+
+                # Nếu kết quả là UNKNOWN_OUTCOME hoặc không thể retry (chưa rõ kết quả, ambiguous, v.v.):
+                # Không được tự ý retry lần 2 để tránh gửi lặp bình luận!
+                if isinstance(ok, comment_controller.CommentTaskResult) and not ok.can_retry:
+                    self.log_message(
+                        f"[Máy {device_name}] ⚠️ Không thể tự động thử lại STT {task.stt}: "
+                        f"{ok.outcome.value} ({ok.message}). Cần đối soát thủ công!"
+                    )
                     break
 
             if ok:

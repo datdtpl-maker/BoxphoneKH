@@ -166,22 +166,36 @@ class ADBController:
         )
 
     @contextmanager
-    def device_workflow_scope(self, device_id):
-        """Grant exclusive in-process control of a device to one workflow."""
+    def device_workflow_scope(self, device_id, timeout=30.0, is_cancelled=None):
+        """Grant exclusive in-process control of a device to one workflow.
+
+        Bảo vệ tranh chấp giữa các luồng/workflow, có timeout và kiểm tra cờ hủy
+        để chống deadlock khi thiết bị bị khóa hoặc bị hủy ngang.
+        """
         with self._device_workflow_locks_guard:
             if not hasattr(self, "_device_workflow_locks"):
                 self._device_workflow_locks = {}
             lock = self._device_workflow_locks.setdefault(
                 device_id, threading.RLock()
             )
-        with lock:
+
+        start_time = time.time()
+        acquired = False
+        while not acquired:
+            if is_cancelled and is_cancelled():
+                raise TimeoutError(f"Tác vụ bị hủy trong khi chờ khóa thiết bị {device_id}")
+            if timeout is not None and (time.time() - start_time) > timeout:
+                raise TimeoutError(f"Hết thời gian chờ ({timeout}s) để lấy khóa thiết bị {device_id}")
+            acquired = lock.acquire(timeout=0.2)
+
+        try:
             with self._device_workflow_locks_guard:
                 self._active_device_workflows[device_id] = (
                     self._active_device_workflows.get(device_id, 0) + 1
                 )
+            yield
+        finally:
             try:
-                yield
-            finally:
                 with self._device_workflow_locks_guard:
                     remaining = (
                         self._active_device_workflows.get(device_id, 1) - 1
@@ -190,6 +204,8 @@ class ADBController:
                         self._active_device_workflows[device_id] = remaining
                     else:
                         self._active_device_workflows.pop(device_id, None)
+            finally:
+                lock.release()
 
     def is_device_workflow_active(self, device_id):
         """Cho tác vụ nền biết thiết bị đang được một workflow điều khiển."""

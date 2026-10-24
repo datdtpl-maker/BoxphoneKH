@@ -26,9 +26,49 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
 
+from enum import Enum
+
 PLATFORM_TIKTOK = "TikTok"
 PLATFORM_FACEBOOK = "Facebook"
 PLATFORM_CHOICES = [PLATFORM_TIKTOK, PLATFORM_FACEBOOK]
+
+
+class TaskOutcome(str, Enum):
+    """Phân loại kết quả nghiệp vụ của tác vụ tương tác/bình luận."""
+
+    SUCCESS = "SUCCESS"
+    RETRYABLE_ERROR = "RETRYABLE_ERROR"
+    AMBIGUOUS_TARGET = "AMBIGUOUS_TARGET"
+    UNSUPPORTED_UI = "UNSUPPORTED_UI"
+    UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
+    CANCELLED = "CANCELLED"
+    FATAL_ERROR = "FATAL_ERROR"
+
+
+class CommentTaskResult:
+    """Kết quả chi tiết của tác vụ bình luận, hỗ trợ phân loại lỗi và chống retry mù quáng."""
+
+    def __init__(
+        self,
+        outcome: TaskOutcome,
+        message: str = "",
+        can_retry: bool = False,
+        details: Optional[dict] = None,
+    ):
+        self.outcome = outcome
+        self.message = message
+        self.can_retry = can_retry
+        self.details = details or {}
+
+    def __bool__(self) -> bool:
+        """Chỉ đánh giá True khi và chỉ khi tác vụ THỰC SỰ THÀNH CÔNG và đã được xác minh."""
+        return self.outcome == TaskOutcome.SUCCESS
+
+    def __repr__(self) -> str:
+        return (
+            f"CommentTaskResult(outcome={self.outcome.value}, "
+            f"can_retry={self.can_retry}, message='{self.message}')"
+        )
 
 DEFAULT_STEALTH_REFERRER = "android-app://com.zing.zalo"
 TIKTOK_PRIMARY_PACKAGE = "com.ss.android.ugc.trill"
@@ -798,6 +838,143 @@ def ensure_comment_input_ready(
     return True
 
 
+def verify_tiktok_comment_posted(
+    adb,
+    device_id: str,
+    comment_text: str,
+    width: int,
+    height: int,
+    timeout: float = 4.0,
+) -> TaskOutcome:
+    """Xác minh bình luận TikTok đã được đăng thành công bằng bằng chứng cụ thể trên UI.
+
+    Kiểm tra:
+    1. Thông báo lỗi hoặc dialog cảnh báo (vi phạm, bị chặn, bình luận quá nhanh).
+    2. Comment text có xuất hiện trong danh sách hiển thị bình luận hay không.
+    3. Ô nhập EditText có được xóa sạch (cleared) sau khi gửi hay không.
+    """
+    clean_target = (comment_text or "").strip().casefold()
+    if not clean_target:
+        return TaskOutcome.UNKNOWN_OUTCOME
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        root = ui_automator_dom.dump_ui_tree(adb, device_id)
+        if root is not None:
+            # 1. Kiểm tra dialog lỗi
+            for elem in root.iter():
+                txt = (elem.get("text") or "").casefold()
+                desc = (elem.get("content-desc") or "").casefold()
+                if any(
+                    w in txt or w in desc
+                    for w in (
+                        "bạn bình luận quá nhanh",
+                        "nội dung vi phạm",
+                        "bị hạn chế",
+                        "không thể bình luận",
+                        "thử lại sau",
+                    )
+                ):
+                    return TaskOutcome.FATAL_ERROR
+
+            # 2. Tìm comment text trong danh sách bình luận
+            found_in_stream = False
+            edit_text_cleared = False
+            for elem in root.iter():
+                cls_name = (elem.get("class") or "").casefold()
+                txt = (elem.get("text") or "").strip()
+                desc = (elem.get("content-desc") or "").strip()
+
+                if "edittext" in cls_name:
+                    if not txt or any(
+                        p in txt.casefold()
+                        for p in ("thêm bình luận", "add comment", "viết bình luận")
+                    ):
+                        edit_text_cleared = True
+                    elif clean_target in txt.casefold():
+                        edit_text_cleared = False
+
+                if "edittext" not in cls_name:
+                    if clean_target in txt.casefold() or clean_target in desc.casefold():
+                        found_in_stream = True
+                        break
+
+            if found_in_stream:
+                return TaskOutcome.SUCCESS
+
+            if edit_text_cleared:
+                time.sleep(1.0)
+                continue
+
+        time.sleep(0.8)
+
+    return TaskOutcome.UNKNOWN_OUTCOME
+
+
+def verify_facebook_comment_posted(
+    adb,
+    device_id: str,
+    comment_text: str,
+    width: int,
+    height: int,
+    timeout: float = 4.0,
+) -> TaskOutcome:
+    """Xác minh bình luận Facebook đã được đăng thành công bằng bằng chứng cụ thể trên UI."""
+    clean_target = (comment_text or "").strip().casefold()
+    if not clean_target:
+        return TaskOutcome.UNKNOWN_OUTCOME
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        root = ui_automator_dom.dump_ui_tree(adb, device_id)
+        if root is not None:
+            for elem in root.iter():
+                txt = (elem.get("text") or "").casefold()
+                desc = (elem.get("content-desc") or "").casefold()
+                if any(
+                    w in txt or w in desc
+                    for w in (
+                        "bạn tạm thời bị chặn",
+                        "vi phạm tiêu chuẩn cộng đồng",
+                        "không thể bình luận",
+                        "bình luận quá nhanh",
+                    )
+                ):
+                    return TaskOutcome.FATAL_ERROR
+
+            found_in_stream = False
+            edit_text_cleared = False
+            for elem in root.iter():
+                cls_name = (elem.get("class") or "").casefold()
+                txt = (elem.get("text") or "").strip()
+                desc = (elem.get("content-desc") or "").strip()
+
+                if "edittext" in cls_name:
+                    if not txt or any(
+                        p in txt.casefold()
+                        for p in ("viết bình luận", "bình luận dưới tên", "write a comment")
+                    ):
+                        edit_text_cleared = True
+                    elif clean_target in txt.casefold():
+                        edit_text_cleared = False
+
+                if "edittext" not in cls_name:
+                    if clean_target in txt.casefold() or clean_target in desc.casefold():
+                        found_in_stream = True
+                        break
+
+            if found_in_stream:
+                return TaskOutcome.SUCCESS
+
+            if edit_text_cleared:
+                time.sleep(1.0)
+                continue
+
+        time.sleep(0.8)
+
+    return TaskOutcome.UNKNOWN_OUTCOME
+
+
 def post_tiktok_comment(
     adb,
     device_id: str,
@@ -806,14 +983,15 @@ def post_tiktok_comment(
     dwell_time: int = 15,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
-) -> bool:
+) -> CommentTaskResult:
     """Quy trình mở link video TikTok, xem tự nhiên và đăng bình luận.
 
     Khóa cứng video mục tiêu (Target Lock), kiểm tra DOM thời gian thực:
     - Thả tim trước nếu chưa like (video/tài khoản đã like thì bỏ qua, tuyệt đối không hủy tim)
-    - Nhận diện chính xác tọa độ theo từng máy qua UI Automator DOM Engine
+    - Nhận diện chính xác tọa độ theo từng máy qua UI Automator DOM Engine, không bấm đoán
     - Tuyệt đối không lướt (swipe) làm trượt sang video khác
-    - Gửi bình luận và đóng an toàn qua phím Back/Escape/Backdrop
+    - Gửi bình luận đơn (không tap trùng, không Enter mù quáng) và xác minh kết quả
+    - Dừng có kiểm soát và trả về CommentTaskResult với outcome cụ thể
     """
     def log(msg: str):
         if status_callback:
@@ -821,7 +999,7 @@ def post_tiktok_comment(
 
     if is_cancelled and is_cancelled():
         log("Đã hủy tác vụ.")
-        return False
+        return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
     width, height = adb.get_effective_screen_size(device_id)
     target_channel = ui_automator_dom.extract_tiktok_channel_from_url(url)
@@ -843,7 +1021,7 @@ def post_tiktok_comment(
     sheet_opened = False
     for flow_attempt in range(1, 3):
         if is_cancelled and is_cancelled():
-            return False
+            return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
         if flow_attempt > 1:
             log("Lần 1 chưa mở được khung bình luận • Tự động dọn dẹp app và mở lại link video lần 2...")
@@ -863,7 +1041,7 @@ def post_tiktok_comment(
         if not success:
             log("Lỗi không thể mở link video.")
             if flow_attempt == 2:
-                return False
+                return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Không thể mở link video qua Intent", can_retry=False)
             continue
 
         # 2. Chờ TikTok tải xong giao diện video
@@ -871,19 +1049,44 @@ def post_tiktok_comment(
             adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
         )
         if is_cancelled and is_cancelled():
-            return False
+            return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
         # 3. Quét DOM kiểm tra Khóa cứng Video mục tiêu (Target Lock)
         root = ui_automator_dom.dump_ui_tree(adb, device_id)
         ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
         dom_channel = ctrls.get("channel_name", "")
-        if target_channel and dom_channel:
-            if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
-                log(f"⚠️ Video đang phát ('{dom_channel}') chưa khớp Kênh mục tiêu ('{target_channel}') • Mở lại Intent...")
-                open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
-                time.sleep(2.5)
-                root = ui_automator_dom.dump_ui_tree(adb, device_id)
-                ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+
+        target_verified = True
+        if target_channel:
+            if dom_channel:
+                if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                    log(f"⚠️ Video đang phát ('{dom_channel}') chưa khớp Kênh mục tiêu ('{target_channel}') • Mở lại Intent...")
+                    open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+                    time.sleep(2.5)
+                    root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                    ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+                    dom_channel = ctrls.get("channel_name", "")
+                    if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+                        log(f"❌ Kênh trên thiết bị ('{dom_channel}') không khớp với kênh mục tiêu ('{target_channel}')!")
+                        target_verified = False
+            else:
+                # Nếu không đọc được tên kênh, kiểm tra xem có video player hoặc nút like/comment không
+                if not ctrls.get("like") and not ctrls.get("comment"):
+                    log("⚠️ Không nhận diện được giao diện video mục tiêu • Thử nạp lại Intent...")
+                    open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+                    time.sleep(2.5)
+                    root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                    ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+                    if not ctrls.get("like") and not ctrls.get("comment"):
+                        log("❌ Không đủ bằng chứng giao diện video mục tiêu!")
+                        target_verified = False
+
+        if not target_verified:
+            return CommentTaskResult(
+                TaskOutcome.AMBIGUOUS_TARGET,
+                "Không thể xác minh đúng video mục tiêu trên màn hình",
+                can_retry=False,
+            )
 
         # 4. Dwell time: Xem video tự nhiên (KHÔNG SWIPE DỌC)
         dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
@@ -891,17 +1094,15 @@ def post_tiktok_comment(
         for remaining in range(dwell_target, 0, -1):
             if is_cancelled and is_cancelled():
                 log("Dừng xem do người dùng yêu cầu.")
-                return False
+                return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
             if remaining % 4 == 0 or remaining <= 3:
                 log(f"Đang xem video ({remaining}s còn lại)...")
             time.sleep(1.0)
 
-        # 5. Xác định chính xác vị trí Like & Comment từ DOM
-        dom_like, is_already_liked, dom_comment = find_tiktok_video_buttons_via_dom(adb, device_id, width, height)
-        like_target = (ctrls.get("like") and ctrls["like"].get("center")) or dom_like or (int(width * 0.925), int(height * 0.550))
-        if ctrls.get("like"):
-            is_already_liked = is_already_liked or ctrls["like"].get("is_liked", False)
-        comment_target = (ctrls.get("comment") and ctrls["comment"].get("center")) or dom_comment or find_tiktok_comment_icon_coords(adb, device_id, width, height)
+        # 5. Xác định vị trí Like & Comment từ DOM
+        like_info = ctrls.get("like")
+        like_target = like_info.get("center") if like_info else None
+        is_already_liked = like_info.get("is_liked", False) if like_info else False
 
         # 6. THẢ TIM TRƯỚC (LIKE FIRST) - Khóa cứng trên clip target, chống hủy tim
         already_tracked = False
@@ -913,35 +1114,35 @@ def post_tiktok_comment(
 
         if is_already_liked or already_tracked:
             log("❤️ Video/tài khoản này đã được thả tim trước đó (DOM Đã thích/Video liked) • Bỏ qua bước thả tim, giữ nguyên tim!")
-        else:
+        elif like_target:
             log(f"❤️ Tiến hành thả tim trước tại tọa độ DOM ({like_target[0]}, {like_target[1]})...")
             adb.tap(device_id, like_target[0], like_target[1])
-            try:
-                import interaction_tracker
-                interaction_tracker.record_interaction(device_id, "tiktok", item_key, "like")
-            except Exception:
-                pass
             time.sleep(random.uniform(1.0, 1.4))
+        else:
+            log("ℹ️ Không tìm thấy nút Like trên DOM • Bỏ qua bước thả tim an toàn, không bấm đoán.")
 
-        # 7. MỞ KHUNG BÌNH LUẬN (Tuyệt đối không vuốt lướt)
-        log(f"Chạm icon Bình luận TikTok tại ({comment_target[0]}, {comment_target[1]})...")
-        for attempt in range(1, 5):
+        # 7. MỞ KHUNG BÌNH LUẬN (Tuyệt đối không vuốt lướt, không bấm tọa độ đoán)
+        for attempt in range(1, 4):
             if is_cancelled and is_cancelled():
-                return False
+                return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
-            if attempt == 1:
-                target_x, target_y = comment_target
-            elif attempt == 2:
-                target_x, target_y = int(width * 0.925), int(height * 0.643)
-                log(f"Lần 1 chưa mở được, chuyển sang tọa độ chuẩn ({target_x}, {target_y})...")
-            elif attempt == 3:
-                target_x, target_y = int(width * 0.925), int(height * 0.665)
-                log(f"Thử lại mở khung bình luận lần 3 tại ({target_x}, {target_y})...")
-            else:
-                target_x, target_y = int(width * 0.925), int(height * 0.620)
-                log(f"Thử lại mở khung bình luận lần 4 tại ({target_x}, {target_y})...")
+            # Đọc lại DOM live trước mỗi lần thử mở khung bình luận
+            if attempt > 1:
+                time.sleep(1.0)
+                root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
 
-            adb.tap(device_id, target_x, target_y)
+            comment_info = ctrls.get("comment")
+            comment_target = comment_info.get("center") if comment_info else None
+            if not comment_target:
+                comment_target = find_tiktok_comment_icon_coords(adb, device_id, width, height)
+
+            if not comment_target:
+                log(f"⚠️ Chưa xác định được vị trí nút bình luận (lần {attempt}/3)...")
+                continue
+
+            log(f"Chạm icon Bình luận TikTok tại ({comment_target[0]}, {comment_target[1]})...")
+            adb.tap(device_id, comment_target[0], comment_target[1])
             time.sleep(random.uniform(1.8, 2.2))
 
             if is_tiktok_comment_sheet_open(adb, device_id, height):
@@ -953,7 +1154,7 @@ def post_tiktok_comment(
             break
 
     if not sheet_opened:
-        log("CẢNH BÁO: Không mở được khung bình luận TikTok sau 2 lượt thử! Hủy tác vụ an toàn để không bấm nhầm vào các nút khác.")
+        log("CẢNH BÁO: Không mở được khung bình luận TikTok sau 2 lượt thử! Dừng tác vụ an toàn.")
         try:
             adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
             adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
@@ -962,7 +1163,7 @@ def post_tiktok_comment(
             adb.keyevent(device_id, 3)
         except Exception:
             pass
-        return False
+        return CommentTaskResult(TaskOutcome.RETRYABLE_ERROR, "Không mở được khung bình luận TikTok", can_retry=True)
 
     # 8. Chạm vào ô nhập bình luận bằng DOM live
     log("Chạm vào ô nhập bình luận...")
@@ -981,26 +1182,35 @@ def post_tiktok_comment(
     time.sleep(random.uniform(1.2, 1.6))
 
     if is_cancelled and is_cancelled():
-        return False
+        return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
-    # 10. Bấm đúng vào icon màu đỏ mũi tên trắng hoặc phím Enter để gửi bình luận
-    log("Tìm nút tròn đỏ mũi tên gửi bình luận...")
-    time.sleep(0.8)
+    # 10. Gửi bình luận: thực hiện duy nhất 1 phương thức phù hợp
+    log("Tìm nút gửi bình luận...")
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_TIKTOK, width, height)
-    log(f"Chạm nút tròn đỏ gửi TikTok tại ({send_x}, {send_y})...")
-    adb.tap(device_id, send_x, send_y)
-    time.sleep(0.4)
-    # Kích hoạt phím Enter / Action Send (KeyEvent 66)
-    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
-    time.sleep(0.5)
-    # Chạm lại nút tròn đỏ mũi tên gửi một lần nữa để đảm bảo nhận touch event 100%
-    adb.tap(device_id, send_x, send_y)
-    time.sleep(0.4)
-    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
-    time.sleep(random.uniform(2.5, 3.2))
+    if send_x and send_y:
+        log(f"Chạm nút gửi TikTok tại ({send_x}, {send_y})...")
+        adb.tap(device_id, send_x, send_y)
+    else:
+        log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
+        adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
 
-    # 11. Hoàn tất bình luận: Đóng bảng an toàn (TUYỆT ĐỐI KHÔNG SWIPE) và dọn dẹp đa nhiệm
-    log("Đã đăng bình luận TikTok thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
+    time.sleep(random.uniform(2.0, 2.8))
+
+    # 11. XÁC MINH KẾT QUẢ BÌNH LUẬN (VERIFY OUTCOME)
+    log("Đang xác minh kết quả đăng bình luận trên thiết bị...")
+    outcome = verify_tiktok_comment_posted(adb, device_id, comment_text, width, height)
+    log(f"Kết quả xác minh bình luận: {outcome.value}")
+
+    if outcome == TaskOutcome.SUCCESS:
+        try:
+            import interaction_tracker
+            interaction_tracker.record_interaction(device_id, "tiktok", item_key, "comment")
+            if not is_already_liked and like_target:
+                interaction_tracker.record_interaction(device_id, "tiktok", item_key, "like")
+        except Exception:
+            pass
+
+    # 12. Dọn dẹp an toàn
     try:
         adb.keyevent(device_id, 4)
         time.sleep(0.4)
@@ -1013,8 +1223,18 @@ def post_tiktok_comment(
     except Exception as e:
         log(f"Cảnh báo dọn dẹp: {e}")
 
-    log("Đã hoàn tất dọn dẹp thiết bị!")
-    return True
+    if outcome == TaskOutcome.SUCCESS:
+        log("Đã đăng bình luận TikTok thành công và xác minh chính xác!")
+        return CommentTaskResult(TaskOutcome.SUCCESS, "Đã đăng bình luận TikTok thành công", can_retry=False)
+    elif outcome == TaskOutcome.UNKNOWN_OUTCOME:
+        log("CẢNH BÁO: Kết quả bình luận chưa rõ (UNKNOWN_OUTCOME) • Cần đối soát thủ công, không tự retry.")
+        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
+    elif outcome == TaskOutcome.FATAL_ERROR:
+        log("Lỗi: Tài khoản hoặc bình luận bị chặn/hạn chế.")
+        return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Tài khoản bị chặn hoặc hạn chế", can_retry=False)
+    else:
+        log("Lỗi đăng bình luận: Chưa gửi được bình luận.")
+        return CommentTaskResult(TaskOutcome.RETRYABLE_ERROR, "Không thể xác nhận đăng bình luận thành công", can_retry=True)
 
 
 def find_facebook_comment_icon_coords(
@@ -1173,14 +1393,15 @@ def post_facebook_comment(
     dwell_time: int = 15,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
-) -> bool:
+) -> CommentTaskResult:
     """Quy trình mở link bài viết/Reels Facebook, đọc tự nhiên và đăng bình luận.
 
     Áp dụng DOM chuẩn cho Facebook:
-    - Thả Like trước (bỏ qua nếu bài viết đã like để không hủy like)
-    - Mở khung bình luận bằng DOM element
+    - Phân biệt vùng chứa mục tiêu (tránh bấm nhầm bài khác trên feed)
+    - Thả Like trước (bỏ qua nếu bài viết đã like để không hủy like, không bấm đoán)
+    - Mở khung bình luận bằng DOM element live trước mỗi lần thử
     - Nhập bình luận Unicode từ Notion qua XwIME
-    - Bấm nút gửi màu xanh + KeyEvent 66
+    - Bấm gửi đơn 1 lần và xác minh kết quả
     - Đóng an toàn
     """
     def log(msg: str):
@@ -1189,7 +1410,7 @@ def post_facebook_comment(
 
     if is_cancelled and is_cancelled():
         log("Đã hủy tác vụ.")
-        return False
+        return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
     width, height = adb.get_effective_screen_size(device_id)
 
@@ -1207,7 +1428,7 @@ def post_facebook_comment(
     sheet_opened = False
     for flow_attempt in range(1, 3):
         if is_cancelled and is_cancelled():
-            return False
+            return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
         if flow_attempt > 1:
             log("Lần 1 chưa mở được khung bình luận • Tự động dọn dẹp app và mở lại link Facebook lần 2...")
@@ -1225,7 +1446,7 @@ def post_facebook_comment(
         if not success:
             log("Lỗi không thể mở link Facebook.")
             if flow_attempt == 2:
-                return False
+                return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Không thể mở link Facebook qua Intent", can_retry=False)
             continue
 
         dwell_target = max(4, int(dwell_time // 2) if flow_attempt > 1 else int(dwell_time)) + random.randint(-1, 2)
@@ -1233,7 +1454,7 @@ def post_facebook_comment(
         for remaining in range(dwell_target, 0, -1):
             if is_cancelled and is_cancelled():
                 log("Dừng xem do người dùng yêu cầu.")
-                return False
+                return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
             time.sleep(1.0)
 
         # 1. Quét DOM xác định các nút Thích và Bình luận trên bài viết Facebook
@@ -1241,9 +1462,22 @@ def post_facebook_comment(
         root = ui_automator_dom.dump_ui_tree(adb, device_id)
         fb_ctrls = ui_automator_dom.find_facebook_target_controls(root, width, height)
 
-        fb_like_c = (fb_ctrls.get("like") and fb_ctrls["like"].get("center")) or (int(width * 0.20), int(height * 0.940))
-        is_fb_liked = fb_ctrls["like"].get("is_liked", False) if fb_ctrls.get("like") else False
-        comment_x, comment_y = (fb_ctrls.get("comment") and fb_ctrls["comment"].get("center")) or find_facebook_comment_icon_coords(adb, device_id, width, height)
+        if fb_ctrls.get("status") == "AMBIGUOUS_TARGET":
+            log("CẢNH BÁO: Phát hiện nhiều bài viết trên màn hình mà không phân biệt được mục tiêu (AMBIGUOUS_TARGET). Dừng tác vụ an toàn.")
+            return CommentTaskResult(
+                TaskOutcome.AMBIGUOUS_TARGET,
+                "Màn hình chứa nhiều bài viết mơ hồ, không xác định được mục tiêu",
+                can_retry=False,
+            )
+
+        like_info = fb_ctrls.get("like")
+        fb_like_c = like_info.get("center") if like_info else None
+        is_fb_liked = like_info.get("is_liked", False) if like_info else False
+
+        comment_info = fb_ctrls.get("comment")
+        comment_coords = comment_info.get("center") if comment_info else None
+        if not comment_coords:
+            comment_coords = find_facebook_comment_icon_coords(adb, device_id, width, height)
 
         # 2. THẢ LIKE TRƯỚC (LIKE FIRST) - Chống hủy Like
         item_key = url
@@ -1256,35 +1490,33 @@ def post_facebook_comment(
 
         if is_fb_liked or already_tracked:
             log("❤️ Bài viết/Reel Facebook này đã được Like trước đó • Bỏ qua bước like, giữ nguyên Like!")
-        else:
+        elif fb_like_c:
             log(f"❤️ Tiến hành thả Like trước tại tọa độ DOM Facebook ({fb_like_c[0]}, {fb_like_c[1]})...")
             adb.tap(device_id, fb_like_c[0], fb_like_c[1])
-            try:
-                import interaction_tracker
-                interaction_tracker.record_interaction(device_id, "facebook", item_key, "like")
-            except Exception:
-                pass
             time.sleep(random.uniform(1.0, 1.4))
+        else:
+            log("ℹ️ Không tìm thấy nút Like trên DOM Facebook • Bỏ qua like an toàn, không bấm đoán.")
 
-        # 3. Bấm nút Mở khung bình luận Facebook
-        log(f"Chạm icon Bình luận Facebook tại ({comment_x}, {comment_y})...")
-
+        # 3. Bấm nút Mở khung bình luận Facebook (đọc lại DOM trước mỗi lần thử)
         for attempt in range(1, 4):
             if is_cancelled and is_cancelled():
-                return False
+                return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
-            if attempt == 1:
-                target_x, target_y = comment_x, comment_y
-            elif attempt == 2:
-                target_x, target_y = int(width * 0.220), int(height * 0.960)
-                log(f"Lần 1 chưa mở được, tự động chuyển sang tọa độ thanh chi tiết ({target_x}, {target_y})...")
-            else:
-                log("Lần 2 chưa mở được, chạm kích hoạt màn hình và thử lại...")
-                adb.tap(device_id, int(width * 0.50), int(height * 0.50))
-                time.sleep(0.5)
-                target_x, target_y = int(width * 0.172), int(height * 0.960)
+            if attempt > 1:
+                time.sleep(1.0)
+                root = ui_automator_dom.dump_ui_tree(adb, device_id)
+                fb_ctrls = ui_automator_dom.find_facebook_target_controls(root, width, height)
+                comment_info = fb_ctrls.get("comment")
+                comment_coords = comment_info.get("center") if comment_info else None
+                if not comment_coords:
+                    comment_coords = find_facebook_comment_icon_coords(adb, device_id, width, height)
 
-            adb.tap(device_id, target_x, target_y)
+            if not comment_coords:
+                log(f"⚠️ Chưa xác định được vị trí nút bình luận Facebook (lần {attempt}/3)...")
+                continue
+
+            log(f"Chạm icon Bình luận Facebook tại ({comment_coords[0]}, {comment_coords[1]})...")
+            adb.tap(device_id, comment_coords[0], comment_coords[1])
             time.sleep(random.uniform(1.8, 2.2))
 
             if is_facebook_comment_sheet_open(adb, device_id, height):
@@ -1296,7 +1528,7 @@ def post_facebook_comment(
             break
 
     if not sheet_opened:
-        log("CẢNH BÁO: Không mở được khung bình luận Facebook sau 2 lượt thử! Hủy tác vụ an toàn.")
+        log("CẢNH BÁO: Không mở được khung bình luận Facebook sau 2 lượt thử! Dừng tác vụ an toàn.")
         try:
             adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
             if hasattr(adb, "clear_recent_apps"):
@@ -1304,7 +1536,7 @@ def post_facebook_comment(
             adb.keyevent(device_id, 3)
         except Exception:
             pass
-        return False
+        return CommentTaskResult(TaskOutcome.RETRYABLE_ERROR, "Không mở được khung bình luận Facebook", can_retry=True)
 
     # 4. Chạm vào ô nhập bình luận
     log("Chạm vào ô nhập bình luận...")
@@ -1323,26 +1555,38 @@ def post_facebook_comment(
     time.sleep(random.uniform(1.2, 1.6))
 
     if is_cancelled and is_cancelled():
-        return False
+        return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
 
-    # 6. Bấm đúng vào icon màu xanh để gửi bình luận
-    log("Tìm nút gửi bình luận màu xanh...")
-    time.sleep(0.8)
+    # 6. Gửi bình luận: thực hiện duy nhất 1 phương thức phù hợp
+    log("Tìm nút gửi bình luận Facebook...")
     send_x, send_y = find_send_button_coords(adb, device_id, PLATFORM_FACEBOOK, width, height)
-    log(f"Chạm nút gửi màu xanh Facebook tại ({send_x}, {send_y})...")
-    adb.tap(device_id, send_x, send_y)
-    time.sleep(0.4)
-    # Kích hoạt phím Enter / Action Send dự phòng
-    adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
-    time.sleep(0.4)
-    adb.tap(device_id, send_x, send_y)
-    time.sleep(random.uniform(2.5, 3.2))
+    if send_x and send_y:
+        log(f"Chạm nút gửi Facebook tại ({send_x}, {send_y})...")
+        adb.tap(device_id, send_x, send_y)
+    else:
+        log("Gửi bình luận bằng KeyEvent 66 (Enter/Action Send)...")
+        adb.execute_adb(device_id, ["shell", "input", "keyevent", "66"])
 
-    # 7. Hoàn tất bình luận: Đóng app và dọn dẹp đa nhiệm
-    log("Đã đăng bình luận Facebook thành công! Đang dọn dẹp đa nhiệm và đóng ứng dụng...")
+    time.sleep(random.uniform(2.0, 2.8))
+
+    # 7. XÁC MINH KẾT QUẢ BÌNH LUẬN (VERIFY OUTCOME)
+    log("Đang xác minh kết quả đăng bình luận Facebook...")
+    outcome = verify_facebook_comment_posted(adb, device_id, comment_text, width, height)
+    log(f"Kết quả xác minh bình luận: {outcome.value}")
+
+    if outcome == TaskOutcome.SUCCESS:
+        try:
+            import interaction_tracker
+            interaction_tracker.record_interaction(device_id, "facebook", item_key, "comment")
+            if not is_fb_liked and fb_like_c:
+                interaction_tracker.record_interaction(device_id, "facebook", item_key, "like")
+        except Exception:
+            pass
+
+    # 8. Dọn dẹp an toàn
     try:
         adb.keyevent(device_id, 4)
-        time.sleep(0.5)
+        time.sleep(0.4)
         if hasattr(adb, "clear_recent_apps"):
             adb.clear_recent_apps(device_id)
         adb.execute_adb(device_id, ["shell", "am", "force-stop", FACEBOOK_PACKAGE])
@@ -1351,8 +1595,18 @@ def post_facebook_comment(
     except Exception as e:
         log(f"Cảnh báo dọn dẹp: {e}")
 
-    log("Đã hoàn tất dọn dẹp thiết bị!")
-    return True
+    if outcome == TaskOutcome.SUCCESS:
+        log("Đã đăng bình luận Facebook thành công và xác minh chính xác!")
+        return CommentTaskResult(TaskOutcome.SUCCESS, "Đã đăng bình luận Facebook thành công", can_retry=False)
+    elif outcome == TaskOutcome.UNKNOWN_OUTCOME:
+        log("CẢNH BÁO: Kết quả bình luận Facebook chưa rõ (UNKNOWN_OUTCOME) • Cần đối soát thủ công, không tự retry.")
+        return CommentTaskResult(TaskOutcome.UNKNOWN_OUTCOME, "Chưa đủ bằng chứng xác nhận bình luận hiển thị", can_retry=False)
+    elif outcome == TaskOutcome.FATAL_ERROR:
+        log("Lỗi: Tài khoản bị chặn hoặc vi phạm tiêu chuẩn Facebook.")
+        return CommentTaskResult(TaskOutcome.FATAL_ERROR, "Tài khoản bị chặn hoặc hạn chế", can_retry=False)
+    else:
+        log("Lỗi đăng bình luận: Chưa gửi được bình luận Facebook.")
+        return CommentTaskResult(TaskOutcome.RETRYABLE_ERROR, "Không thể xác nhận đăng bình luận Facebook", can_retry=True)
 
 
 def find_tiktok_send_button_via_cv(
@@ -1570,7 +1824,7 @@ def parse_comment_devices(selection_text: str, total_tasks: int, all_devices: li
 
 
 def execute_comment_task(
-    adb: ADBManager,
+    adb,
     device_id: str,
     platform: str,
     url: str,
@@ -1578,33 +1832,57 @@ def execute_comment_task(
     dwell_time: int = 15,
     status_callback: Optional[Callable[[str], None]] = None,
     is_cancelled: Optional[Callable[[], bool]] = None,
-) -> bool:
-    """Điều phối thực hiện tác vụ bình luận theo đúng nền tảng."""
+) -> CommentTaskResult:
+    """Điều phối thực hiện tác vụ bình luận theo đúng nền tảng.
+
+    Bọc an toàn qua device_workflow_scope nếu chưa được bọc từ caller.
+    Trả về CommentTaskResult với outcome chi tiết.
+    """
     plat = (platform or "").strip().casefold()
-    if "tiktok" in plat:
-        return post_tiktok_comment(
-            adb,
-            device_id,
-            url,
-            comment_text,
-            dwell_time=dwell_time,
-            status_callback=status_callback,
-            is_cancelled=is_cancelled,
-        )
-    elif "facebook" in plat:
-        return post_facebook_comment(
-            adb,
-            device_id,
-            url,
-            comment_text,
-            dwell_time=dwell_time,
-            status_callback=status_callback,
-            is_cancelled=is_cancelled,
-        )
-    else:
-        if status_callback:
-            status_callback(f"[Device {device_id}] Nền tảng '{platform}' chưa hỗ trợ seeding.")
-        return False
+
+    def _run() -> CommentTaskResult:
+        if "tiktok" in plat:
+            return post_tiktok_comment(
+                adb,
+                device_id,
+                url,
+                comment_text,
+                dwell_time=dwell_time,
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+        elif "facebook" in plat:
+            return post_facebook_comment(
+                adb,
+                device_id,
+                url,
+                comment_text,
+                dwell_time=dwell_time,
+                status_callback=status_callback,
+                is_cancelled=is_cancelled,
+            )
+        else:
+            if status_callback:
+                status_callback(f"[Device {device_id}] Nền tảng '{platform}' chưa hỗ trợ seeding.")
+            return CommentTaskResult(
+                TaskOutcome.FATAL_ERROR,
+                f"Nền tảng '{platform}' chưa được hỗ trợ",
+                can_retry=False,
+            )
+
+    if hasattr(adb, "device_workflow_scope"):
+        try:
+            with adb.device_workflow_scope(device_id, timeout=30.0, is_cancelled=is_cancelled):
+                return _run()
+        except TimeoutError as te:
+            if status_callback:
+                status_callback(f"[Device {device_id}] Lỗi khóa thiết bị: {te}")
+            return CommentTaskResult(
+                TaskOutcome.CANCELLED if (is_cancelled and is_cancelled()) else TaskOutcome.RETRYABLE_ERROR,
+                str(te),
+                can_retry=not (is_cancelled and is_cancelled()),
+            )
+    return _run()
 
 
 def filter_tasks_for_platform(tasks: list, platform: str) -> list:
