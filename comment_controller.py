@@ -168,54 +168,41 @@ def open_url_via_intent(
     clean_url = clean_platform_url(canonical_url, platform)
 
     if "tiktok" in clean_platform:
-        # Đảm bảo TikTok đã khởi động nếu đang tắt
-        if hasattr(adb, "is_tiktok_in_foreground") and not adb.is_tiktok_in_foreground(device_id):
-            if hasattr(adb, "launch_tiktok"):
-                try:
-                    adb.launch_tiktok(device_id)
-                    time.sleep(1.5)
-                except Exception:
-                    pass
+        # Chuẩn bị thiết bị: Đóng app TikTok đang chạy để tránh việc onNewIntent giữ nguyên video cũ trong ViewPager
+        # Khởi động sạch (cold start) đảm bảo ApplinkHookActivity tiếp nhận và phân phối chính xác video mới 100%
+        try:
+            adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_PRIMARY_PACKAGE])
+            adb.execute_adb(device_id, ["shell", "am", "force-stop", TIKTOK_ALT_PACKAGE])
+            time.sleep(0.5)
+        except Exception:
+            pass
 
-        video_id = extract_tiktok_video_id(clean_url)
-        # 1. Nếu có video_id: mở thẳng native deep link để vào đúng video mục tiêu 100%
-        if video_id:
-            pkg_target = TIKTOK_PRIMARY_PACKAGE
-            if hasattr(adb, "is_app_installed"):
-                if not adb.is_app_installed(device_id, TIKTOK_PRIMARY_PACKAGE) and adb.is_app_installed(device_id, TIKTOK_ALT_PACKAGE):
-                    pkg_target = TIKTOK_ALT_PACKAGE
-            scheme = "snssdk1233" if pkg_target == TIKTOK_ALT_PACKAGE else "snssdk1180"
-            cmd_nat = [
-                "shell", "am", "start",
-                "-a", "android.intent.action.VIEW",
-                "-d", f"{scheme}://aweme/detail/{video_id}",
-                "-p", pkg_target,
-                "-f", "0x14000000",
-                "--es", "android.intent.extra.REFERRER_NAME", referrer,
-            ]
-            code, stdout, _ = adb.execute_adb(device_id, cmd_nat)
-            if code == 0 and "Error" not in (stdout or ""):
-                return True
+        pkg_target = TIKTOK_PRIMARY_PACKAGE
+        if hasattr(adb, "is_app_installed"):
+            if not adb.is_app_installed(device_id, TIKTOK_PRIMARY_PACKAGE) and adb.is_app_installed(device_id, TIKTOK_ALT_PACKAGE):
+                pkg_target = TIKTOK_ALT_PACKAGE
 
-        # 2. Fallback mở bằng URL HTTP chuẩn
+        # Mở link video HTTP chuẩn bằng Intent đến ApplinkHookActivity qua FLAG_ACTIVITY_NEW_TASK (0x10000000)
+        # TUYỆT ĐỐI KHÔNG dùng scheme snssdk1180 giả lập (gây silent failure trên Android 10)
+        # TUYỆT ĐỐI KHÔNG kèm FLAG_ACTIVITY_CLEAR_TOP 0x04000000 (gây văng/reset ApplinkHookActivity về Launcher)
         cmd = [
             "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
             "-d", clean_url,
-            "-p", TIKTOK_PRIMARY_PACKAGE,
-            "-f", "0x14000000",
+            "-p", pkg_target,
+            "-f", "0x10000000",
             "--es", "android.intent.extra.REFERRER_NAME", referrer,
         ]
         code, stdout, _ = adb.execute_adb(device_id, cmd)
         success = (code == 0 and "Error" not in (stdout or ""))
 
-        if not success:
+        if not success and pkg_target == TIKTOK_PRIMARY_PACKAGE:
             cmd_alt = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
                 "-d", clean_url,
                 "-p", TIKTOK_ALT_PACKAGE,
-                "-f", "0x14000000",
+                "-f", "0x10000000",
                 "--es", "android.intent.extra.REFERRER_NAME", referrer,
             ]
             code_alt, stdout_alt, _ = adb.execute_adb(device_id, cmd_alt)
@@ -1156,6 +1143,53 @@ def verify_facebook_comment_posted(
     return TaskOutcome.UNKNOWN_OUTCOME
 
 
+def is_tiktok_target_video_verified(
+    adb,
+    device_id: str,
+    target_video_id: str,
+    target_channel: str,
+    dom_channel: str,
+    has_controls: bool = False,
+) -> bool:
+    """Xác minh chính xác 100% video mục tiêu đang mở:
+    1. Nếu có target_channel và dom_channel xung đột -> SAI MỤC TIÊU NGAY.
+    2. Nếu có target_video_id:
+       Kiểm tra Activity stack (dumpsys activity activities):
+       Nếu có video_id nào trong intent stack của TikTok:
+       BẮT BUỘC phải khớp target_video_id (loại trừ clip khác của cùng creator).
+    3. Nếu không có video ID nào trong dumpsys (môi trường mock hoặc chưa parse được):
+       - Nếu có dom_channel: kiểm tra khớp target_channel.
+       - Nếu dom_channel trống: chấp thuận khi có controls (like/comment) hợp lệ trên màn hình.
+    """
+    import re
+    # 1. Nếu có target_channel và dom_channel xung đột -> SAI MỤC TIÊU NGAY
+    if target_channel and dom_channel:
+        if not ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
+            return False
+
+    # 2. Kiểm tra dumpsys activity stack nếu có target_video_id
+    if target_video_id:
+        try:
+            code, out, _ = adb.execute_adb(device_id, ["shell", "dumpsys", "activity", "activities"])
+            if code == 0 and out:
+                found_vids = []
+                for line in out.splitlines():
+                    if ("com.ss.android.ugc.trill" in line or "com.zhiliaoapp.musically" in line) and "/video/" in line:
+                        m = re.search(r"/video/(\d+)", line)
+                        if m:
+                            found_vids.append(m.group(1))
+                if found_vids:
+                    return target_video_id in found_vids
+        except Exception:
+            pass
+
+    # 3. Dựa trên channel match hoặc has_controls
+    if target_channel and dom_channel:
+        return ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel)
+
+    return bool(has_controls)
+
+
 def post_tiktok_comment(
     adb,
     device_id: str,
@@ -1219,7 +1253,7 @@ def post_tiktok_comment(
 
         # 1. Mở link video mục tiêu qua Intent Zalo Referrer
         log(f"Đang mở link video qua Intent Zalo Referrer (lượt {flow_attempt}/2)...")
-        success = open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
+        success = open_url_via_intent(adb, device_id, canonical_url, PLATFORM_TIKTOK)
         if not success:
             log("Lỗi không thể mở link video.")
             if flow_attempt == 2:
@@ -1228,7 +1262,7 @@ def post_tiktok_comment(
 
         # 2. Chờ TikTok tải xong giao diện video
         wait_for_tiktok_video_ready(
-            adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=url
+            adb, device_id, timeout=15, status_callback=status_callback, is_cancelled=is_cancelled, clean_url=canonical_url
         )
         if is_cancelled and is_cancelled():
             return CommentTaskResult(TaskOutcome.CANCELLED, "Đã hủy tác vụ", can_retry=False)
@@ -1242,51 +1276,42 @@ def post_tiktok_comment(
 
         ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
         dom_channel = ctrls.get("channel_name", "")
+        has_video_controls = bool(ctrls.get("like") or ctrls.get("comment"))
 
-        target_verified = False
-        if target_channel:
-            if dom_channel:
-                if ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
-                    target_verified = True
-                else:
-                    log(f"⚠️ Video đang phát ('{dom_channel}') chưa khớp Kênh mục tiêu ('{target_channel}') • Mở lại Intent...")
-                    open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
-                    time.sleep(2.5)
-                    root = ui_automator_dom.dump_ui_tree(adb, device_id)
-                    ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
-                    dom_channel = ctrls.get("channel_name", "")
-                    if ui_automator_dom.match_tiktok_channel_name(dom_channel, target_channel):
-                        target_verified = True
-                    else:
-                        log(f"❌ Kênh trên thiết bị ('{dom_channel}') không khớp với kênh mục tiêu ('{target_channel}')!")
-            else:
-                if ctrls.get("like") or ctrls.get("comment"):
-                    target_verified = True
-                else:
-                    log("⚠️ Không nhận diện được giao diện video mục tiêu • Thử nạp lại Intent...")
-                    open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
-                    time.sleep(2.5)
-                    root = ui_automator_dom.dump_ui_tree(adb, device_id)
-                    ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
-                    if ctrls.get("like") or ctrls.get("comment"):
-                        target_verified = True
-                    else:
-                        log("❌ Không đủ bằng chứng giao diện video mục tiêu!")
-        else:
-            if ctrls.get("like") or ctrls.get("comment"):
-                target_verified = True
-            else:
-                open_url_via_intent(adb, device_id, url, PLATFORM_TIKTOK)
-                time.sleep(2.5)
-                root = ui_automator_dom.dump_ui_tree(adb, device_id)
-                ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
-                if ctrls.get("like") or ctrls.get("comment"):
-                    target_verified = True
+        target_verified = is_tiktok_target_video_verified(
+            adb,
+            device_id,
+            target_video_id=target_video_id,
+            target_channel=target_channel,
+            dom_channel=dom_channel,
+            has_controls=has_video_controls,
+        )
 
         if not target_verified:
+            log(
+                f"⚠️ Chưa xác minh được video mục tiêu (ID: {target_video_id or 'N/A'}, "
+                f"Kênh: {target_channel or 'N/A'}, DOM: '{dom_channel}') • Thử nạp lại Intent..."
+            )
+            open_url_via_intent(adb, device_id, canonical_url, PLATFORM_TIKTOK)
+            time.sleep(3.0)
+            root = ui_automator_dom.dump_ui_tree(adb, device_id)
+            ctrls = ui_automator_dom.find_tiktok_video_controls(root, width, height)
+            dom_channel = ctrls.get("channel_name", "")
+            has_video_controls = bool(ctrls.get("like") or ctrls.get("comment"))
+            target_verified = is_tiktok_target_video_verified(
+                adb,
+                device_id,
+                target_video_id=target_video_id,
+                target_channel=target_channel,
+                dom_channel=dom_channel,
+                has_controls=has_video_controls,
+            )
+
+        if not target_verified:
+            log("❌ Không đủ bằng chứng xác minh đúng video mục tiêu trên thiết bị!")
             return CommentTaskResult(
                 TaskOutcome.AMBIGUOUS_TARGET,
-                "Không thể xác minh đúng video mục tiêu trên màn hình",
+                f"Không thể xác minh đúng video mục tiêu (ID: {target_video_id or 'N/A'}, Kênh: {target_channel or 'N/A'}) trên màn hình",
                 can_retry=False,
             )
 

@@ -6179,25 +6179,29 @@ class ADBController:
                 tree = ET.parse(local_xml)
                 root = tree.getroot()
                 
-                # Kiểm tra xem có popup hỏi quyền vị trí không
+                # Kiểm tra xem có popup hỏi quyền vị trí hệ thống thực tế không
                 for elem in root.iter():
                     text = (elem.get('text', '') or elem.get('content-desc', '')).lower()
-                    if any(k in text for k in ["vị trí", "location", "truy cập vào vị trí", "thiết bị này"]):
+                    pkg = (elem.get('package', '') or '').lower()
+                    is_perm_pkg = any(p in pkg for p in ["permissioncontroller", "packageinstaller"])
+                    if is_perm_pkg or any(k in text for k in ["truy cập vào vị trí", "cho phép truy cập vị trí", "allow location access"]):
                         found_popup = True
-                    
+
                     if any(k in text for k in ["không hỏi lại", "don't ask again", "remember choice"]):
                         bounds = elem.get('bounds', '')
                         m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                         if m:
                             x1, y1, x2, y2 = map(int, m.groups())
-                            dont_ask_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+                            if x2 > x1 and y2 > y1:
+                                dont_ask_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
 
                     if any(k in text for k in ["từ chối", "deny", "don't allow"]):
                         bounds = elem.get('bounds', '')
                         m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
                         if m:
                             x1, y1, x2, y2 = map(int, m.groups())
-                            deny_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+                            if x2 > x1 and y2 > y1:
+                                deny_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
             except Exception:
                 pass
             finally:
@@ -6206,19 +6210,16 @@ class ADBController:
                 except Exception:
                     pass
 
-        if found_popup or dont_ask_coords or deny_coords:
+        # Tuyệt đối KHÔNG bấm đoán tọa độ nếu không tìm thấy nút thực tế trên DOM!
+        if (found_popup and deny_coords) or deny_coords or dont_ask_coords:
             print(f"[Device {device_id[:6]}] Phát hiện Popup hỏi quyền Vị trí! Tiến hành Từ chối...")
-            # 1. Bấm Không hỏi lại
-            if not dont_ask_coords:
-                dont_ask_coords = (int(width * 0.25), int(height * 0.54))
-            self.tap(device_id, dont_ask_coords[0], dont_ask_coords[1])
-            time.sleep(0.5)
+            if dont_ask_coords:
+                self.tap(device_id, dont_ask_coords[0], dont_ask_coords[1])
+                time.sleep(0.5)
 
-            # 2. Bấm Từ chối
-            if not deny_coords:
-                deny_coords = (int(width * 0.58), int(height * 0.60))
-            self.tap(device_id, deny_coords[0], deny_coords[1])
-            time.sleep(1.0)
+            if deny_coords:
+                self.tap(device_id, deny_coords[0], deny_coords[1])
+                time.sleep(1.0)
             return True
         return False
 

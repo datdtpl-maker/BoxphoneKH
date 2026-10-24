@@ -41,12 +41,16 @@ class TestCommentController(unittest.TestCase):
         self.assertTrue(res)
         calls = self.adb.execute_adb.call_args_list
         self.assertTrue(len(calls) >= 1)
-        first_cmd = calls[0][0][1]
-        self.assertIn("am", first_cmd)
-        self.assertIn("android.intent.action.VIEW", first_cmd)
-        self.assertIn("com.ss.android.ugc.trill", first_cmd)
-        self.assertIn("--es", first_cmd)
-        self.assertIn("android.intent.extra.REFERRER_NAME", first_cmd)
+        cmds = [c[0][1] for c in calls]
+        has_stop = any("force-stop" in cmd for cmd in cmds)
+        self.assertTrue(has_stop, "Phải force-stop để cold-start sạch cho TikTok")
+        start_cmd = next(cmd for cmd in cmds if "start" in cmd)
+        self.assertIn("am", start_cmd)
+        self.assertIn("android.intent.action.VIEW", start_cmd)
+        self.assertIn("com.ss.android.ugc.trill", start_cmd)
+        self.assertIn("0x10000000", start_cmd)
+        self.assertIn("--es", start_cmd)
+        self.assertIn("android.intent.extra.REFERRER_NAME", start_cmd)
 
     def test_open_url_via_intent_facebook(self):
         self.adb.execute_adb.return_value = (0, "", "")
@@ -726,6 +730,68 @@ class TestGUICommentSeedingIntegration(unittest.TestCase):
         )
         self.assertTrue(success)
         self.assertEqual(mock_intent.call_count, 2)
+
+    def test_tiktok_target_video_id_mismatch_in_activity_stack_aborts(self):
+        """Khi clip mục tiêu khác clip đang mở trên máy (dù cùng creator), Target Lock phát hiện và dừng an toàn."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        # Stack đang có video 99999 của kênh khaihoanskincare
+        adb.execute_adb.return_value = (
+            0,
+            "com.ss.android.ugc.trill dat=https://www.tiktok.com/@khaihoanskincare/video/99999 flg=0x10000000",
+            "",
+        )
+        # Target URL là video 12345
+        target_vid = "12345"
+        verified = comment_controller.is_tiktok_target_video_verified(
+            adb, "dev1", target_video_id=target_vid, target_channel="khaihoanskincare", dom_channel="khải hoàn skincare pt"
+        )
+        self.assertFalse(verified, "Phải từ chối khi video ID trong intent stack khác target video ID")
+
+    def test_tiktok_target_video_id_match_in_activity_stack_succeeds(self):
+        """Khi clip mục tiêu khớp chính xác video ID trong stack và DOM, Target Lock chấp thuận."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (
+            0,
+            "com.ss.android.ugc.trill dat=https://www.tiktok.com/@khaihoanskincare/video/7691674187748068629 flg=0x10000000",
+            "",
+        )
+        target_vid = "7691674187748068629"
+        verified = comment_controller.is_tiktok_target_video_verified(
+            adb, "dev1", target_video_id=target_vid, target_channel="khaihoanskincare", dom_channel="khải hoàn skincare pt"
+        )
+        self.assertTrue(verified, "Phải xác minh thành công khi video ID khớp stack")
+
+    def test_dismiss_tiktok_location_popup_no_fake_tap_when_no_buttons(self):
+        """Khi DOM video chỉ có chữ vị trí/thiết bị này trong caption mà không có nút popup, tuyệt đối không tap bừa."""
+        adb = MagicMock()
+        adb.get_effective_screen_size.return_value = (1080, 1920)
+        adb.execute_adb.return_value = (0, "", "")
+
+        # Giả lập XML video có chữ vị trí ở mô tả bài đăng
+        xml_video_caption = """<hierarchy>
+          <node class="android.widget.TextView" text="Thành phố Phan Thiết - Vị trí này rất đẹp" bounds="[100,1400][800,1450]" package="com.ss.android.ugc.trill" />
+        </hierarchy>"""
+
+        import os, tempfile
+        local_xml = os.path.join(os.path.dirname(comment_controller.__file__), "temp_dump_loc_popup_test_dev.xml")
+        with open(local_xml, "w", encoding="utf-8") as f:
+            f.write(xml_video_caption)
+
+        taps = []
+        adb.tap = lambda dev, x, y: taps.append((x, y))
+
+        from adb_controller import ADBController
+        controller = ADBController.__new__(ADBController)
+        controller.get_effective_screen_size = lambda dev: (1080, 1920)
+        controller.execute_adb = lambda dev, cmd, **kw: (0, "", "")
+        controller.tap = lambda dev, x, y: taps.append((x, y))
+
+        res = controller.dismiss_tiktok_location_popup("test_dev")
+        self.assertFalse(res)
+        self.assertEqual(len(taps), 0, "Không được bấm bất kỳ tọa độ đoán nào vào giữa màn hình video")
+
 
 
 if __name__ == "__main__":
