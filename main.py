@@ -864,13 +864,26 @@ def handle_all_messages(message):
                         platform="TikTok",
                     )
                     dev_start = time.time()
-                    success, err = adb.tiktok_automation_workflow(
-                        dev,
-                        seed_keywords=seed_kws,
-                        target_channel=target_ch,
-                        status_callback=tracker.status_callback,
-                        is_cancelled=session_is_cancelled
-                    )
+                    max_attempts = 2
+                    for attempt in range(1, max_attempts + 1):
+                        success, err = adb.tiktok_automation_workflow(
+                            dev,
+                            seed_keywords=seed_kws,
+                            target_channel=target_ch,
+                            status_callback=tracker.status_callback,
+                            is_cancelled=session_is_cancelled
+                        )
+                        if success or (session_is_cancelled and session_is_cancelled()):
+                            break
+                        if attempt < max_attempts:
+                            tracker.status_callback(
+                                dev,
+                                f"TikTok gặp lỗi ở lượt {attempt} ({err}) • "
+                                f"Đang tự động phục hồi và thử lại chịu lỗi ({attempt + 1}/{max_attempts})..."
+                            )
+                            adb.keyevent(dev, 4)
+                            time.sleep(1.0)
+                            adb.recover_tiktok_if_blocked_by_captcha_or_link(dev)
                     dev_dur = time.time() - dev_start
                     clear_device_recents_after_success(
                         dev, status_callback=tracker.status_callback
@@ -906,13 +919,26 @@ def handle_all_messages(message):
                     platform="TikTok",
                 )
                 dev_start = time.time()
-                success, err = adb.tiktok_automation_workflow(
-                    device_id,
-                    seed_keywords=seed_kws,
-                    target_channel=target_ch,
-                    status_callback=tracker.status_callback,
-                    is_cancelled=session_is_cancelled
-                )
+                max_attempts = 2
+                for attempt in range(1, max_attempts + 1):
+                    success, err = adb.tiktok_automation_workflow(
+                        device_id,
+                        seed_keywords=seed_kws,
+                        target_channel=target_ch,
+                        status_callback=tracker.status_callback,
+                        is_cancelled=session_is_cancelled
+                    )
+                    if success or (session_is_cancelled and session_is_cancelled()):
+                        break
+                    if attempt < max_attempts:
+                        tracker.status_callback(
+                            device_id,
+                            f"TikTok gặp lỗi ở lượt {attempt} ({err}) • "
+                            f"Đang tự động phục hồi và thử lại chịu lỗi ({attempt + 1}/{max_attempts})..."
+                        )
+                        adb.keyevent(device_id, 4)
+                        time.sleep(1.0)
+                        adb.recover_tiktok_if_blocked_by_captcha_or_link(device_id)
                 dev_dur = time.time() - dev_start
                 clear_device_recents_after_success(
                     device_id, status_callback=tracker.status_callback

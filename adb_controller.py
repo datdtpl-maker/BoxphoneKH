@@ -1866,14 +1866,36 @@ class ADBController:
                                 primary_title = p_norm
                                 break
 
+                        if not primary_title:
+                            primary_title = label_normalized
                         primary_title_tokens = set(primary_title.split())
-                        has_target_in_title = any(
-                            t in primary_title_tokens for t in target_tokens
+                        label_token_set = set(label_normalized.split())
+                        # Từ chối dứt khoát các thương hiệu ngoại lai / trang không liên quan
+                        unrelated_brands = (
+                            "sony", "samsung", "apple", "xiaomi", "honda", "yamaha",
+                            "toyota", "mercedes", "oto", "xe", "dien may", "the gioi di dong"
                         )
+                        if any(
+                            ub in primary_title_tokens or ub in label_token_set or ub in label_normalized
+                            for ub in unrelated_brands
+                        ):
+                            continue
+
+                        # Nếu target có 'khai' và 'hoan', candidate title BẮT BUỘC phải có 'khai' và 'hoan', và 'khai' đứng trước 'hoan'
+                        if "khai" in target_tokens and "hoan" in target_tokens:
+                            if "khai" not in primary_title_tokens or "hoan" not in primary_title_tokens:
+                                continue
+                            if primary_title.find("khai") > primary_title.find("hoan"):
+                                # Tên đảo 'Hoàn khải' -> TỪ CHỐI
+                                continue
+                            has_target_in_title = True
+                        else:
+                            has_target_in_title = any(
+                                t in primary_title_tokens for t in target_tokens
+                            )
                         if not has_target_in_title:
                             continue
 
-                        label_token_set = set(label_normalized.split())
                         # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand hoặc khớp địa điểm canonical
                         has_all_target = all(
                             token in label_token_set for token in target_tokens
@@ -1882,7 +1904,9 @@ class ADBController:
                             1 for token in target_tokens if token in label_token_set
                         )
                         has_core_brand = (
-                            "khai" in label_token_set and "hoan" in label_token_set
+                            "khai" in label_token_set
+                            and "hoan" in label_token_set
+                            and label_normalized.find("khai") < label_normalized.find("hoan")
                         )
                         has_desired_loc = (
                             bool(desired_tokens)
@@ -2014,6 +2038,7 @@ class ADBController:
                         self.tap(device_id, x, y)
                         time.sleep(2.0)
                         self.dismiss_facebook_messenger_if_present(device_id)
+                        self.dismiss_facebook_blocking_popups(device_id)
                         time.sleep(1.0)
                         if self._is_facebook_personal_profile(device_id):
                             print(
@@ -2050,339 +2075,6 @@ class ADBController:
                     duration=random.randint(650, 950),
                 )
                 self.collapse_statusbar_if_expanded(device_id)
-                time.sleep(1.5)
-        return False
-
-        width, height = self.get_effective_screen_size(device_id)
-        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
-        remote_xml = f"/sdcard/dump_facebook_page_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_facebook_page_{safe_device_id}.xml",
-        )
-
-        for attempt in range(max(1, max_swipes)):
-            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
-            self.execute_adb(
-                device_id, ["shell", "uiautomator", "dump", remote_xml]
-            )
-            pull_code, _, _ = self.execute_adb(
-                device_id, ["pull", remote_xml, local_xml]
-            )
-
-            try:
-                if pull_code == 0 and os.path.exists(local_xml):
-                    root = ET.parse(local_xml).getroot()
-                    parent_map = {
-                        child: parent
-                        for parent in root.iter()
-                        for child in parent
-                    }
-                    candidates = []
-                    for node in root.iter():
-                        if node.get("class", "").endswith("EditText"):
-                            continue
-                        label = " ".join(
-                            part
-                            for part in (
-                                node.get("text", ""),
-                                node.get("content-desc", ""),
-                            )
-                            if part
-                        ).strip()
-                        label_normalized = self._normalize_facebook_text(label)
-                        if not label_normalized:
-                            continue
-
-                        label_token_set = set(label_normalized.split())
-                        # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand
-                        has_all_target = all(
-                            token in label_token_set for token in target_tokens
-                        )
-                        target_overlap = sum(
-                            1 for token in target_tokens if token in label_token_set
-                        )
-                        has_core_brand = (
-                            "khai" in label_token_set and "hoan" in label_token_set
-                        )
-
-                        if not (has_all_target or (has_core_brand and target_overlap >= min(2, len(target_tokens)))):
-                            continue
-
-                        node_bounds = node.get("bounds", "")
-                        node_match = re.match(
-                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node_bounds
-                        )
-                        if not node_match:
-                            continue
-                        nx1, ny1, nx2, ny2 = map(int, node_match.groups())
-                        if ny2 <= int(height * 0.08) or ny1 >= int(height * 0.95):
-                            continue
-
-                        # Tìm clickable container hợp lệ: CHỈ nhận container có chiều cao hợp lý (thẻ card <= 28% màn hình).
-                        # Tuyệt đối không duyệt lên RecyclerView/ViewGroup toàn màn hình để tránh lệch tọa độ giữa màn hình.
-                        click_node = node
-                        curr = node
-                        while curr is not None:
-                            if curr.get("clickable", "false") == "true":
-                                cbounds = curr.get("bounds", "")
-                                cmatch = re.match(
-                                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", cbounds
-                                )
-                                if cmatch:
-                                    cx1, cy1, cx2, cy2 = map(int, cmatch.groups())
-                                    c_height = cy2 - cy1
-                                    if c_height <= int(height * 0.28) and cy1 <= ny1 and cy2 >= ny2:
-                                        click_node = curr
-                                        break
-                            curr = parent_map.get(curr)
-
-                        bounds = click_node.get("bounds", "")
-                        match = re.match(
-                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
-                        )
-                        if not match:
-                            continue
-                        x1, y1, x2, y2 = map(int, match.groups())
-                        if y2 <= int(height * 0.08) or y1 >= int(height * 0.95):
-                            continue
-
-                        desired_overlap = sum(
-                            1 for token in desired_tokens if token in label_token_set
-                        ) if desired_tokens else 0
-                        exact_canonical = (
-                            bool(desired_tokens)
-                            and all(token in label_token_set for token in desired_tokens)
-                        )
-                        contiguous_desired = (
-                            bool(desired_normalized)
-                            and desired_normalized in label_normalized
-                        )
-                        contiguous_target = (
-                            bool(target_normalized)
-                            and target_normalized in label_normalized
-                        )
-
-                        # Phân cấp ưu tiên (tier càng thấp càng ưu tiên cao):
-                        # Tier 0: Khớp hoàn toàn canonical page name
-                        # Tier 1: Khớp hoàn toàn target_phrase
-                        # Tier 2: Khớp nhiều token của desired_tokens
-                        # Tier 3: Khớp các trường hợp còn lại
-                        if exact_canonical or contiguous_desired:
-                            tier = 0
-                        elif has_all_target or contiguous_target:
-                            tier = 1
-                        else:
-                            tier = 2
-
-                        tap_x = (x1 + x2) // 2
-                        tap_y = (y1 + y2) // 2
-                        candidates.append(
-                            (
-                                tier,
-                                -desired_overlap,
-                                -target_overlap,
-                                -len(label_normalized),
-                                tap_x,
-                                tap_y,
-                            )
-                        )
-
-                    if candidates:
-                        candidates.sort()
-                        _, _, _, _, x, y = candidates[0]
-                        self.tap(device_id, x, y)
-                        time.sleep(3.0)
-                        return True
-            except Exception as exc:
-                print(
-                    f"[Device {device_id[:6]}] Lỗi đọc kết quả Page "
-                    f"Facebook: {exc}"
-                )
-            finally:
-                try:
-                    os.remove(local_xml)
-                except Exception:
-                    pass
-                self.execute_adb(
-                    device_id, ["shell", "rm", "-f", remote_xml]
-                )
-
-            if attempt < max(1, max_swipes) - 1:
-                # Nếu attempt == 0 mà chưa thấy, chờ 0.6s quét lại tại chỗ trước khi cuộn
-                if attempt == 0:
-                    time.sleep(0.6)
-                self.swipe(
-                    device_id,
-                    width // 2,
-                    int(height * 0.78),
-                    width // 2,
-                    int(height * 0.30),
-                    duration=random.randint(650, 950),
-                )
-                time.sleep(1.5)
-        return False
-
-        width, height = self.get_effective_screen_size(device_id)
-        safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
-        remote_xml = f"/sdcard/dump_facebook_page_{safe_device_id}.xml"
-        local_xml = os.path.join(
-            os.path.dirname(__file__),
-            f"temp_facebook_page_{safe_device_id}.xml",
-        )
-
-        for attempt in range(max(1, max_swipes)):
-            self.execute_adb(device_id, ["shell", "rm", "-f", remote_xml])
-            self.execute_adb(
-                device_id, ["shell", "uiautomator", "dump", remote_xml]
-            )
-            pull_code, _, _ = self.execute_adb(
-                device_id, ["pull", remote_xml, local_xml]
-            )
-
-            try:
-                if pull_code == 0 and os.path.exists(local_xml):
-                    root = ET.parse(local_xml).getroot()
-                    parent_map = {
-                        child: parent
-                        for parent in root.iter()
-                        for child in parent
-                    }
-                    candidates = []
-                    for node in root.iter():
-                        if node.get("class", "").endswith("EditText"):
-                            continue
-                        label = " ".join(
-                            part
-                            for part in (
-                                node.get("text", ""),
-                                node.get("content-desc", ""),
-                            )
-                            if part
-                        ).strip()
-                        label_normalized = self._normalize_facebook_text(label)
-                        if not label_normalized:
-                            continue
-
-                        label_token_set = set(label_normalized.split())
-                        # Kiểm tra khớp target: chứa tất cả target_tokens hoặc khớp core brand
-                        has_all_target = all(
-                            token in label_token_set for token in target_tokens
-                        )
-                        target_overlap = sum(
-                            1 for token in target_tokens if token in label_token_set
-                        )
-                        has_core_brand = (
-                            "khai" in label_token_set and "hoan" in label_token_set
-                        )
-
-                        if not (has_all_target or (has_core_brand and target_overlap >= min(2, len(target_tokens)))):
-                            continue
-
-                        node_bounds = node.get("bounds", "")
-                        node_match = re.match(
-                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node_bounds
-                        )
-                        if not node_match:
-                            continue
-                        nx1, ny1, nx2, ny2 = map(int, node_match.groups())
-                        if ny2 <= int(height * 0.08) or ny1 >= int(height * 0.95):
-                            continue
-
-                        # Tìm clickable container hợp lệ: CHỈ nhận container có chiều cao hợp lý (thẻ card <= 28% màn hình).
-                        # Tuyệt đối không duyệt lên RecyclerView/ViewGroup toàn màn hình để tránh lệch tọa độ giữa màn hình.
-                        click_node = node
-                        curr = node
-                        while curr is not None:
-                            if curr.get("clickable", "false") == "true":
-                                cbounds = curr.get("bounds", "")
-                                cmatch = re.match(
-                                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", cbounds
-                                )
-                                if cmatch:
-                                    cx1, cy1, cx2, cy2 = map(int, cmatch.groups())
-                                    c_height = cy2 - cy1
-                                    if c_height <= int(height * 0.28) and cy1 <= ny1 and cy2 >= ny2:
-                                        click_node = curr
-                                        break
-                            curr = parent_map.get(curr)
-
-                        bounds = click_node.get("bounds", "")
-                        match = re.match(
-                            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds
-                        )
-                        if not match:
-                            continue
-                        x1, y1, x2, y2 = map(int, match.groups())
-                        if y2 <= int(height * 0.08) or y1 >= int(height * 0.95):
-                            continue
-
-                        desired_overlap = sum(
-                            1 for token in desired_tokens if token in label_token_set
-                        ) if desired_tokens else 0
-                        exact_canonical = (
-                            bool(desired_tokens)
-                            and all(token in label_token_set for token in desired_tokens)
-                        )
-                        contiguous_desired = (
-                            bool(desired_normalized)
-                            and desired_normalized in label_normalized
-                        )
-                        contiguous_target = (
-                            bool(target_normalized)
-                            and target_normalized in label_normalized
-                        )
-
-                        # Phân cấp ưu tiên (tier càng thấp càng ưu tiên cao):
-                        # Tier 0: Khớp hoàn toàn canonical page name
-                        # Tier 1: Khớp hoàn toàn target_phrase
-                        # Tier 2: Khớp nhiều token của desired_tokens
-                        # Tier 3: Khớp các trường hợp còn lại
-                        if exact_canonical or contiguous_desired:
-                            tier = 0
-                        elif has_all_target or contiguous_target:
-                            tier = 1
-                        else:
-                            tier = 2
-
-                        tap_x = (x1 + x2) // 2
-                        tap_y = (y1 + y2) // 2
-                        candidates.append(
-                            (
-                                -len(label_normalized),
-                                (x1 + x2) // 2,
-                                (y1 + y2) // 2,
-                            )
-                        )
-
-                    if candidates:
-                        _, _, x, y = min(candidates)
-                        self.tap(device_id, x, y)
-                        time.sleep(3.0)
-                        return True
-            except Exception as exc:
-                print(
-                    f"[Device {device_id[:6]}] Lỗi đọc kết quả Page "
-                    f"Facebook: {exc}"
-                )
-            finally:
-                try:
-                    os.remove(local_xml)
-                except Exception:
-                    pass
-                self.execute_adb(
-                    device_id, ["shell", "rm", "-f", remote_xml]
-                )
-
-            if attempt < max(1, max_swipes) - 1:
-                self.swipe(
-                    device_id,
-                    width // 2,
-                    int(height * 0.78),
-                    width // 2,
-                    int(height * 0.30),
-                    duration=random.randint(650, 950),
-                )
                 time.sleep(1.5)
         return False
 
@@ -3057,6 +2749,12 @@ class ADBController:
             "luc khac",
             "not now",
             "de sau",
+            "bao cao",
+            "report",
+            "ban muon bao cao dieu gi",
+            "van de ve trang nay",
+            "bai viet cu the",
+            "tim su giup do",
         )
         dismiss_labels = {
             "luc khac",
@@ -3077,6 +2775,8 @@ class ADBController:
             "tu choi",
             "deny",
             "dont allow",
+            "tro lai",
+            "back",
         }
 
         has_popup = False
@@ -4079,7 +3779,7 @@ class ADBController:
     def is_facebook_target_page_open(
         self, device_id, target_phrase, exact_page_name=None
     ):
-        """Xác minh đã vào profile Page, không còn ở danh sách kết quả."""
+        """Xác minh đã vào đúng profile Page mục tiêu, không còn ở danh sách kết quả hay trang khác."""
         safe_device_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", device_id)
         remote_xml = f"/sdcard/dump_fb_profile_{safe_device_id}.xml"
         local_xml = os.path.join(tempfile.gettempdir(), f"temp_fb_profile_{safe_device_id}.xml")
@@ -4094,27 +3794,42 @@ class ADBController:
             if pull_code != 0 or not os.path.exists(local_xml):
                 return False
             root = ET.parse(local_xml).getroot()
-            all_text = self._normalize_facebook_text(
-                " ".join(
-                    " ".join(
-                        (node.get("text", ""), node.get("content-desc", ""))
-                    )
-                    for node in root.iter()
-                )
+
+            # Các thương hiệu ngoại lai / không liên quan tuyệt đối từ chối
+            unrelated_brands = (
+                "sony", "samsung", "apple", "xiaomi", "honda", "yamaha",
+                "toyota", "mercedes", "oto", "xe", "dien may", "the gioi di dong"
             )
-            target_tokens = self._normalize_facebook_text(
-                target_phrase
-            ).split()
-            all_tokens_set = set(all_text.split())
-            core_tokens = [t for t in target_tokens if t in ("khai", "hoan", "skincare", "101", "not", "mun")]
-            if not core_tokens:
-                core_tokens = target_tokens[:2]
-            has_core = all(token in all_tokens_set for token in core_tokens)
-            target_overlap = sum(1 for token in target_tokens if token in all_tokens_set)
-            has_target = (
-                all(token in all_tokens_set for token in target_tokens)
-                or (len(target_tokens) > 2 and target_overlap >= len(target_tokens) * 0.6)
-            )
+
+            # Thu thập nhãn từ các node KHÔNG PHẢI EditText (để loại bỏ ô search bar vẫn lưu truy vấn)
+            non_edit_texts = []
+            has_unrelated_brand = False
+
+            for node in root.iter():
+                cls = node.get("class", "")
+                if cls.endswith("EditText") or "edittext" in cls.lower():
+                    continue
+                txt = (node.get("text") or "").strip()
+                desc = (node.get("content-desc") or "").strip()
+                combined = f"{txt} {desc}".strip()
+                if not combined:
+                    continue
+                norm = self._normalize_facebook_text(combined)
+                if not norm:
+                    continue
+                non_edit_texts.append(norm)
+
+                norm_tokens = set(norm.split())
+                if any(ub in norm_tokens for ub in unrelated_brands):
+                    has_unrelated_brand = True
+
+            if has_unrelated_brand:
+                return False
+
+            all_non_edit_text = " ".join(non_edit_texts)
+            target_norm = self._normalize_facebook_text(target_phrase)
+            target_tokens = target_norm.split()
+
             profile_markers = (
                 "theo doi",
                 "nhan tin",
@@ -4139,7 +3854,55 @@ class ADBController:
                 "trang chu",
                 "home",
             )
-            return (has_core or has_target) and any(marker in all_text for marker in profile_markers)
+            has_profile_marker = any(marker in all_non_edit_text for marker in profile_markers)
+            if not has_profile_marker:
+                return False
+
+            # Kiểm tra tên Page mục tiêu:
+            # 1. Nếu target có 'khai' và 'hoan':
+            if "khai" in target_tokens and "hoan" in target_tokens:
+                # Bắt buộc phải có ít nhất 1 node chứa cả 'khai' và 'hoan', với 'khai' đứng trước 'hoan'
+                has_khai_hoan_node = False
+                for t in non_edit_texts:
+                    t_tokens = set(t.split())
+                    if "khai" in t_tokens and "hoan" in t_tokens:
+                        if t.find("khai") < t.find("hoan"):
+                            has_khai_hoan_node = True
+                            break
+                if not has_khai_hoan_node:
+                    return False
+                return True
+
+            # 2. Nếu target là thương hiệu khác:
+            # Bắt buộc ít nhất 1 node phải chứa core tokens của target
+            core_tokens = [t for t in target_tokens if t not in ("spa", "clinic", "cham", "soc", "da", "y", "khoa")]
+            if not core_tokens:
+                core_tokens = target_tokens
+
+            has_target_node = False
+            for t in non_edit_texts:
+                t_tokens = set(t.split())
+                if all(ct in t_tokens for ct in core_tokens):
+                    has_target_node = True
+                    break
+                overlap = sum(1 for token in target_tokens if token in t_tokens)
+                if len(target_tokens) >= 2 and overlap >= len(target_tokens) * 0.6:
+                    has_target_node = True
+                    break
+
+            if has_target_node:
+                return True
+
+            # Fallback kiểm tra qua exact_page_name nếu có
+            if exact_page_name:
+                exact_norm = self._normalize_facebook_text(exact_page_name)
+                exact_tokens = exact_norm.split()
+                for t in non_edit_texts:
+                    t_tokens = set(t.split())
+                    if sum(1 for et in exact_tokens if et in t_tokens) >= max(2, int(len(exact_tokens) * 0.5)):
+                        return True
+
+            return False
         except Exception:
             return False
         finally:
@@ -4201,229 +3964,266 @@ class ADBController:
             else [str(item).strip() for item in target_pages if str(item).strip()]
         )
 
-        try:
-            if not seeds:
-                raise RuntimeError("Chưa nhập từ khóa mồi Facebook")
-            if not targets:
-                raise RuntimeError("Chưa nhập Page target Facebook")
-            seed_keyword = random.choice(seeds)
-            target_phrase = random.choice(targets)
-            if len(targets) > 1:
-                update_status(
-                    f"[Facebook] Chọn ngẫu nhiên Page mục tiêu "
-                    f"'{target_phrase}' (1/{len(targets)} page)..."
+        if not seeds:
+            update_status("Lỗi Facebook: Chưa nhập từ khóa mồi Facebook")
+            return False, "Chưa nhập từ khóa mồi Facebook"
+        if not targets:
+            update_status("Lỗi Facebook: Chưa nhập Page target Facebook")
+            return False, "Chưa nhập Page target Facebook"
+
+        max_flow_attempts = 2
+        for flow_attempt in range(1, max_flow_attempts + 1):
+            try:
+                if flow_attempt > 1:
+                    check_cancelled()
+                    update_status(
+                        f"[Facebook] Tự động thử lại quy trình chịu lỗi (Lần {flow_attempt}/{max_flow_attempts})..."
+                    )
+                    self.keyevent(device_id, 4)
+                    time.sleep(1.0)
+                    self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
+                    self.return_facebook_home_before_search(device_id)
+
+                seed_keyword = random.choice(seeds)
+                target_phrase = random.choice(targets)
+                if len(targets) > 1:
+                    update_status(
+                        f"[Facebook] Chọn ngẫu nhiên Page mục tiêu "
+                        f"'{target_phrase}' (1/{len(targets)} page)..."
+                    )
+                exact_page_name = self._resolve_facebook_exact_page_name(
+                    target_phrase
                 )
-            exact_page_name = self._resolve_facebook_exact_page_name(
-                target_phrase
-            )
-            self.lock_portrait(device_id)
+                self.lock_portrait(device_id)
 
-            check_cancelled()
-            self.warmup_tiktok_before_facebook(
-                device_id,
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            check_cancelled()
-            update_status("[Facebook B1] Kiểm tra và mở Facebook...")
-            if not self.ensure_facebook_ready(device_id):
-                raise RuntimeError("Không mở được ứng dụng Facebook")
-            self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
-            feed_total = random.randint(
-                config.FACEBOOK_STEP1_FEED_MIN,
-                config.FACEBOOK_STEP1_FEED_MAX,
-            )
-            update_status(
-                f"[Facebook B1] Nuôi Feed trong {feed_total}s (10-20s)..."
-            )
-            self.browse_facebook_surface(
-                device_id,
-                feed_total,
-                "feed",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
+                check_cancelled()
+                self.warmup_tiktok_before_facebook(
+                    device_id,
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
+                check_cancelled()
+                update_status("[Facebook B1] Kiểm tra và mở Facebook...")
+                if not self.ensure_facebook_ready(device_id):
+                    raise RuntimeError("Không mở được ứng dụng Facebook")
+                self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
+                feed_total = random.randint(
+                    config.FACEBOOK_STEP1_FEED_MIN,
+                    config.FACEBOOK_STEP1_FEED_MAX,
+                )
+                update_status(
+                    f"[Facebook B1] Nuôi Feed trong {feed_total}s (10-20s)..."
+                )
+                self.browse_facebook_surface(
+                    device_id,
+                    feed_total,
+                    "feed",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
 
-            check_cancelled()
-            ensure_facebook_action_context("Facebook B2")
-            if not self.return_facebook_home_before_search(device_id):
-                update_status("[Facebook B2] Đang khôi phục về Home...")
-                self.keyevent(device_id, 4)
-                time.sleep(0.8)
-                self.return_facebook_home_before_search(device_id)
-            update_status(
-                f"[Facebook B2] Tìm từ khóa mồi '{seed_keyword}'..."
-            )
-            if not self.find_and_click_facebook_search(device_id):
-                update_status("[Facebook B2] Thử mở lại ô Search Facebook lần 2...")
-                self.keyevent(device_id, 4)
-                time.sleep(0.5)
+                check_cancelled()
+                ensure_facebook_action_context("Facebook B2")
+                if not self.return_facebook_home_before_search(device_id):
+                    update_status("[Facebook B2] Đang khôi phục về Home...")
+                    self.keyevent(device_id, 4)
+                    time.sleep(0.8)
+                    self.return_facebook_home_before_search(device_id)
+                update_status(
+                    f"[Facebook B2] Tìm từ khóa mồi '{seed_keyword}'..."
+                )
                 if not self.find_and_click_facebook_search(device_id):
-                    raise RuntimeError("Không mở được ô Search Facebook")
-            self.replace_facebook_search_text(device_id, seed_keyword)
-            self.submit_facebook_search(device_id)
-            self.facebook_loading_delay(
-                device_id,
-                "seed_results",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            seed_result_total = random.randint(
-                config.FACEBOOK_STEP2_RESULTS_MIN,
-                config.FACEBOOK_STEP2_RESULTS_MAX,
-            )
-            update_status(
-                f"[Facebook B2] Lướt kết quả trong {seed_result_total}s "
-                "(10-15s)..."
-            )
-            self.browse_facebook_surface(
-                device_id,
-                seed_result_total,
-                "seed_results",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
+                    update_status("[Facebook B2] Thử mở lại ô Search Facebook lần 2...")
+                    self.keyevent(device_id, 4)
+                    time.sleep(0.5)
+                    if not self.find_and_click_facebook_search(device_id):
+                        raise RuntimeError("Không mở được ô Search Facebook")
+                self.replace_facebook_search_text(device_id, seed_keyword)
+                self.submit_facebook_search(device_id)
+                self.facebook_loading_delay(
+                    device_id,
+                    "seed_results",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
+                seed_result_total = random.randint(
+                    config.FACEBOOK_STEP2_RESULTS_MIN,
+                    config.FACEBOOK_STEP2_RESULTS_MAX,
+                )
+                update_status(
+                    f"[Facebook B2] Lướt kết quả trong {seed_result_total}s "
+                    "(10-15s)..."
+                )
+                self.browse_facebook_surface(
+                    device_id,
+                    seed_result_total,
+                    "seed_results",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
 
-            check_cancelled()
-            ensure_facebook_action_context("Facebook B3")
-            update_status(
-                f"[Facebook B3] Xóa sạch từ khóa mồi và tìm Page "
-                f"'{target_phrase}'..."
-            )
-            if not self.find_and_click_facebook_search(
-                device_id, allow_recent_fallback=True
-            ):
-                update_status("[Facebook B3] Thử mở lại ô Search Facebook lần 2...")
-                self.keyevent(device_id, 4)
-                time.sleep(0.5)
+                check_cancelled()
+                ensure_facebook_action_context("Facebook B3")
+                update_status(
+                    f"[Facebook B3] Xóa sạch từ khóa mồi và tìm Page "
+                    f"'{target_phrase}'..."
+                )
                 if not self.find_and_click_facebook_search(
                     device_id, allow_recent_fallback=True
                 ):
-                    raise RuntimeError("Không mở lại được ô Search Facebook")
-            self.replace_facebook_search_text(
-                device_id,
-                target_phrase,
-                allow_transient_foreground=True,
-            )
-            self.submit_facebook_search(
-                device_id, allow_transient_foreground=True
-            )
-            self.facebook_loading_delay(
-                device_id,
-                "target_results",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            update_status(
-                "[Facebook B3] Đưa kết quả về đầu và ưu tiên tab Trang..."
-            )
-            if not self.prepare_facebook_target_results(device_id):
-                raise RuntimeError(
-                    "Facebook rời foreground khi chuẩn bị kết quả Page target"
-                )
-            page_clicked = False
-            for target_attempt in range(3):
-                if self.find_and_click_facebook_page(
+                    update_status("[Facebook B3] Thử mở lại ô Search Facebook lần 2...")
+                    self.keyevent(device_id, 4)
+                    time.sleep(0.5)
+                    if not self.find_and_click_facebook_search(
+                        device_id, allow_recent_fallback=True
+                    ):
+                        raise RuntimeError("Không mở lại được ô Search Facebook")
+                self.replace_facebook_search_text(
                     device_id,
                     target_phrase,
-                    exact_page_name=exact_page_name,
-                    randomize_matching_pages=True,
-                ):
-                    page_clicked = True
-                    break
-                if target_attempt < 2:
-                    check_cancelled()
-                    update_status(
-                        f"[Facebook B3] Chưa thấy Page ở lượt {target_attempt + 1} • "
-                        "cuộn kết quả tìm kiếm và thử lại..."
+                    allow_transient_foreground=True,
+                )
+                self.submit_facebook_search(
+                    device_id, allow_transient_foreground=True
+                )
+                self.facebook_loading_delay(
+                    device_id,
+                    "target_results",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
+                update_status(
+                    "[Facebook B3] Đưa kết quả về đầu và ưu tiên tab Trang..."
+                )
+                if not self.prepare_facebook_target_results(device_id):
+                    raise RuntimeError(
+                        "Facebook rời foreground khi chuẩn bị kết quả Page target"
                     )
-                    ensure_facebook_action_context("Facebook B3 retry")
-                    if target_attempt == 0:
-                        if self.find_and_click_facebook_search(
-                            device_id, allow_recent_fallback=True
-                        ):
-                            self.replace_facebook_search_text(
-                                device_id,
-                                target_phrase,
-                                allow_transient_foreground=True,
-                            )
-                            self.submit_facebook_search(
-                                device_id, allow_transient_foreground=True
-                            )
-                        self.facebook_loading_delay(
-                            device_id,
-                            "target_results",
-                            status_callback=status_callback,
-                            is_cancelled=is_cancelled,
+                page_clicked = False
+                for target_attempt in range(3):
+                    if self.find_and_click_facebook_page(
+                        device_id,
+                        target_phrase,
+                        exact_page_name=exact_page_name,
+                        randomize_matching_pages=True,
+                    ):
+                        page_clicked = True
+                        break
+                    if target_attempt < 2:
+                        check_cancelled()
+                        update_status(
+                            f"[Facebook B3] Chưa thấy Page ở lượt {target_attempt + 1} • "
+                            "cuộn kết quả tìm kiếm và thử lại..."
                         )
-                    else:
-                        width_fb, height_fb = self.get_effective_screen_size(device_id)
-                        self.swipe(
-                            device_id,
-                            width_fb // 2,
-                            int(height_fb * 0.75),
-                            width_fb // 2,
-                            int(height_fb * 0.35),
-                            duration=600,
+                        ensure_facebook_action_context("Facebook B3 retry")
+                        if target_attempt == 0:
+                            if self.find_and_click_facebook_search(
+                                device_id, allow_recent_fallback=True
+                            ):
+                                self.replace_facebook_search_text(
+                                    device_id,
+                                    target_phrase,
+                                    allow_transient_foreground=True,
+                                )
+                                self.submit_facebook_search(
+                                    device_id, allow_transient_foreground=True
+                                )
+                            self.facebook_loading_delay(
+                                device_id,
+                                "target_results",
+                                status_callback=status_callback,
+                                is_cancelled=is_cancelled,
+                            )
+                        else:
+                            width_fb, height_fb = self.get_effective_screen_size(device_id)
+                            self.swipe(
+                                device_id,
+                                width_fb // 2,
+                                int(height_fb * 0.75),
+                                width_fb // 2,
+                                int(height_fb * 0.35),
+                                duration=600,
+                            )
+                            time.sleep(1.5)
+                        if not self.prepare_facebook_target_results(device_id):
+                            raise RuntimeError(
+                                "Facebook rời foreground khi tải lại Page target"
+                            )
+                if not page_clicked:
+                    raise RuntimeError(
+                        f"Không tìm thấy Page Facebook chứa đủ cụm '{target_phrase}'"
+                    )
+                self.facebook_loading_delay(
+                    device_id,
+                    "target_page",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
+                target_verified = False
+                for verify_attempt in range(3):
+                    if self.is_facebook_target_page_open(
+                        device_id,
+                        target_phrase,
+                        exact_page_name=exact_page_name,
+                    ):
+                        target_verified = True
+                        break
+                    if verify_attempt < 2:
+                        check_cancelled()
+                        update_status(
+                            "[Facebook B3] Page đang mở nhưng header chưa tải đủ • "
+                            f"xác minh lại ({verify_attempt + 2}/3)..."
                         )
                         time.sleep(1.5)
-                    if not self.prepare_facebook_target_results(device_id):
-                        raise RuntimeError(
-                            "Facebook rời foreground khi tải lại Page target"
-                        )
-            if not page_clicked:
-                raise RuntimeError(
-                    f"Không tìm thấy Page Facebook chứa đủ cụm '{target_phrase}'"
-                )
-            self.facebook_loading_delay(
-                device_id,
-                "target_page",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            target_verified = False
-            for verify_attempt in range(3):
-                if self.is_facebook_target_page_open(
-                    device_id,
-                    target_phrase,
-                    exact_page_name=exact_page_name,
-                ):
-                    target_verified = True
-                    break
-                if verify_attempt < 2:
-                    check_cancelled()
+                        self.lock_portrait(device_id, retries=3)
+                if not target_verified:
                     update_status(
-                        "[Facebook B3] Page đang mở nhưng header chưa tải đủ • "
-                        f"xác minh lại ({verify_attempt + 2}/3)..."
+                        f"[Facebook B3] Chưa vào đúng Page '{target_phrase}' "
+                        f"hoặc mở nhầm trang khác • Bấm Back thoát ra..."
                     )
-                    time.sleep(1.5)
-                    self.lock_portrait(device_id, retries=3)
-            if not target_verified:
-                raise RuntimeError(
-                    f"Đã bấm kết quả nhưng chưa vào đúng Page '{target_phrase}'"
-                )
+                    self.keyevent(device_id, 4)
+                    time.sleep(1.0)
+                    self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
+                    raise RuntimeError(
+                        f"Đã bấm kết quả nhưng chưa vào đúng Page '{target_phrase}'"
+                    )
 
-            target_total = random.randint(
-                config.FACEBOOK_STEP3_PAGE_MIN,
-                config.FACEBOOK_STEP3_PAGE_MAX,
-            )
-            update_status(
-                f"[Facebook B3] Đã vào đúng Page • lướt trong "
-                f"{target_total // 60} phút {target_total % 60:02d} giây..."
-            )
-            self.browse_facebook_surface(
-                device_id,
-                target_total,
-                "target_page",
-                status_callback=status_callback,
-                is_cancelled=is_cancelled,
-            )
-            update_status("Hoàn thành tác vụ Bơm Facebook!")
-            return True, "Thành công"
-        except Exception as exc:
-            message = str(exc)
-            update_status(f"Lỗi Facebook: {message}")
-            return False, message
+                target_total = random.randint(
+                    config.FACEBOOK_STEP3_PAGE_MIN,
+                    config.FACEBOOK_STEP3_PAGE_MAX,
+                )
+                update_status(
+                    f"[Facebook B3] Đã vào đúng Page • lướt trong "
+                    f"{target_total // 60} phút {target_total % 60:02d} giây..."
+                )
+                self.browse_facebook_surface(
+                    device_id,
+                    target_total,
+                    "target_page",
+                    status_callback=status_callback,
+                    is_cancelled=is_cancelled,
+                )
+                update_status("Hoàn thành tác vụ Bơm Facebook!")
+                return True, "Thành công"
+            except Exception as exc:
+                if is_cancelled and is_cancelled():
+                    message = str(exc)
+                    update_status(f"Dừng Facebook: {message}")
+                    return False, message
+                if "Bị dừng bởi người dùng" in str(exc):
+                    return False, str(exc)
+                if flow_attempt < max_flow_attempts:
+                    update_status(
+                        f"[Facebook] Gặp lỗi ở lượt {flow_attempt}: {exc} • "
+                        f"Đang phục hồi và tự động thử lại chịu lỗi..."
+                    )
+                    self.keyevent(device_id, 4)
+                    time.sleep(1.0)
+                    self.dismiss_facebook_blocking_popups(device_id, status_callback=update_status)
+                    continue
+                message = str(exc)
+                update_status(f"Lỗi Facebook: {message}")
+                return False, message
 
     def is_shopee_home_activity(self, device_id):
         """Xác minh cửa sổ đang focus chính xác là HomeActivity của Shopee."""

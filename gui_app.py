@@ -3948,13 +3948,27 @@ class GUIApp(ctk.CTk):
                         tracker.status_callback(d, msg)
 
                 dev_start = time.time()
-                success, message = main.adb.tiktok_automation_workflow(
-                    dev, 
-                    seed_keywords=seed_raw, 
-                    target_channel=channel, 
-                    status_callback=tt_status_cb,
-                    is_cancelled=session_is_cancelled
-                )
+                max_tt_attempts = 2
+                for tt_attempt in range(1, max_tt_attempts + 1):
+                    success, message = main.adb.tiktok_automation_workflow(
+                        dev, 
+                        seed_keywords=seed_raw, 
+                        target_channel=channel, 
+                        status_callback=tt_status_cb,
+                        is_cancelled=session_is_cancelled
+                    )
+                    if success or (session_is_cancelled and session_is_cancelled()):
+                        break
+                    if tt_attempt < max_tt_attempts:
+                        self.log_message(
+                            f"[Máy {dev_name}] TikTok kết thúc có lỗi ({message}) • "
+                            f"Đang tự động phục hồi và thử lại chịu lỗi ({tt_attempt + 1}/{max_tt_attempts})..."
+                        )
+                        if hasattr(main.adb, "keyevent"):
+                            main.adb.keyevent(dev, 4)
+                        time.sleep(1.0)
+                        if hasattr(main.adb, "recover_tiktok_if_blocked_by_captcha_or_link"):
+                            main.adb.recover_tiktok_if_blocked_by_captcha_or_link(dev)
                 dev_duration = time.time() - dev_start
                 device_results[dev]["runs_done"] += 1
                 device_results[dev]["last_msg"] = message

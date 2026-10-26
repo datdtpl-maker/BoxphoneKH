@@ -1663,6 +1663,200 @@ class FacebookAutomationTests(unittest.TestCase):
         # Nút 'Lúc khác' có bounds [150,1200][450,1320] -> tâm là (300, 1260)
         self.assertEqual((300, 1260), taps[0])
 
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_is_facebook_target_page_open_rejects_unrelated_brand_sony(
+        self, _exists, _remove
+    ):
+        """Khóa chặt Target: Tuyệt đối không nhận Sony Vietnam dù EditText còn lưu từ khóa Khải Hoàn."""
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node class="android.widget.EditText" text="Khải Hoàn Skincare" />
+              <node text="Sony Vietnam" />
+              <node text="Theo dõi" />
+              <node text="Bài viết" />
+              <node text="Nhắn tin" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            opened = controller.is_facebook_target_page_open(
+                "dev-sony",
+                "Khải Hoàn Skincare",
+                exact_page_name="Nhà thuốc Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa",
+            )
+        self.assertFalse(opened, "Sony Vietnam không được phép xác minh là Page mục tiêu Khải Hoàn")
+
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_is_facebook_target_page_open_rejects_reversed_khai_hoan(
+        self, _exists, _remove
+    ):
+        """Khóa chặt Target: Tên đảo 'Hoàn Khải' phải bị từ chối."""
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node text="Hoàn Khải Skincare" />
+              <node text="Theo dõi" />
+              <node text="Bài viết" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            opened = controller.is_facebook_target_page_open(
+                "dev-reversed",
+                "Khải Hoàn Skincare",
+            )
+        self.assertFalse(opened, "Tên đảo 'Hoàn Khải' phải bị từ chối")
+
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_is_facebook_target_page_open_accepts_valid_khai_hoan_header(
+        self, _exists, _remove
+    ):
+        """Xác minh hợp lệ khi đúng Page Khải Hoàn Skincare."""
+        root = ET.fromstring(
+            """
+            <hierarchy>
+              <node text="Nhà Thuốc Khải Hoàn - Khải Hoàn Skincare" />
+              <node text="Theo dõi" />
+              <node text="Bài viết" />
+              <node text="Nhắn tin" />
+            </hierarchy>
+            """
+        )
+        controller = ADBController(adb_path="adb")
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: root),
+        ):
+            opened = controller.is_facebook_target_page_open(
+                "dev-valid",
+                "Khải Hoàn Skincare",
+            )
+        self.assertTrue(opened)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_dismiss_facebook_blocking_popups_dismisses_report_modal(
+        self, _mock_sleep
+    ):
+        """Đóng modal Báo cáo / Report khi xuất hiện."""
+        controller = ADBController(adb_path="adb")
+        controller.is_facebook_in_foreground = lambda _dev: True
+        modal_xml = """
+        <hierarchy>
+          <node text="Báo cáo" bounds="[100,200][980,300]" />
+          <node text="Bạn muốn báo cáo điều gì?" bounds="[100,320][980,420]" />
+          <node text="Vấn đề về Trang này" bounds="[100,450][980,550]" />
+          <node text="Trở lại" clickable="true" bounds="[100,1000][400,1100]" />
+        </hierarchy>
+        """
+        controller._get_facebook_ui_root = lambda *_args: ET.fromstring(modal_xml)
+        taps = []
+        controller.tap = lambda _dev, x, y: taps.append((x, y))
+
+        dismissed = controller.dismiss_facebook_blocking_popups("dev-report")
+        self.assertTrue(dismissed)
+        self.assertEqual(1, len(taps))
+        self.assertEqual((250, 1050), taps[0])
+
+    @patch("adb_controller.os.remove")
+    @patch("adb_controller.os.path.exists", return_value=True)
+    def test_find_and_click_facebook_page_rejects_unrelated_brands(
+        self, _exists, _remove
+    ):
+        """Bỏ qua thẻ card có thương hiệu ngoại lai như Sony dù chứa từ khóa 'da'."""
+        search_results_xml = """
+        <hierarchy>
+          <node class="android.view.ViewGroup" bounds="[0,200][1080,450]" clickable="true">
+            <node text="Sony Vietnam - Máy ảnh chụp da đẹp" bounds="[50,220][800,280]" />
+          </node>
+          <node class="android.view.ViewGroup" bounds="[0,500][1080,750]" clickable="true">
+            <node text="Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa" bounds="[50,520][800,580]" />
+          </node>
+        </hierarchy>
+        """
+        controller = ADBController(adb_path="adb")
+        controller.get_effective_screen_size = lambda _dev: (1080, 1920)
+        controller.execute_adb = lambda *_args, **_kwargs: (0, "", "")
+        controller.collapse_statusbar_if_expanded = lambda *_args, **_kwargs: True
+        controller.dismiss_facebook_messenger_if_present = lambda *_args, **_kwargs: True
+        controller.dismiss_facebook_blocking_popups = lambda *_args, **_kwargs: True
+        controller._is_facebook_personal_profile = lambda *_args, **_kwargs: False
+
+        taps = []
+        controller.tap = lambda _dev, x, y: taps.append((x, y))
+
+        with patch(
+            "adb_controller.ET.parse",
+            return_value=SimpleNamespace(getroot=lambda: ET.fromstring(search_results_xml)),
+        ):
+            clicked = controller.find_and_click_facebook_page(
+                "dev-1",
+                "Khải Hoàn Skincare",
+                randomize_matching_pages=False,
+            )
+
+        self.assertTrue(clicked)
+        self.assertEqual(1, len(taps))
+        # Phải bấm vào Card 2 [0,500][1080,750] -> tâm là (540, 625), KHÔNG bấm vào Sony (Card 1)
+        self.assertEqual((540, 625), taps[0])
+
+    @patch("adb_controller.random.randint", side_effect=lambda low, _high: low)
+    @patch("adb_controller.random.choice", side_effect=lambda values: values[0])
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_facebook_workflow_fault_tolerant_retry_succeeds_on_second_attempt(
+        self, _sleep, _choice, _randint
+    ):
+        """Quy trình Bơm Facebook tự động phục hồi và thử lại chịu lỗi khi lượt 1 gặp sự cố."""
+        controller = ADBController(adb_path="adb")
+        controller.lock_portrait = lambda *_args, **_kwargs: True
+        controller.warmup_tiktok_before_facebook = lambda *_args, **_kwargs: True
+        controller.is_facebook_in_foreground = lambda _device_id: True
+        controller.ensure_facebook_ready = lambda _device_id: True
+        controller.browse_facebook_surface = lambda *_args, **_kwargs: True
+        controller.return_facebook_home_before_search = lambda _device_id: True
+        controller.replace_facebook_search_text = lambda *_args, **_kwargs: True
+        controller.submit_facebook_search = lambda *_args, **_kwargs: True
+        controller.facebook_loading_delay = lambda *_args, **_kwargs: None
+        controller.prepare_facebook_target_results = lambda _device_id: True
+        controller.find_and_click_facebook_page = lambda *_args, **_kwargs: True
+        controller.is_facebook_target_page_open = lambda *_args, **_kwargs: True
+        controller.dismiss_facebook_blocking_popups = lambda *_args, **_kwargs: True
+        controller.keyevent = lambda *_args, **_kwargs: None
+
+        search_calls = []
+        def flaky_search(_device_id, **_kwargs):
+            search_calls.append(1)
+            # Lượt 1 lỗi search, lượt 2 thành công
+            return len(search_calls) >= 3
+
+        controller.find_and_click_facebook_search = flaky_search
+
+        statuses = []
+        with patch("builtins.print"):
+            success, message = controller.facebook_automation_workflow(
+                "dev-retry",
+                seed_keywords="chăm sóc da",
+                target_pages="Khải Hoàn Skincare",
+                status_callback=lambda _dev, msg: statuses.append(msg),
+            )
+
+        self.assertTrue(success, message)
+        self.assertTrue(any("thử lại chịu lỗi" in s.lower() for s in statuses))
+
 
 if __name__ == "__main__":
     unittest.main()
