@@ -8005,122 +8005,15 @@ class ADBController:
         return False
 
     def _extract_tiktok_profile_video_candidates(self, root, width, height):
-        """Trích xuất danh sách tọa độ các ô video trên profile, ưu tiên video mới nhất (bỏ qua bài Đã ghim lên đầu)."""
+        """Trích xuất danh sách tọa độ các ô video trên profile qua UI Automator DOM Engine, ưu tiên video mới nhất."""
         if root is None:
             return [], False
 
-        pinned_markers = ("da ghim", "đã ghim", "pinned", "ghim")
-        pinned_centers = []
-        for elem in root.iter():
-            raw_t = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
-            norm_t = self._normalize_tiktok_text(raw_t)
-            if norm_t and any(
-                norm_t == m or norm_t.startswith(f"{m} ") or f" {m}" in norm_t
-                for m in pinned_markers
-            ):
-                c = self._element_center(elem)
-                if c:
-                    pinned_centers.append(c)
+        dom_res = ui_automator_dom.find_tiktok_profile_first_video_adaptive(root, width, height)
+        if dom_res.get("method") == "dom_exact_tile" and dom_res.get("candidates"):
+            return dom_res["candidates"], dom_res.get("has_unpinned", False)
 
-        parent_map = {child: parent for parent in root.iter() for child in parent}
-        raw_items = []
-
-        def is_tile_pinned(target_elem, coords):
-            for sub in target_elem.iter():
-                raw_sub = f"{sub.get('text', '')} {sub.get('content-desc', '')}"
-                norm_sub = self._normalize_tiktok_text(raw_sub)
-                if norm_sub and any(
-                    norm_sub == m or norm_sub.startswith(f"{m} ") or f" {m}" in norm_sub
-                    for m in pinned_markers
-                ):
-                    return True
-            bounds = target_elem.get("bounds", "")
-            m = re.findall(r"\d+", bounds)
-            if len(m) >= 4:
-                x1, y1, x2, y2 = map(int, m[:4])
-                for px, py in pinned_centers:
-                    if x1 <= px <= x2 and y1 <= py <= y2:
-                        return True
-            for px, py in pinned_centers:
-                if abs(px - coords[0]) <= int(width * 0.16) and abs(py - coords[1]) <= int(height * 0.14):
-                    return True
-            return False
-
-        def add_candidate(target_elem):
-            coords = self._element_center(target_elem)
-            if not coords or not (int(height * 0.25) < coords[1] < int(height * 0.90)):
-                return
-            dedup_dist = max(30, int(width * 0.04))
-            for idx, (old_pinned, (ex, ey)) in enumerate(raw_items):
-                if abs(coords[0] - ex) < dedup_dist and abs(coords[1] - ey) < dedup_dist:
-                    if not old_pinned and is_tile_pinned(target_elem, coords):
-                        raw_items[idx] = (True, (ex, ey))
-                    return
-            raw_items.append((is_tile_pinned(target_elem, coords), coords))
-
-        # 1. Quét các node hiển thị số lượt xem (View count: '1,598', '1.330', '473', '1.2K lượt xem' hoặc icon Play)
-        view_count_re = re.compile(r"^\s*(?:▷\s*)?(\d+[\.,]?\d*[kKmM]?)(?:\s*(?:lượt xem|views|lần|đã phát))?\s*$", re.IGNORECASE)
-        for elem in root.iter():
-            text = (elem.get("text", "") or "").strip()
-            desc = (elem.get("content-desc", "") or "").strip()
-            match_text = text or desc
-            if match_text and view_count_re.match(match_text):
-                clickable = elem
-                while clickable is not None and clickable.get("clickable", "").lower() != "true":
-                    clickable = parent_map.get(clickable)
-                add_candidate(clickable if clickable is not None else elem)
-
-        # 2. Quét các item trong GridView/RecyclerView
-        for grid in root.iter():
-            cls = grid.get("class", "").lower()
-            if "gridview" not in cls and "recyclerview" not in cls:
-                continue
-            for item in list(grid):
-                if item.get("clickable", "").lower() != "true":
-                    continue
-                add_candidate(item)
-
-        # 3. Quét theo resource-id và desc đã biết
-        for elem in root.iter():
-            resource_id = elem.get("resource-id", "").lower()
-            desc = self._normalize_tiktok_text(elem.get("content-desc", ""))
-            desc_lower = (elem.get("content-desc") or "").strip().lower()
-            is_known_video = (
-                "user_video_view" in resource_id
-                or resource_id.endswith(":id/eti")
-                or resource_id.endswith(":id/erf")
-                or resource_id.endswith(":id/cover")
-                or "video_tile" in resource_id
-                or "video_item" in resource_id
-                or "post_item" in resource_id
-                or "feed_item" in resource_id
-                or desc.startswith("video by ")
-                or desc_lower.startswith("video")
-                or "đã phát" in desc_lower
-                or "lượt xem" in desc_lower
-            )
-            if not is_known_video:
-                continue
-            clickable = elem
-            while (
-                clickable is not None
-                and clickable.get("clickable", "").lower() != "true"
-            ):
-                clickable = parent_map.get(clickable)
-            add_candidate(clickable if clickable is not None else elem)
-
-        # Sắp xếp ưu tiên: Video KHÔNG ghim (mới nhất) lên trước -> Hàng trên cùng -> Cột trái sang phải
-        row_step = max(1, int(height * 0.08))
-        raw_items.sort(
-            key=lambda item: (
-                1 if item[0] else 0,
-                item[1][1] // row_step,
-                item[1][0],
-            )
-        )
-        candidates = [coords for _, coords in raw_items]
-        has_unpinned = any(not is_pinned for is_pinned, _ in raw_items)
-        return candidates, has_unpinned
+        return [], False
 
     def click_random_tiktok_profile_video(self, device_id, channel_name):
         """Tìm và mở ưu tiên video mới nhất trên đầu profile kênh (bắt buộc xác minh đúng profile)."""
@@ -8172,14 +8065,24 @@ class ADBController:
                         root, width, height
                     )
 
-            # 4. Fallback chuẩn tọa độ 3 cột x 3 hàng trong lưới video TikTok (Row 1 nằm ở khoảng 60%-64% chiều cao màn hình ngay dưới bio):
             if not candidates:
-                grid_top = int(height * 0.54)
-                for row_offset in (int(height * 0.08), int(height * 0.26), int(height * 0.44)):
-                    row_y = grid_top + row_offset
-                    if row_y < int(height * 0.92):
-                        for col_ratio in (0.17, 0.50, 0.83):
-                            candidates.append((int(width * col_ratio), row_y))
+                # Sử dụng tính toán hình học tự thích nghi theo từng thiết bị từ UI Automator DOM
+                adaptive_res = ui_automator_dom.find_tiktok_profile_first_video_adaptive(root, width, height)
+                candidates = adaptive_res.get("candidates") or []
+
+            if not candidates:
+                col_w = max(1, width // 3)
+                tile_h = max(1, int(col_w * 1.33))
+                header_y = int(height * 0.45)
+                row_1_cy = header_y + int(tile_h * 0.45)
+                candidates = [
+                    (col_w // 2, row_1_cy),
+                    (col_w + col_w // 2, row_1_cy),
+                    (2 * col_w + col_w // 2, row_1_cy),
+                ]
+
+            # Kiểm tra và đóng mọi popup/link/chat nếu có trước khi tap
+            self.recover_tiktok_if_blocked_by_captcha_or_link(device_id)
 
             # Luôn ưu tiên click vào video mới nhất đầu danh sách để dòng chảy đi qua trọn vẹn các video mới nhất
             coords = candidates[0]
@@ -8187,15 +8090,28 @@ class ADBController:
                 f"[Device {device_id[:6]}][TikTok] Click ưu tiên vào video mới nhất tại tọa độ {coords}..."
             )
             self.tap(device_id, coords[0], coords[1])
-            time.sleep(2.8)
+            time.sleep(2.5)
 
             if self.is_tiktok_video_player(device_id):
                 return True
 
-            # Thử tap lần 2 với video mới nhất kế tiếp trong hàng đầu
+            # Kiểm tra xem có bị mở nhầm Chat / Tin nhắn hoặc Share không, nếu có thì Back về Profile
+            cur_root = self._get_tiktok_ui_root(device_id, "tt_misclick_chk")
+            if cur_root is not None:
+                combined_txt = " ".join(
+                    f"{e.get('text', '')} {e.get('content-desc', '')}"
+                    for e in cur_root.iter()
+                ).lower()
+                if any(m in combined_txt for m in ("gửi tin nhắn", "send message", "chia sẻ với", "share to", "soạn tin")):
+                    print(f"[Device {device_id[:6]}][TikTok] Phát hiện mở nhầm Chat/Share • Thoát về Profile ngay...")
+                    self.keyevent(device_id, 111)
+                    self.keyevent(device_id, 4)
+                    time.sleep(1.0)
+
+            # Thử tap lần 2 với video kế tiếp trong hàng đầu
             retry_coords = candidates[1] if len(candidates) > 1 else candidates[0]
             self.tap(device_id, retry_coords[0], retry_coords[1])
-            time.sleep(2.8)
+            time.sleep(2.5)
             if self.is_tiktok_video_player(device_id):
                 return True
 
@@ -8203,6 +8119,74 @@ class ADBController:
 
     def is_tiktok_video_player(self, device_id):
         """Xác minh đã mở player bằng Activity hoặc cụm điều khiển video."""
+        code, stdout, _ = self.execute_adb(
+            device_id, ["shell", "dumpsys", "window", "windows"]
+        )
+        output = stdout.lower() if code == 0 else ""
+        tiktok_packages = (
+            config.TIKTOK_PACKAGE.casefold(),
+            config.TIKTOK_PACKAGE_ALT.casefold(),
+        )
+        if (
+            any(package in output for package in tiktok_packages)
+            and any(
+                marker in output
+                for marker in (
+                    "detailactivity", "aweme.detail", "detail.ui",
+                )
+            )
+        ):
+            return True
+
+        # Kiểm tra nhanh luồng phát AudioTrack Media của Android (khi video đang phát thì AudioTrack luôn started)
+        try:
+            code_audio, stdout_audio, _ = self.execute_adb(
+                device_id, ["shell", "dumpsys", "audio"], timeout=3
+            )
+            if code_audio == 0:
+                audio_lower = stdout_audio.lower()
+                if "state:started" in audio_lower and (
+                    "usage_media" in audio_lower
+                    or "audiotrack" in audio_lower
+                    or "content_type_music" in audio_lower
+                ):
+                    if self.is_tiktok_in_foreground(device_id):
+                        return True
+        except Exception:
+            pass
+
+        root = self._get_tiktok_ui_root(device_id, "tt_player_check")
+        if root is None:
+            return False
+        action_hits = set()
+        has_profile_grid = False
+        action_markers = {
+            "like", "likes", "thich", "comment", "comments", "binh luan",
+            "share", "chia se", "favorite", "favourite", "save", "luu",
+        }
+        profile_exclusive_markers = {
+            "sua ho so", "edit profile", "tin nhan", "lienhe.khaihoanskincare.com",
+            "chuyen san pham", "dia chi", "address",
+        }
+        has_profile_exclusive = False
+        for elem in root.iter():
+            cls = elem.get("class", "").casefold()
+            if cls.endswith("gridview"):
+                has_profile_grid = True
+            value = self._normalize_tiktok_identity(
+                f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+            )
+            for marker in action_markers:
+                if marker in value:
+                    action_hits.add(marker)
+            for p_marker in profile_exclusive_markers:
+                if p_marker in value:
+                    has_profile_exclusive = True
+
+        if has_profile_exclusive:
+            return False
+
+        return not has_profile_grid and len(action_hits) >= 1
         code, stdout, _ = self.execute_adb(
             device_id, ["shell", "dumpsys", "window", "windows"]
         )
@@ -9116,14 +9100,20 @@ class ADBController:
                     self.tap(device_id, width // 2, int(height * 0.12))
                     time.sleep(0.2)
 
-                    # Đi thẳng qua trọn vẹn nhóm video mới nhất trên đầu kênh trước,
-                    # sau đó mới thỉnh thoảng lướt lùi ngẫu nhiên 15%
-                    # KHÓA CỨNG CLIP MỤC TIÊU: Tiếp tục xem và tương tác trên clip mục tiêu, tuyệt đối KHÔNG lướt xuống để nhảy sang clip khác
+                    # Đi thẳng qua trọn vẹn nhóm video trên Kênh mục tiêu bắt đầu từ clip đầu tiên
                     update_status(
-                        f"[TikTok B3] 🔒 Khóa cứng clip mục tiêu • Duy trì xem và tương tác ({step3_total - step3_elapsed}s còn lại)..."
+                        f"[TikTok B3] 🎬 Lướt sang video tiếp theo trên Kênh '{target_channel}' ({channel_video + 1}) • {step3_total - step3_elapsed}s còn lại..."
+                    )
+                    self.swipe(
+                        device_id,
+                        width // 2,
+                        int(height * 0.78),
+                        width // 2,
+                        int(height * 0.22),
+                        duration=random.randint(350, 500),
                     )
                     channel_video += 1
-                    time.sleep(0.5)
+                    time.sleep(1.2)
                     self.recover_tiktok_if_blocked_by_captcha_or_link(
                         device_id, status_callback=status_callback
                     )

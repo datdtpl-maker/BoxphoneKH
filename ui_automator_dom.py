@@ -409,6 +409,297 @@ def is_tiktok_target_profile_dom(
     )
 
 
+def find_tiktok_profile_first_video_adaptive(
+    root: Optional[ET.Element], width: int, height: int
+) -> Dict[str, Any]:
+    """Tự thích nghi theo từng thiết bị và độ phân giải màn hình để bắt chính xác video đầu tiên trên profile TikTok.
+
+    Quy tắc an toàn tuyệt đối:
+    1. Loại trừ 100% vùng Header và Tab Bar của Profile (Avatar, Follow, Tin nhắn, Chia sẻ, Link Bio, Tab bar, Back).
+       Tuyệt đối không bao giờ bấm nhầm vào nút 'Tin nhắn' (Chat), 'Link Bio' (Website ngoài), hay nút 'Theo dõi'.
+    2. Tự đo lường ranh giới thực tế header_bottom_y trên DOM của thiết bị đó.
+    3. Tìm kiếm video đầu tiên (ưu tiên video mới nhất chưa ghim trong hàng 1, hoặc ô video đầu tiên) nằm bên dưới header_bottom_y.
+    4. Thích nghi hình học theo tỷ lệ màn hình của thiết bị cụ thể nếu cây DOM ẩn node con.
+    """
+    res: Dict[str, Any] = {
+        "matched": False,
+        "coords": None,
+        "header_bottom_y": 0,
+        "method": "none",
+        "candidates": [],
+        "has_unpinned": False,
+    }
+    if root is None or width <= 0 or height <= 0:
+        return res
+
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+
+    # 1. Đo lường chính xác ranh giới Header / Tab Bar (header_bottom_y)
+    header_markers = (
+        "follow", "theo dõi", "theo doi", "đang follow", "dang follow",
+        "đã follow", "da follow", "đang theo dõi", "tin nhắn", "tin nhan",
+        "nhắn tin", "nhan tin", "message", "chat", "chia sẻ", "chia se",
+        "share", "sửa hồ sơ", "sua ho so", "edit profile", "chỉnh sửa hồ sơ",
+        "follower", "following", "người theo dõi", "lượt thích", "thích",
+        "bài đăng", "đã đăng lại", "repost", "yêu thích", "đã thích", "liked",
+        "http://", "https://", ".com", ".vn", "lienhe", "địa chỉ", "website",
+        "xem bản dịch", "xem them", "thêm"
+    )
+
+    header_bottoms = []
+    tab_bottoms = []
+
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
+            continue
+        x1, y1, x2, y2, cx, cy = b_info
+
+        cls = elem.get("class", "").casefold()
+        rid = elem.get("resource-id", "").casefold()
+        txt = normalize_text(elem.get("text", ""))
+        desc = normalize_text(elem.get("content-desc", ""))
+        combined = f"{txt} {desc}"
+
+        # Nhận diện tab bar
+        is_tab = (
+            "tab" in cls
+            or "tab" in rid
+            or "tabhost" in cls
+            or "tablayout" in cls
+            or "sliding_tabs" in rid
+            or "viewpager" in rid
+            or any(t == txt or t == desc for t in ("videos", "bài viết", "đã thích", "yêu thích", "repost"))
+        )
+        if is_tab and y2 < int(height * 0.70):
+            tab_bottoms.append(y2)
+
+        # Nhận diện nút hành động / bio trong Header
+        if any(m in combined for m in header_markers) and y2 < int(height * 0.68):
+            header_bottoms.append(y2)
+
+    # Xác định đường chân Header + Tab bar
+    header_candidates = tab_bottoms if tab_bottoms else header_bottoms
+    if header_candidates:
+        header_bottom_y = max(header_candidates)
+    elif header_bottoms:
+        header_bottom_y = max(header_bottoms)
+    else:
+        # Mặc định theo tỷ lệ hình học nếu không nhận diện được text
+        header_bottom_y = int(height * 0.40)
+
+    # Ràng buộc an toàn: header_bottom_y nằm trong khoảng [22%, 65%] chiều cao màn hình
+    header_bottom_y = max(int(height * 0.22), min(int(height * 0.65), header_bottom_y))
+    min_video_y = header_bottom_y + max(4, int(height * 0.005))
+    res["header_bottom_y"] = header_bottom_y
+
+    # 2. Tìm kiếm các vị trí đã ghim (Pinned markers)
+    pinned_markers = ("da ghim", "đã ghim", "pinned", "ghim")
+    pinned_centers = []
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info:
+            continue
+        _, _, _, _, cx, cy = b_info
+        raw_t = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+        norm_t = normalize_text(raw_t)
+        if norm_t and any(
+            norm_t == m or norm_t.startswith(f"{m} ") or f" {m}" in norm_t
+            for m in pinned_markers
+        ):
+            pinned_centers.append((cx, cy))
+
+    def is_elem_pinned(node, coords):
+        for sub in node.iter():
+            sub_t = normalize_text(f"{sub.get('text', '')} {sub.get('content-desc', '')}")
+            if sub_t and any(
+                sub_t == m or sub_t.startswith(f"{m} ") or f" {m}" in sub_t
+                for m in pinned_markers
+            ):
+                return True
+        b_box = parse_bounds(node.get("bounds", ""))
+        if b_box:
+            nx1, ny1, nx2, ny2, _, _ = b_box
+            for px, py in pinned_centers:
+                if nx1 <= px <= nx2 and ny1 <= py <= ny2:
+                    return True
+        for px, py in pinned_centers:
+            if abs(px - coords[0]) <= int(width * 0.16) and abs(py - coords[1]) <= int(height * 0.14):
+                return True
+        return False
+
+    raw_candidates = []
+    dedup_dist = max(30, int(width * 0.05))
+
+    def add_video_candidate(node, coords):
+        if not coords:
+            return
+        cx, cy = coords
+        # Ràng buộc an toàn tuyệt đối: Không bao giờ chạm vào Header / Tab Bar
+        if cy < min_video_y or cy > int(height * 0.95):
+            return
+        if cx < int(width * 0.04) or cx > int(width * 0.96):
+            return
+        pinned = is_elem_pinned(node, (cx, cy))
+        for idx, (old_pinned, (ex, ey)) in enumerate(raw_candidates):
+            if abs(cx - ex) < dedup_dist and abs(cy - ey) < dedup_dist:
+                if not old_pinned and pinned:
+                    raw_candidates[idx] = (True, (ex, ey))
+                return
+        raw_candidates.append((pinned, (cx, cy)))
+
+    # A. Quét các node số lượt xem (view count: 1.2K, 534, 1.5M, ▷, lượt xem, đã phát)
+    view_count_re = re.compile(
+        r"^\s*(?:▷\s*)?(\d+[\.,]?\d*[kKmM]?)(?:\s*(?:lượt xem|views|lần|đã phát))?\s*$",
+        re.IGNORECASE,
+    )
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info:
+            continue
+        _, _, _, _, ecx, ecy = b_info
+        if ecy < min_video_y:
+            continue
+        text = (elem.get("text", "") or "").strip()
+        desc = (elem.get("content-desc", "") or "").strip()
+        match_text = text or desc
+        if match_text and view_count_re.match(match_text):
+            # Tìm container ô video bao quanh
+            curr = elem
+            tile_node = elem
+            while curr is not None:
+                cb = parse_bounds(curr.get("bounds", ""))
+                if cb:
+                    cw = cb[2] - cb[0]
+                    if int(width * 0.20) <= cw <= int(width * 0.45):
+                        tile_node = curr
+                        break
+                curr = parent_map.get(curr)
+            tb = parse_bounds(tile_node.get("bounds", ""))
+            if tb:
+                add_video_candidate(tile_node, (tb[4], tb[5]))
+            else:
+                add_video_candidate(elem, (ecx, max(min_video_y + 10, ecy - int(height * 0.05))))
+
+    # B. Quét theo resource-id và desc video đã biết
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info:
+            continue
+        x1, y1, x2, y2, ecx, ecy = b_info
+        if ecy < min_video_y:
+            continue
+        rid = elem.get("resource-id", "").casefold()
+        desc = normalize_text(elem.get("content-desc", ""))
+        desc_lower = (elem.get("content-desc") or "").strip().lower()
+        w = x2 - x1
+        h = y2 - y1
+
+        is_known = (
+            "user_video_view" in rid
+            or rid.endswith(":id/eti")
+            or rid.endswith(":id/erf")
+            or rid.endswith(":id/cover")
+            or "video_tile" in rid
+            or "video_item" in rid
+            or "post_item" in rid
+            or "feed_item" in rid
+            or desc.startswith("video by ")
+            or desc.startswith("video của ")
+            or "đã phát" in desc_lower
+            or "lượt xem" in desc_lower
+        )
+        if is_known:
+            # Nếu là container ô video hoặc ảnh bìa
+            if int(width * 0.20) <= w <= int(width * 0.45) and h >= int(w * 0.7):
+                add_video_candidate(elem, (ecx, ecy))
+            else:
+                # Tìm container cha có kích thước 1 ô
+                curr = elem
+                tile_node = elem
+                while curr is not None:
+                    cb = parse_bounds(curr.get("bounds", ""))
+                    if cb:
+                        cw = cb[2] - cb[0]
+                        ch = cb[3] - cb[1]
+                        if int(width * 0.20) <= cw <= int(width * 0.45) and ch >= int(cw * 0.7):
+                            tile_node = curr
+                            break
+                    curr = parent_map.get(curr)
+                tb = parse_bounds(tile_node.get("bounds", ""))
+                if tb:
+                    add_video_candidate(tile_node, (tb[4], tb[5]))
+                else:
+                    add_video_candidate(elem, (ecx, ecy))
+
+    # C. Quét các item trực tiếp trong GridView/RecyclerView nằm bên dưới header_bottom_y
+    for grid in root.iter():
+        cls = grid.get("class", "").casefold()
+        if "gridview" not in cls and "recyclerview" not in cls:
+            continue
+        gb = parse_bounds(grid.get("bounds", ""))
+        if not gb:
+            continue
+        for item in list(grid):
+            ib = parse_bounds(item.get("bounds", ""))
+            if not ib:
+                continue
+            iw = ib[2] - ib[0]
+            ih = ib[3] - ib[1]
+            icy = ib[5]
+            if icy < min_video_y:
+                continue
+            # Một ô video TikTok chiếm khoảng 1/3 chiều rộng màn hình và có tỷ lệ dọc (h >= w * 0.7)
+            if int(width * 0.20) <= iw <= int(width * 0.45) and ih >= int(iw * 0.7):
+                add_video_candidate(item, (ib[4], ib[5]))
+
+    # 3. Phân loại và lựa chọn video đầu tiên
+    col_width = max(1, width // 3)
+    row_height = max(1, int(col_width * 1.33))
+
+    if raw_candidates:
+        # Sắp xếp theo hàng trước, sau đó theo trạng thái ghim, sau đó theo cột từ trái sang phải
+        row_bucket_size = max(1, int(row_height * 0.80))
+        raw_candidates.sort(
+            key=lambda item: (
+                (item[1][1] - min_video_y) // row_bucket_size,
+                1 if item[0] else 0,  # Trong cùng 1 hàng, ưu tiên video chưa ghim
+                item[1][0],           # Cột 1 (trái) -> Cột 2 (giữa) -> Cột 3 (phải)
+            )
+        )
+        res["candidates"] = [coords for _, coords in raw_candidates]
+        res["has_unpinned"] = any(not is_p for is_p, _ in raw_candidates)
+        res["coords"] = res["candidates"][0]
+        res["matched"] = True
+        res["method"] = "dom_exact_tile"
+        return res
+
+    # 4. Thích nghi hình học tuyệt đối (Adaptive Geometric Positioning)
+    # Tự động tính toán tọa độ tâm Hàng 1 Cột 1 dựa trên header_bottom_y thực tế của thiết bị đó
+    col_1_cx = col_width // 2
+    col_2_cx = col_width + col_width // 2
+    col_3_cx = 2 * col_width + col_width // 2
+    row_1_cy = min_video_y + int(row_height * 0.45)
+    row_2_cy = row_1_cy + row_height
+
+    adaptive_coords = (col_1_cx, row_1_cy)
+    adaptive_candidates = [
+        (col_1_cx, row_1_cy),
+        (col_2_cx, row_1_cy),
+        (col_3_cx, row_1_cy),
+        (col_1_cx, row_2_cy),
+        (col_2_cx, row_2_cy),
+        (col_3_cx, row_2_cy),
+    ]
+
+    res["matched"] = True
+    res["coords"] = adaptive_coords
+    res["candidates"] = adaptive_candidates
+    res["has_unpinned"] = True
+    res["method"] = "adaptive_geometry"
+    return res
+
+
 # ==============================================================================
 # TIKTOK DOM ENGINE
 # ==============================================================================
