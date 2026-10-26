@@ -7197,40 +7197,8 @@ class ADBController:
         ]
 
     def _match_tiktok_channel_name(self, candidate, target):
-        """So khớp tên kênh thông minh, tuyệt đối không nhầm người khác (như 'Trần Khải Hoàn' hay 'honkhi418')."""
-        if not candidate or not target:
-            return False
-        c_tokens = self._clean_channel_tokens(candidate)
-        t_tokens = self._clean_channel_tokens(target)
-        if not c_tokens or not t_tokens:
-            return False
-
-        c_compact = "".join(c_tokens)
-        t_compact = "".join(t_tokens)
-
-        # 1. Trùng khớp chính xác chuỗi liền
-        if t_compact == c_compact:
-            return True
-
-        # 2. Candidate bắt đầu bằng target và hậu tố kèm theo (ví dụ: "Official", "@handle", "Shop")
-        if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 25:
-            return True
-
-        # 3. Handle rút gọn: target bắt đầu bằng candidate (ví dụ @khaihoanskincare từ Khải Hoàn Skincare PT)
-        if t_compact.startswith(c_compact) and len(c_compact) >= 8 and len(c_compact) >= len(t_compact) - 6:
-            return True
-
-        # 4. Kiểm tra các từ khóa đặc trưng (distinctive tokens)
-        # Ví dụ: "101", "skincare", "pt", "not", "mun"
-        distinctive = {
-            token for token in t_tokens
-            if token in ("101", "skincare", "pt", "not", "mun", "spa", "clinic", "derma", "beauty")
-            or token.isdigit()
-        }
-        if distinctive and not distinctive.issubset(set(c_tokens)):
-            return False
-
-        return False
+        """So khớp tên kênh thông minh qua UI Automator DOM Engine, tuyệt đối không nhầm người khác."""
+        return ui_automator_dom.match_tiktok_channel_name(candidate, target)
 
     def _remember_tiktok_target_tap(self, device_id, channel_name):
         self._recent_tiktok_target_taps[device_id] = (
@@ -7259,22 +7227,12 @@ class ADBController:
     def _tap_tiktok_target_name_fallback(
         self, device_id, channel_name, coords=None
     ):
-        """Tap thẳng vùng tên kênh khi TikTok không expose card qua XML."""
-        if not self.wait_for_tiktok_foreground(device_id):
-            return False
-        width, height = self.get_effective_screen_size(device_id)
-        if coords is None:
-            coords = (int(width * 0.38), int(height * 0.26))
+        """Tuyệt đối không đoán mò tọa độ khi UI Automator không nhận diện được card kênh."""
         print(
-            f"[Device {device_id[:6]}] UI TikTok không expose card Kênh • "
-            f"tap trực tiếp vùng tên tại {coords}."
+            f"[Device {device_id[:6]}] Không tìm thấy card kênh TikTok '{channel_name}' qua DOM • "
+            f"từ chối tap mù tọa độ để tránh bấm nhầm người khác."
         )
-        self.tap(device_id, coords[0], coords[1])
-        time.sleep(3.0)
-        if not self.wait_for_tiktok_foreground(device_id):
-            return False
-        self._remember_tiktok_target_tap(device_id, channel_name)
-        return True
+        return False
 
     def _tap_tiktok_profile_clip_fallback(self, device_id):
         """Mở clip ở vùng lưới thấp và bắt buộc xác minh player."""
@@ -7534,6 +7492,17 @@ class ADBController:
         if root is None:
             return False
 
+        screen_width, screen_height = self.get_effective_screen_size(device_id)
+
+        # 1. Thử xác minh trước qua UI Automator DOM Engine
+        try:
+            if ui_automator_dom.is_tiktok_target_profile_dom(
+                root, screen_width, screen_height, channel_name
+            ):
+                return True
+        except Exception:
+            pass
+
         target = self._normalize_tiktok_identity(channel_name)
         has_target = False
         has_search_input = False
@@ -7541,9 +7510,9 @@ class ADBController:
         has_profile_action = False
         video_nodes = 0
 
-        screen_width, screen_height = self.get_effective_screen_size(device_id)
         tab_y_min = int(screen_height * 0.05)
         tab_y_max = int(screen_height * 0.22)
+        header_y_max = int(screen_height * 0.42)
 
         for elem in root.iter():
             class_name = elem.get("class", "")
@@ -7563,11 +7532,10 @@ class ADBController:
             m = re.findall(r"\d+", bounds)
             elem_y = (int(m[1]) + int(m[3])) // 2 if len(m) >= 4 else None
 
-            # Tên target phải xuất hiện như một trường danh tính hoàn chỉnh.
-            # Không dùng phép "contains" vì caption/bio của kênh khác có thể
-            # nhắc tên target và khiến tool xác minh nhầm profile.
+            # Tên target phải xuất hiện trong phần Header Profile (y <= 42%).
+            # Tuyệt đối không dùng caption/bio của video ở dưới để tránh nhận nhầm profile khác.
             target_clean = target.replace(" ", "")
-            if target and any(
+            if (elem_y is None or elem_y <= header_y_max) and target and any(
                 value == target
                 or value.startswith(f"{target} ")
                 or (target_clean and value.replace(" ", "").lstrip("@") == target_clean)
@@ -7743,34 +7711,91 @@ class ADBController:
         return False
 
     def _switch_to_tiktok_users_tab(self, device_id, root=None):
-        """Giữ tương thích ngược: chuyển/đảm bảo tab Top (không chuyển Users/Photos)."""
-        return self.ensure_tiktok_search_top_tab(device_id, root=root)
+        """Chuyển sang tab Người dùng (Users) để tìm kiếm danh sách tài khoản."""
+        if root is None:
+            root = self._get_tiktok_ui_root(device_id, "tt_switch_users_tab")
+        if root is None:
+            return False
+        screen_width, screen_height = self.get_effective_screen_size(device_id)
+        card_info = ui_automator_dom.find_tiktok_search_channel_card(
+            root, screen_width, screen_height, ""
+        )
+        if card_info.get("users_tab_coords"):
+            ux, uy = card_info["users_tab_coords"]
+            print(f"[Device {device_id[:6]}][TikTok] Bấm chọn tab 'Người dùng' tại ({ux}, {uy})...")
+            self.tap(device_id, ux, uy)
+            time.sleep(1.8)
+            return True
+        return False
 
     def find_and_click_tiktok_channel(self, device_id, channel_name):
-        """Click đúng card kênh, rồi xác minh đã vào profile mục tiêu."""
+        """Click đúng card kênh qua UI Automator DOM, rồi xác minh đã vào profile mục tiêu."""
         target = self._normalize_tiktok_identity(channel_name)
         screen_width, screen_height = self.get_effective_screen_size(device_id)
-        search_bar_bottom = int(screen_height * 0.12)
-        max_scan_attempts = 5
+        search_bar_bottom = int(screen_height * 0.14)
+        max_scan_attempts = 7
 
         for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_channel_{attempt}")
             if root is None:
-                if attempt == 0:
-                    return self._tap_tiktok_target_name_fallback(
-                        device_id, channel_name
-                    )
+                # Tuyệt đối không tap mù tọa độ khi dump thất bại; thử lại hoặc dừng
                 time.sleep(1.0)
                 continue
 
-            # Có máy đã nhận tap ở lần trước nhưng UI profile tải chậm hơn
-            # nhịp xác minh. Nếu đúng profile đã mở thì hoàn tất ngay, không
-            # tiếp tục tìm/tap lại trên giao diện profile.
+            # 1. Nếu đúng profile đã mở thì hoàn tất ngay, không tap lại
             if self.is_on_tiktok_target_profile(
                 device_id, channel_name, root=root
             ):
+                self._remember_tiktok_target_tap(device_id, channel_name)
                 return True
 
+            # 2. Sử dụng phân hệ UI Automator DOM Engine quét chính xác card kênh
+            dom_card = ui_automator_dom.find_tiktok_search_channel_card(
+                root, screen_width, screen_height, channel_name
+            )
+
+            # Trường hợp 2A: Tìm thấy card kênh khớp chuẩn xác mục tiêu qua DOM
+            if dom_card.get("matched") and dom_card.get("card_coords"):
+                tap_x, tap_y = dom_card["card_coords"]
+                print(
+                    f"[Device {device_id[:6]}][UI Automator] Tìm thấy card Kênh '{dom_card['matched_name']}' "
+                    f"khớp '{channel_name}' tại ({tap_x}, {tap_y})."
+                )
+                self.tap(device_id, tap_x, tap_y)
+                time.sleep(3.0)
+
+                if self.is_on_tiktok_target_profile(device_id, channel_name):
+                    self._remember_tiktok_target_tap(device_id, channel_name)
+                    return True
+
+                # Thêm 1.5s chờ mạng tải chậm
+                time.sleep(1.5)
+                if self.is_on_tiktok_target_profile(device_id, channel_name):
+                    self._remember_tiktok_target_tap(device_id, channel_name)
+                    return True
+
+                # Nếu sau khi tap mà không phải profile mục tiêu, lập tức quay lại tìm kiếm
+                print(
+                    f"[Device {device_id[:6]}] Chưa xác nhận đúng profile '{channel_name}' • "
+                    f"quay lại tìm kiếm ngay..."
+                )
+                self.keyevent(device_id, 4)
+                time.sleep(1.5)
+                continue
+
+            # Trường hợp 2B: Chưa thấy card kênh ở lần đầu, nhưng đang ở tab Top
+            # -> Chuyển sang tab Người dùng (Users) để quét danh sách tài khoản đầy đủ
+            if attempt == 0 and dom_card.get("current_tab") == "top" and dom_card.get("users_tab_coords"):
+                ux, uy = dom_card["users_tab_coords"]
+                print(
+                    f"[Device {device_id[:6]}][TikTok] Chưa thấy card Kênh trên tab Top • "
+                    f"Chuyển sang tab 'Người dùng' tại ({ux}, {uy})..."
+                )
+                self.tap(device_id, ux, uy)
+                time.sleep(2.0)
+                continue
+
+            # Trường hợp 2C: Quét card tương thích ngược nếu DOM engine chưa gom đủ cấu trúc
             parent_map = {child: parent for parent in root.iter() for child in parent}
             matches = []
             profile_row_cues = (
@@ -7851,10 +7876,6 @@ class ADBController:
                     )
                 )
 
-                # Một số bản TikTok gắn clickable cho toàn bộ khối kết quả
-                # (Users + Shopping), làm vùng cha cao gần cả màn hình. Tap
-                # giữa vùng cha sẽ rơi vào sản phẩm. Khi tên target và nút
-                # Follow nằm cùng hàng, chạm trực tiếp vào text tên kênh.
                 clickable_bounds = re.match(
                     r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
                     target_elem.get("bounds", ""),
@@ -7911,9 +7932,6 @@ class ADBController:
                         or has_profile_row_cue
                         or nearby_profile_row_cue
                     )
-                    # Text gộp như "Tên, @handle, Follow" chỉ được nhận khi
-                    # card có dấu hiệu hàng tài khoản. Nhờ vậy caption video
-                    # của kênh khác dù nhắc tên target vẫn bị loại.
                     and (
                         exact_identity
                         or fuzzy_identity
@@ -7930,28 +7948,16 @@ class ADBController:
                     matches.append((score, final_coords, target))
 
             if not matches:
-                # Nếu chưa thấy card khớp ở lần đầu, thử kiểm tra nếu đang kẹt ở tab khác (Ảnh, Video...) thì mới chuyển về Top
-                if attempt == 0:
-                    switched = self.ensure_tiktok_search_top_tab(device_id, root=root)
-                    if switched:
-                        time.sleep(1.5)
-                        fresh_root = self._get_tiktok_ui_root(device_id, f"tt_channel_top_{attempt}")
-                        if fresh_root is not None:
-                            root = fresh_root
-                            continue
-                    else:
-                        time.sleep(2.0)
-                        continue
                 if attempt >= max_scan_attempts - 1:
                     break
                 if not self.wait_for_tiktok_foreground(device_id):
                     return False
                 print(
-                    f"[Device {device_id[:6]}] Chưa thấy Kênh target ở vùng "
+                    f"[Device {device_id[:6]}] Chưa thấy Kênh '{channel_name}' ở vùng "
                     f"hiện tại • cuộn kết quả tìm kiếm ({attempt + 1}/"
                     f"{max_scan_attempts - 1})..."
                 )
-                # Vuốt ở vùng giữa màn hình (y từ 72% lên 35%), hoàn toàn cách ly với thanh tab trên đầu (y < 25%)
+                # Vuốt ở vùng giữa màn hình (y từ 72% lên 35%), cách ly hoàn toàn với thanh tab trên đầu (y < 25%)
                 self.swipe(
                     device_id,
                     screen_width // 2,
@@ -7964,7 +7970,6 @@ class ADBController:
                 continue
 
             _, coords, matched_text = max(matches, key=lambda item: item[0])
-            # Tuyệt đối tránh nút Follow ở mép phải: ép tap_x vào vùng tên kênh/avatar (32% - 48%)
             tap_x = coords[0]
             if tap_x >= int(screen_width * 0.65):
                 tap_x = int(screen_width * 0.40)
@@ -7982,17 +7987,14 @@ class ADBController:
                 self._remember_tiktok_target_tap(device_id, channel_name)
                 return True
 
-            # Cho thêm một nhịp chờ 1.5s nếu profile mạng tải chậm
             time.sleep(1.5)
             if self.is_on_tiktok_target_profile(device_id, channel_name):
                 self._remember_tiktok_target_tap(device_id, channel_name)
                 return True
 
-            # Nếu app bị văng ra trình duyệt ngoài/webview thì thu hồi ngay
             if not self.is_tiktok_in_foreground(device_id):
                 self.recover_tiktok_if_blocked_by_captcha_or_link(device_id)
             else:
-                # Nếu chưa xác nhận đúng profile, bấm Back để ra lại tìm kiếm
                 print(
                     f"[Device {device_id[:6]}] Chưa xác nhận đúng profile '{channel_name}' • "
                     f"quay lại tìm kiếm..."
@@ -8121,18 +8123,13 @@ class ADBController:
         return candidates, has_unpinned
 
     def click_random_tiktok_profile_video(self, device_id, channel_name):
-        """Tìm và mở ưu tiên video mới nhất trên đầu profile kênh (chỉ cuộn nhẹ nếu header che khuất lưới)."""
+        """Tìm và mở ưu tiên video mới nhất trên đầu profile kênh (bắt buộc xác minh đúng profile)."""
         width, height = self.get_effective_screen_size(device_id)
         max_scan_attempts = 5
-        trusted_target_tap = self._has_recent_tiktok_target_tap(
-            device_id, channel_name
-        )
-        profile_confirmed = trusted_target_tap
+        profile_confirmed = False
         for attempt in range(max_scan_attempts):
             root = self._get_tiktok_ui_root(device_id, f"tt_profile_videos_{attempt}")
             if root is None:
-                if trusted_target_tap and attempt == 0:
-                    return self._tap_tiktok_profile_clip_fallback(device_id)
                 time.sleep(0.8)
                 continue
             if not profile_confirmed:
@@ -8140,6 +8137,10 @@ class ADBController:
                     device_id, channel_name, root=root
                 )
                 if not profile_confirmed:
+                    print(
+                        f"[Device {device_id[:6]}] Cảnh báo: Chưa xác nhận đúng profile '{channel_name}' • "
+                        f"không mở clip nhầm người khác ({attempt + 1}/{max_scan_attempts})."
+                    )
                     time.sleep(0.8)
                     continue
 
@@ -8654,17 +8655,10 @@ class ADBController:
         root = self._get_tiktok_ui_root(device_id, "tt_search_ctr")
         if root is None:
             return False
-        norm_target = self._normalize_tiktok_text(target_channel)
-        target_tokens = [t for t in norm_target.split() if len(t) >= 2]
-        if not target_tokens:
-            return False
-
         width, height = self.get_effective_screen_size(device_id)
         for node in root.iter():
-            text = self._normalize_tiktok_text(
-                f"{node.get('text', '')} {node.get('content-desc', '')}"
-            )
-            if any(token in text for token in target_tokens):
+            text = f"{node.get('text', '')} {node.get('content-desc', '')}"
+            if ui_automator_dom.match_tiktok_channel_name(text, target_channel):
                 bounds = node.get("bounds", "")
                 m = re.findall(r"\d+", bounds)
                 if len(m) >= 4:
@@ -8952,10 +8946,9 @@ class ADBController:
                 time.sleep(3.5)
                 check_cancelled()
 
-                # BẮT BUỘC: Đảm bảo chuyển đúng tab Top trước khi tìm card Kênh
-                update_status(f"[TikTok B3] Đảm bảo đang ở tab Top & Tải kết quả Kênh '{target_channel}'...")
-                self.ensure_tiktok_search_top_tab(device_id, force=True)
-                time.sleep(2.0)
+                # Quét tìm card Kênh mục tiêu thông minh qua UI Automator DOM (Top & Người dùng)
+                update_status(f"[TikTok B3] Tìm Kênh mục tiêu '{target_channel}' qua UI Automator DOM...")
+                time.sleep(1.0)
                 check_cancelled()
 
                 # Click vào card kênh mục tiêu đã cấu hình.
@@ -8970,7 +8963,7 @@ class ADBController:
             check_cancelled()
 
             update_status(
-                "[TikTok B3] Đã xác minh đúng profile • ưu tiên mở video mới nhất..."
+                f"[TikTok B3] Đã xác minh đúng profile '{target_channel}' • ưu tiên mở video mới nhất..."
             )
             clip_opened = False
             for clip_attempt in range(3):

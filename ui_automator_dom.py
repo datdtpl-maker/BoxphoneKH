@@ -147,6 +147,10 @@ def match_tiktok_channel_name(candidate: str, target: str) -> bool:
     """So khớp tên kênh mục tiêu (TikTok Channel Target Lock)."""
     if not candidate or not target:
         return False
+    if "," in target:
+        sub_targets = [t.strip() for t in target.split(",") if t.strip()]
+        return any(match_tiktok_channel_name(candidate, st) for st in sub_targets)
+
     c_tokens = clean_channel_tokens(candidate)
     t_tokens = clean_channel_tokens(target)
     if not c_tokens or not t_tokens:
@@ -155,7 +159,7 @@ def match_tiktok_channel_name(candidate: str, target: str) -> bool:
     c_compact = "".join(c_tokens)
     t_compact = "".join(t_tokens)
 
-    # 1. Trùng khớp chính xác
+    # 1. Trùng khớp chính xác chuỗi liền
     if t_compact == c_compact:
         return True
 
@@ -163,11 +167,7 @@ def match_tiktok_channel_name(candidate: str, target: str) -> bool:
     if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 25:
         return True
 
-    # 3. Handle rút gọn
-    if t_compact.startswith(c_compact) and len(c_compact) >= 8 and len(c_compact) >= len(t_compact) - 6:
-        return True
-
-    # 4. Distinctive tokens (101, skincare, pt, not, mun, ...)
+    # 3. Handle rút gọn (chỉ khi có đủ distinctive tokens nếu target có từ khóa đặc trưng)
     distinctive = {
         token for token in t_tokens
         if token in ("101", "skincare", "pt", "not", "mun", "spa", "clinic", "derma", "beauty")
@@ -175,6 +175,9 @@ def match_tiktok_channel_name(candidate: str, target: str) -> bool:
     }
     if distinctive and not distinctive.issubset(set(c_tokens)):
         return False
+
+    if t_compact.startswith(c_compact) and len(c_compact) >= 8 and len(c_compact) >= len(t_compact) - 6:
+        return True
 
     return False
 
@@ -185,6 +188,225 @@ def extract_tiktok_channel_from_url(url: str) -> Optional[str]:
         return None
     m = re.search(r"@([a-zA-Z0-9_\.\-]+)", url)
     return m.group(1) if m else None
+
+
+def find_tiktok_search_channel_card(
+    root: Optional[ET.Element], width: int, height: int, target_channel: str
+) -> Dict[str, Any]:
+    """Tìm chính xác card kênh TikTok mục tiêu trong trang kết quả tìm kiếm qua DOM.
+
+    Bao gồm:
+    - Nhận diện tab hiện tại (Top, Người dùng/Users, Âm thanh, etc.)
+    - Tọa độ chuyển tab Người dùng (nếu đang ở Top hoặc tab khác)
+    - Tọa độ chuyển tab Top (nếu cần)
+    - Nhận diện card kênh khớp target_channel (qua Display Name hoặc @handle)
+    - Tọa độ tap an toàn vào card (vùng tên/avatar 35-45%, tuyệt đối tránh nút Follow ở >=70%)
+    - Đếm số lượng card tài khoản nhìn thấy trên màn hình
+    """
+    res: Dict[str, Any] = {
+        "matched": False,
+        "card_coords": None,
+        "matched_name": "",
+        "current_tab": "unknown",
+        "top_tab_coords": None,
+        "users_tab_coords": None,
+        "visible_user_cards": 0,
+    }
+    if root is None or not target_channel:
+        return res
+
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    tab_y_min = int(height * 0.05)
+    tab_y_max = int(height * 0.22)
+    search_bar_bottom = int(height * 0.14)
+
+    # 1. Phát hiện các Tab trên dải điều hướng (Top, Người dùng / Users, ...)
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
+            continue
+        _, y1, _, y2, cx, cy = b_info
+        if not (tab_y_min <= y1 <= tab_y_max):
+            continue
+
+        raw_txt = f"{elem.get('text', '')} {elem.get('content-desc', '')}"
+        norm_t = normalize_tiktok_identity(raw_txt)
+        if not norm_t:
+            continue
+
+        # Kiểm tra selected trên chính node hoặc container cha
+        is_selected = (
+            elem.get("selected", "").casefold() == "true"
+            or elem.get("checked", "").casefold() == "true"
+        )
+        curr = parent_map.get(elem)
+        for _ in range(3):
+            if curr is None:
+                break
+            if curr.get("selected", "").casefold() == "true" or curr.get("checked", "").casefold() == "true":
+                is_selected = True
+                break
+            curr = parent_map.get(curr)
+
+        # Tab Top / Hàng đầu
+        if norm_t in ("top", "op", "hangdau") or (norm_t.endswith("op") and norm_t not in ("shop", "cuahang")):
+            res["top_tab_coords"] = (cx, cy)
+            if is_selected:
+                res["current_tab"] = "top"
+
+        # Tab Người dùng / Users / Tài khoản
+        if any(k in norm_t for k in ("nguoidung", "users", "user", "taikhoan", "people")):
+            res["users_tab_coords"] = (cx, cy)
+            if is_selected:
+                res["current_tab"] = "users"
+
+    matches = []
+
+    # 2. Quét các card kênh / user trên màn hình
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        if not b_info or not is_bounds_visible_on_screen(b_info, width, height):
+            continue
+        x1, y1, x2, y2, cx, cy = b_info
+
+        # Tuyệt đối bỏ qua vùng tìm kiếm trên đầu màn hình (search bar, gợi ý tìm kiếm)
+        if cy <= search_bar_bottom:
+            continue
+
+        # Bỏ qua edittext tìm kiếm
+        cls_name = elem.get("class", "").casefold()
+        rid = elem.get("resource-id", "").casefold()
+        if "edittext" in cls_name or "search_edit" in rid or "search_input" in rid or "search_src_text" in rid:
+            continue
+
+        # Đếm các card user dựa trên nút Follow
+        txt_val = normalize_text(elem.get("text", ""))
+        desc_val = normalize_text(elem.get("content-desc", ""))
+        if any(cue in txt_val or cue in desc_val for cue in ("follow", "theo dõi", "đang follow", "đã follow", "bạn bè")):
+            if cx > width * 0.60:
+                res["visible_user_cards"] += 1
+
+        # Trích xuất chuỗi danh tính
+        text_candidates = [elem.get("text", ""), elem.get("content-desc", "")]
+        for raw_val in text_candidates:
+            if not raw_val or len(raw_val.strip()) < 2:
+                continue
+
+            # So khớp danh tính với target_channel
+            is_matched = match_tiktok_channel_name(raw_val, target_channel)
+            if not is_matched:
+                is_matched = (normalize_tiktok_identity(raw_val) == normalize_tiktok_identity(target_channel))
+
+            if is_matched:
+                # Đảm bảo phần tử thuộc vùng card kết quả (không phải gợi ý bàn phím ở đáy)
+                if y1 > height * 0.88 and not res["visible_user_cards"]:
+                    continue
+
+                curr_click = elem
+                while curr_click is not None and curr_click.get("clickable", "").casefold() != "true":
+                    curr_click = parent_map.get(curr_click)
+
+                target_elem = curr_click if curr_click is not None else elem
+                target_b_info = parse_bounds(target_elem.get("bounds", "")) or b_info
+
+                card_height_threshold = max(360, int(height * 0.18))
+                card_height = target_b_info[3] - target_b_info[1]
+                if card_height > card_height_threshold:
+                    tap_x = cx
+                    tap_y = cy
+                else:
+                    tap_x = target_b_info[4]
+                    tap_y = target_b_info[5]
+
+                # Tọa độ tap an toàn: x nằm ở giữa hoặc vùng tên kênh (tránh nút Follow ở >= 65%)
+                if tap_x >= int(width * 0.65):
+                    tap_x = int(width * 0.40)
+                elif tap_x < int(width * 0.20):
+                    tap_x = int(width * 0.35)
+                matches.append((tap_x, tap_y, raw_val))
+
+    if matches:
+        best_tap = min(matches, key=lambda m: m[1])
+        res["matched"] = True
+        res["card_coords"] = (best_tap[0], best_tap[1])
+        res["matched_name"] = best_tap[2]
+
+    return res
+
+
+def is_tiktok_target_profile_dom(
+    root: Optional[ET.Element], width: int, height: int, target_channel: str
+) -> bool:
+    """Xác minh chính xác qua DOM đã mở đúng Profile của Kênh TikTok mục tiêu.
+
+    Yêu cầu:
+    1. Đã rời khỏi trang tìm kiếm (không còn ô search input / tab bar kết quả tìm kiếm).
+    2. Có các nút hành động của profile (Follow, Nhắn tin, Chỉnh sửa hồ sơ, Video, etc.).
+    3. Tên kênh hoặc @handle hiển thị trong phần Header của Profile (y <= 42% màn hình)
+       phải khớp target_channel (không lấy caption video ở dưới).
+    """
+    if root is None or not target_channel:
+        return False
+
+    has_search_input = False
+    has_search_results_marker = False
+    has_profile_action = False
+    has_target_identity = False
+    video_nodes = 0
+
+    tab_y_min = int(height * 0.05)
+    tab_y_max = int(height * 0.22)
+    header_y_max = int(height * 0.42)
+
+    for elem in root.iter():
+        b_info = parse_bounds(elem.get("bounds", ""))
+        elem_y = b_info[5] if b_info else None
+
+        cls_name = elem.get("class", "").casefold()
+        rid = elem.get("resource-id", "").casefold()
+        txt = normalize_text(elem.get("text", ""))
+        desc = normalize_text(elem.get("content-desc", ""))
+        combined = f"{txt} {desc}"
+
+        # 1. Kiểm tra ô search input
+        if "edittext" in cls_name and (elem_y is None or elem_y < int(height * 0.18)):
+            has_search_input = True
+
+        # 2. Kiểm tra tab bar của kết quả tìm kiếm
+        if elem_y is None or (tab_y_min <= elem_y <= tab_y_max):
+            if any(k in txt or k in desc for k in ("người dùng", "users", "photos", "ảnh", "cửa hàng", "âm thanh")):
+                has_search_results_marker = True
+
+        # 3. Kiểm tra danh tính kênh trong phần Header (y <= 42% chiều cao màn hình)
+        if elem_y is None or elem_y <= header_y_max:
+            for val in (elem.get("text", ""), elem.get("content-desc", "")):
+                if not val or len(val.strip()) < 2:
+                    continue
+                if match_tiktok_channel_name(val, target_channel):
+                    has_target_identity = True
+                elif normalize_tiktok_identity(val) == normalize_tiktok_identity(target_channel):
+                    has_target_identity = True
+
+        # 4. Kiểm tra nút hành động profile
+        if any(
+            k in combined
+            for k in (
+                "follow", "theo dõi", "đang follow", "đã follow", "đang theo dõi",
+                "message", "nhắn tin", "tin nhắn", "chỉnh sửa hồ sơ", "edit profile",
+                "chia sẻ hồ sơ", "share profile", "bài viết", "repost",
+            )
+        ):
+            has_profile_action = True
+
+        if "user_video_view" in rid or rid.endswith(":id/erf"):
+            video_nodes += 1
+
+    return (
+        has_target_identity
+        and not has_search_input
+        and not has_search_results_marker
+        and (has_profile_action or video_nodes >= 1)
+    )
 
 
 # ==============================================================================

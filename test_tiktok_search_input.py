@@ -1167,15 +1167,15 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, x, y: taps.append((x, y))
         )
 
-        self.assertTrue(
+        self.assertFalse(
             self.controller.find_and_click_tiktok_channel(
                 "device-ui-dump-busy", "Khai Hoan Skincare"
             )
         )
         self.assertEqual(
-            [(410, 499)],
+            [],
             taps,
-            "Khi XML bận phải tap thẳng vùng tên kênh trên kết quả Top",
+            "Khi XML bận tuyệt đối không tap mù tọa độ để tránh bấm nhầm người khác",
         )
 
     @patch("adb_controller.random.choice", side_effect=lambda values: values[0])
@@ -1196,20 +1196,20 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda _device_id, x, y: taps.append((x, y))
         )
 
-        self.assertTrue(
+        self.assertFalse(
             self.controller.find_and_click_tiktok_channel(
                 "device-ui-dump-busy", "Khai Hoan Skincare"
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             self.controller.click_random_tiktok_profile_video(
                 "device-ui-dump-busy", "Khai Hoan Skincare"
             )
         )
         self.assertEqual(
-            [(410, 499), (194, 1305)],
+            [],
             taps,
-            "Phải tap vùng tên kênh rồi tap trực tiếp clip trong lưới",
+            "Tuyệt đối không tap clip khi chưa xác minh được profile đúng kênh mục tiêu",
         )
 
     @patch("adb_controller.random.choice", side_effect=lambda values: values[0])
@@ -1234,7 +1234,7 @@ class TikTokSearchInputTests(unittest.TestCase):
             lambda *_args, **_kwargs: swipes.append("reveal-grid")
         )
 
-        self.assertTrue(
+        self.assertFalse(
             self.controller.find_and_click_tiktok_channel(
                 "device-menu-not-player", "Khai Hoan Skincare"
             )
@@ -1244,12 +1244,7 @@ class TikTokSearchInputTests(unittest.TestCase):
                 "device-menu-not-player", "Khai Hoan Skincare"
             )
         )
-        self.assertEqual((410, 499), taps[0])
-        self.assertTrue(
-            all(y >= int(1920 * 0.60) for _, y in taps[1:]),
-            "Fallback clip không được tap vùng sort/header phía trên",
-        )
-        self.assertGreaterEqual(len(swipes), 1)
+        self.assertEqual([], taps)
 
     def test_profile_verifier_rejects_target_mentioned_only_in_bio(self):
         wrong_profile_root = ET.fromstring(
@@ -2081,6 +2076,170 @@ class TikTokSearchInputTests(unittest.TestCase):
 
         self.assertTrue(switched)
         self.assertEqual([(230, 190)], taps)  # Tâm của tab 'op' (Top) [180,160][280,220]
+
+
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_channel_search_rejects_wrong_candidates_from_user_screenshot(self, _sleep):
+        """Khải Hoàn & 101 Nốt Mụn tuyệt đối không click nhầm các tài khoản KHAI HOAN, Hoàn khải, KHAIHOAN STORE trên tab Người dùng."""
+        wrong_users_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[132,66][888,144]" />
+          <node class="android.widget.TextView" text="Người dùng" bounds="[220,160][420,230]" selected="true" />
+          
+          <node class="android.widget.RelativeLayout" bounds="[0,250][1080,450]" clickable="true">
+            <node class="android.widget.TextView" text="KHAI HOAN" bounds="[200,280][500,340]" />
+            <node class="android.widget.TextView" text="@nguyn.cng7947" bounds="[200,345][550,395]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,300][1040,390]" />
+          </node>
+          <node class="android.widget.RelativeLayout" bounds="[0,460][1080,660]" clickable="true">
+            <node class="android.widget.TextView" text="Hoàn khải" bounds="[200,490][500,550]" />
+            <node class="android.widget.TextView" text="@hoankhai37" bounds="[200,555][550,605]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,510][1040,600]" />
+          </node>
+          <node class="android.widget.RelativeLayout" bounds="[0,670][1080,870]" clickable="true">
+            <node class="android.widget.TextView" text="Khải Hoàn" bounds="[200,700][500,760]" />
+            <node class="android.widget.TextView" text="@duy.hong5684" bounds="[200,765][550,815]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,720][1040,810]" />
+          </node>
+          <node class="android.widget.RelativeLayout" bounds="[0,880][1080,1080]" clickable="true">
+            <node class="android.widget.TextView" text="KHAIHOAN STORE" bounds="[200,910][650,970]" />
+            <node class="android.widget.TextView" text="@khaihoan.store" bounds="[200,975][550,1025]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,930][1040,1020]" />
+          </node>
+        </hierarchy>
+        """)
+
+        taps = []
+        swipes = []
+        self.controller._get_tiktok_ui_root = lambda *_args: wrong_users_root
+        self.controller.tap = lambda _dev, x, y: taps.append((x, y))
+        self.controller.swipe = lambda *_args, **_kwargs: swipes.append("scroll")
+        self.controller.get_effective_screen_size = lambda _dev: (1080, 2400)
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
+
+        res = self.controller.find_and_click_tiktok_channel("dev-wrong", "Khải Hoàn & 101 Nốt Mụn")
+        self.assertFalse(res, "Không được click vào các kênh khác không có đủ token 101, nốt, mụn")
+        self.assertEqual([], taps, "Không được phát sinh tap vào card tài khoản sai")
+        self.assertGreaterEqual(len(swipes), 1, "Phải cuộn để tiếp tục tìm kiếm")
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_channel_search_clicks_exact_khai_hoan_101_not_mun(self, _sleep):
+        """Khải Hoàn & 101 Nốt Mụn tìm thấy card có handle @khaihoan.101notmun -> tap và vào profile."""
+        search_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[132,66][888,144]" />
+          <node class="android.widget.TextView" text="Người dùng" bounds="[220,160][420,230]" selected="true" />
+          
+          <node class="android.widget.RelativeLayout" bounds="[0,400][1080,620]" clickable="true">
+            <node class="android.widget.ImageView" bounds="[40,420][180,560]" />
+            <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[200,430][750,490]" />
+            <node class="android.widget.TextView" text="@khaihoan.101notmun" bounds="[200,495][600,545]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,440][1040,530]" />
+          </node>
+        </hierarchy>
+        """)
+
+        profile_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[200,200][880,280]" />
+          <node class="android.widget.TextView" text="@khaihoan.101notmun" bounds="[300,290][780,340]" />
+          <node class="android.widget.Button" text="Follow" bounds="[300,360][780,440]" />
+          <node class="android.widget.RelativeLayout" resource-id="com.ss.android.ugc.trill:id/user_video_view" bounds="[0,900][360,1380]" />
+        </hierarchy>
+        """)
+
+        roots = iter([search_root, profile_root])
+        taps = []
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots, profile_root)
+        self.controller.tap = lambda _dev, x, y: taps.append((x, y))
+        self.controller.get_effective_screen_size = lambda _dev: (1080, 2400)
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
+
+        res = self.controller.find_and_click_tiktok_channel("dev-exact", "Khải Hoàn & 101 Nốt Mụn")
+        self.assertTrue(res)
+        self.assertEqual([(540, 510)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_channel_search_clicks_exact_khai_hoan_skincare_pt(self, _sleep):
+        """Khải Hoàn Skincare PT tìm thấy card có handle @khaihoanskincare -> tap và vào profile."""
+        search_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[132,66][888,144]" />
+          <node class="android.widget.TextView" text="Người dùng" bounds="[220,160][420,230]" selected="true" />
+          
+          <node class="android.widget.RelativeLayout" bounds="[0,400][1080,620]" clickable="true">
+            <node class="android.widget.ImageView" bounds="[40,420][180,560]" />
+            <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[200,430][750,490]" />
+            <node class="android.widget.TextView" text="@khaihoanskincare" bounds="[200,495][600,545]" />
+            <node class="android.widget.Button" text="Follow" bounds="[820,440][1040,530]" />
+          </node>
+        </hierarchy>
+        """)
+
+        profile_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn Skincare PT" bounds="[200,200][880,280]" />
+          <node class="android.widget.TextView" text="@khaihoanskincare" bounds="[300,290][780,340]" />
+          <node class="android.widget.Button" text="Follow" bounds="[300,360][780,440]" />
+          <node class="android.widget.RelativeLayout" resource-id="com.ss.android.ugc.trill:id/user_video_view" bounds="[0,900][360,1380]" />
+        </hierarchy>
+        """)
+
+        roots = iter([search_root, profile_root])
+        taps = []
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots, profile_root)
+        self.controller.tap = lambda _dev, x, y: taps.append((x, y))
+        self.controller.get_effective_screen_size = lambda _dev: (1080, 2400)
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
+
+        res = self.controller.find_and_click_tiktok_channel("dev-exact-skincare", "Khải Hoàn Skincare PT")
+        self.assertTrue(res)
+        self.assertEqual([(540, 510)], taps)
+
+    @patch("adb_controller.time.sleep", return_value=None)
+    def test_tiktok_channel_search_switches_from_top_to_users_tab(self, _sleep):
+        """Khi ở tab Top không có card kênh, tự động chuyển sang tab Người dùng và quét tiếp."""
+        top_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Top" bounds="[60,160][180,230]" selected="true" />
+          <node class="android.widget.TextView" text="Người dùng" bounds="[220,160][420,230]" selected="false" />
+          <node class="android.widget.TextView" text="Video chung chung" bounds="[100,500][800,600]" />
+        </hierarchy>
+        """)
+
+        users_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Top" bounds="[60,160][180,230]" selected="false" />
+          <node class="android.widget.TextView" text="Người dùng" bounds="[220,160][420,230]" selected="true" />
+          <node class="android.widget.RelativeLayout" bounds="[0,400][1080,620]" clickable="true">
+            <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[200,430][750,490]" />
+            <node class="android.widget.TextView" text="@khaihoan.101notmun" bounds="[200,495][600,545]" />
+          </node>
+        </hierarchy>
+        """)
+
+        profile_root = ET.fromstring("""
+        <hierarchy>
+          <node class="android.widget.TextView" text="Khải Hoàn &amp; 101 Nốt Mụn" bounds="[200,200][880,280]" />
+          <node class="android.widget.TextView" text="@khaihoan.101notmun" bounds="[300,290][780,340]" />
+          <node class="android.widget.Button" text="Follow" bounds="[300,360][780,440]" />
+          <node class="android.widget.RelativeLayout" resource-id="com.ss.android.ugc.trill:id/user_video_view" bounds="[0,900][360,1380]" />
+        </hierarchy>
+        """)
+
+        roots = iter([top_root, users_root, profile_root])
+        taps = []
+        self.controller._get_tiktok_ui_root = lambda *_args: next(roots, profile_root)
+        self.controller.tap = lambda _dev, x, y: taps.append((x, y))
+        self.controller.get_effective_screen_size = lambda _dev: (1080, 2400)
+        self.controller.wait_for_tiktok_foreground = lambda *_args, **_kwargs: True
+
+        res = self.controller.find_and_click_tiktok_channel("dev-switch", "Khải Hoàn & 101 Nốt Mụn")
+        self.assertTrue(res)
+        # Tap 1: Bấm tab Người dùng tại tâm [220,160][420,230] -> (320, 195)
+        # Tap 2: Bấm card kênh mục tiêu tại (540, 510)
+        self.assertEqual([(320, 195), (540, 510)], taps)
 
 
 if __name__ == "__main__":
