@@ -144,7 +144,17 @@ def normalize_tiktok_identity(text: str) -> str:
 
 
 def match_tiktok_channel_name(candidate: str, target: str) -> bool:
-    """So khớp tên kênh mục tiêu (TikTok Channel Target Lock)."""
+    """So khớp tên kênh mục tiêu (TikTok Channel Target Lock).
+
+    Quy tắc an toàn tuyệt đối:
+    1. Hỗ trợ đa mục tiêu (phân tách bởi dấu phẩy).
+    2. Bảo toàn thứ tự từ khóa: 'khai' bắt buộc xuất hiện trước 'hoan', từ chối 100% tên đảo 'Hoàn khải'.
+    3. Kiểm tra token đặc trưng:
+       - 'Khải Hoàn Skincare PT' -> bắt buộc có 'skincare', 'pt', 'derma', hoặc 'skin'.
+       - 'Khải Hoàn & 101 Nốt Mụn' -> bắt buộc có '101' và ('not' hoặc 'mun').
+    4. Khớp chính xác tên hiển thị hoặc @handle (ví dụ @khaihoan.101notmun, khaihoanskincare).
+    5. Từ chối 100% tài khoản nhái, tài khoản xe ba bánh, hoa lâm, store khác (@hoankhai37, etc.).
+    """
     if not candidate or not target:
         return False
     if "," in target:
@@ -159,23 +169,46 @@ def match_tiktok_channel_name(candidate: str, target: str) -> bool:
     c_compact = "".join(c_tokens)
     t_compact = "".join(t_tokens)
 
-    # 1. Trùng khớp chính xác chuỗi liền
+    # 1. Trùng khớp chính xác chuỗi liền (có/không dấu)
     if t_compact == c_compact:
         return True
 
-    # 2. Candidate bắt đầu bằng target (ví dụ thêm Official, Shop, etc.)
-    if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 25:
+    # 2. Xử lý @handle hoặc tên không dấu chuẩn
+    c_id = normalize_tiktok_identity(candidate)
+    t_id = normalize_tiktok_identity(target)
+    if c_id == t_id or c_id.lstrip("@") == t_id:
         return True
 
-    # 3. Handle rút gọn (chỉ khi có đủ distinctive tokens nếu target có từ khóa đặc trưng)
-    distinctive = {
-        token for token in t_tokens
-        if token in ("101", "skincare", "pt", "not", "mun", "spa", "clinic", "derma", "beauty")
-        or token.isdigit()
-    }
-    if distinctive and not distinctive.issubset(set(c_tokens)):
-        return False
+    # 3. Kiểm tra thứ tự xuất hiện của 'khai' và 'hoan'
+    # Nếu target có 'khai' và 'hoan', candidate PHẢI có 'khai' xuất hiện TRƯỚC 'hoan'
+    if "khai" in t_tokens and "hoan" in t_tokens:
+        if "khai" not in c_tokens or "hoan" not in c_tokens:
+            if "khaihoan" not in c_compact:
+                return False
+        else:
+            if c_tokens.index("khai") > c_tokens.index("hoan"):
+                # Đảo thứ tự: 'hoan khai' -> TỪ CHỐI 100%
+                return False
 
+    # 4. Kiểm tra distinctive tokens theo từng target cụ thể
+    # A) Target 'Khải Hoàn Skincare PT'
+    if any(k in t_tokens for k in ("skincare", "pt")):
+        has_skincare = any(k in c_tokens for k in ("skincare", "skin", "pt", "derma")) or ("skincare" in c_compact)
+        if not has_skincare:
+            return False
+
+    # B) Target 'Khải Hoàn & 101 Nốt Mụn'
+    if any(k in t_tokens for k in ("101", "not", "mun")):
+        has_101 = ("101" in c_tokens) or ("101" in c_compact)
+        has_mun = any(k in c_tokens for k in ("not", "mun")) or ("mun" in c_compact)
+        if not (has_101 and has_mun):
+            return False
+
+    # 5. Candidate bắt đầu bằng target (ví dụ thêm Official, Shop, etc.)
+    if c_compact.startswith(t_compact) and len(c_compact) <= len(t_compact) + 20:
+        return True
+
+    # 6. Target bắt đầu bằng candidate (handle rút gọn, tối thiểu 8 ký tự)
     if t_compact.startswith(c_compact) and len(c_compact) >= 8 and len(c_compact) >= len(t_compact) - 6:
         return True
 
@@ -342,8 +375,9 @@ def is_tiktok_target_profile_dom(
     Yêu cầu:
     1. Đã rời khỏi trang tìm kiếm (không còn ô search input / tab bar kết quả tìm kiếm).
     2. Có các nút hành động của profile (Follow, Nhắn tin, Chỉnh sửa hồ sơ, Video, etc.).
-    3. Tên kênh hoặc @handle hiển thị trong phần Header của Profile (y <= 42% màn hình)
+    3. Tên kênh hoặc @handle hiển thị trong phần Header của Profile (y <= 35% màn hình)
        phải khớp target_channel (không lấy caption video ở dưới).
+    4. Tuyệt đối từ chối 100% nếu tiêu đề profile là tên đảo (Hoàn khải), tài khoản lạ (@hoankhai37).
     """
     if root is None or not target_channel:
         return False
@@ -352,11 +386,12 @@ def is_tiktok_target_profile_dom(
     has_search_results_marker = False
     has_profile_action = False
     has_target_identity = False
+    has_wrong_identity = False
     video_nodes = 0
 
     tab_y_min = int(height * 0.05)
     tab_y_max = int(height * 0.22)
-    header_y_max = int(height * 0.42)
+    header_y_max = int(height * 0.35)
 
     for elem in root.iter():
         b_info = parse_bounds(elem.get("bounds", ""))
@@ -377,11 +412,15 @@ def is_tiktok_target_profile_dom(
             if any(k in txt or k in desc for k in ("người dùng", "users", "photos", "ảnh", "cửa hàng", "âm thanh")):
                 has_search_results_marker = True
 
-        # 3. Kiểm tra danh tính kênh trong phần Header (y <= 42% chiều cao màn hình)
+        # 3. Kiểm tra danh tính kênh trong phần Header (y <= 35% chiều cao màn hình)
         if elem_y is None or elem_y <= header_y_max:
             for val in (elem.get("text", ""), elem.get("content-desc", "")):
                 if not val or len(val.strip()) < 2:
                     continue
+                v_clean = normalize_tiktok_identity(val)
+                # Phát hiện tài khoản đảo tên hoặc tài khoản nhái rõ ràng trong header
+                if "hoankhai" in v_clean and "khaihoan" not in v_clean:
+                    has_wrong_identity = True
                 if match_tiktok_channel_name(val, target_channel):
                     has_target_identity = True
                 elif normalize_tiktok_identity(val) == normalize_tiktok_identity(target_channel):
@@ -403,6 +442,7 @@ def is_tiktok_target_profile_dom(
 
     return (
         has_target_identity
+        and not has_wrong_identity
         and not has_search_input
         and not has_search_results_marker
         and (has_profile_action or video_nodes >= 1)

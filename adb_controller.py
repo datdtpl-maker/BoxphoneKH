@@ -7535,7 +7535,13 @@ class ADBController:
             # Tên target phải xuất hiện trong phần Header Profile (y <= 42%).
             # Tuyệt đối không dùng caption/bio của video ở dưới để tránh nhận nhầm profile khác.
             target_clean = target.replace(" ", "")
-            if (elem_y is None or elem_y <= header_y_max) and target and any(
+            has_wrong_identity = False
+            for v in identity_values:
+                v_clean = v.replace(" ", "").lstrip("@")
+                if "hoankhai" in v_clean and "khaihoan" not in v_clean:
+                    has_wrong_identity = True
+
+            if (elem_y is None or elem_y <= header_y_max) and target and not has_wrong_identity and any(
                 value == target
                 or value.startswith(f"{target} ")
                 or (target_clean and value.replace(" ", "").lstrip("@") == target_clean)
@@ -7774,10 +7780,10 @@ class ADBController:
                     self._remember_tiktok_target_tap(device_id, channel_name)
                     return True
 
-                # Nếu sau khi tap mà không phải profile mục tiêu, lập tức quay lại tìm kiếm
+                # Nếu sau khi tap mà không phải profile mục tiêu, lập tức quay lại tìm kiếm ngay
                 print(
                     f"[Device {device_id[:6]}] Chưa xác nhận đúng profile '{channel_name}' • "
-                    f"quay lại tìm kiếm ngay..."
+                    f"lập tức quay lại tìm kiếm..."
                 )
                 self.keyevent(device_id, 4)
                 time.sleep(1.5)
@@ -7852,10 +7858,8 @@ class ADBController:
                 target_elem = clickable if clickable is not None else elem
                 target_class = target_elem.get("class", "").lower()
                 target_resource_id = target_elem.get("resource-id", "").lower()
-                coords = self._element_center(target_elem)
                 identity_coords = self._element_center(elem)
-                inferred_identity_coords = False
-                if identity_coords is None:
+                if identity_coords is None and cue_centers:
                     viable_cues = [
                         (cue_x, cue_y)
                         for cue_x, cue_y in cue_centers
@@ -7864,88 +7868,20 @@ class ADBController:
                     if viable_cues:
                         _, cue_y = min(viable_cues, key=lambda point: point[1])
                         identity_coords = (int(screen_width * 0.38), cue_y)
-                        inferred_identity_coords = True
-                nearby_profile_row_cue = bool(
-                    identity_coords and (
-                        inferred_identity_coords
-                        or any(
-                            abs(cue_y - identity_coords[1])
-                            <= max(120, int(screen_height * 0.09))
-                            for _, cue_y in cue_centers
-                        )
-                    )
-                )
 
-                clickable_bounds = re.match(
-                    r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
-                    target_elem.get("bounds", ""),
-                )
-                card_height = (
-                    int(clickable_bounds.group(4)) - int(clickable_bounds.group(2))
-                    if clickable_bounds else 0
-                )
-                card_height_threshold = max(360, int(screen_height * 0.18))
-                compact_identity_card = bool(
-                    inferred_identity_coords or (clickable_bounds and card_height <= card_height_threshold)
-                )
-                clickable_is_too_broad = bool(clickable_bounds and card_height > card_height_threshold)
-                if (
-                    identity_coords
-                    and (
-                        clickable_is_too_broad
-                        or "search" in target_resource_id
-                        or (nearby_profile_row_cue and not compact_identity_card)
-                    )
-                ):
-                    target_elem = elem
-                    target_class = elem.get("class", "").lower()
-                    target_resource_id = elem.get("resource-id", "").lower()
-                    coords = identity_coords
-                identity_markers = (
-                    "username", "user_name", "nickname", "profile",
-                    "account", "author", "title",
-                )
-                has_identity_resource = any(
-                    marker in resource_id or marker in target_resource_id
-                    for marker in identity_markers
-                )
-                subtree_texts = {
-                    self._normalize_tiktok_text(
-                        f"{node.get('text', '')} "
-                        f"{node.get('content-desc', '')}"
-                    )
-                    for node in target_elem.iter()
-                }
-                has_profile_row_cue = any(
-                    any(cue in value for cue in profile_row_cues)
-                    for value in subtree_texts
-                )
-                if (
-                    coords
-                    and coords[1] > search_bar_bottom
-                    and "edittext" not in target_class
-                    and "search" not in target_resource_id
-                    and (
-                        has_identity_resource
-                        or compact_identity_card
-                        or exact_identity
-                        or has_profile_row_cue
-                        or nearby_profile_row_cue
-                    )
-                    and (
-                        exact_identity
-                        or fuzzy_identity
-                        or has_identity_resource
-                        or has_profile_row_cue
-                    )
-                ):
-                    score = 20 if exact_identity else (16 if fuzzy_identity else 10)
-                    if has_profile_row_cue or nearby_profile_row_cue:
-                        score += 5
-                    final_coords = coords
-                    if final_coords and final_coords[0] >= int(screen_width * 0.72):
-                        final_coords = (int(screen_width * 0.38), final_coords[1])
-                    matches.append((score, final_coords, target))
+                coords = identity_coords or self._element_center(target_elem)
+                if coords is None:
+                    continue
+
+                is_search_bar = any(k in target_resource_id for k in ("search_edit", "search_input", "search_src_text", "search_box", "search_bar")) or "edittext" in target_class
+                if coords[1] <= search_bar_bottom or is_search_bar:
+                    continue
+
+                score = 25 if exact_identity else (20 if fuzzy_identity else 0)
+                if score == 0:
+                    continue
+                final_coords = (int(screen_width * 0.38), coords[1])
+                matches.append((score, final_coords, target))
 
             if not matches:
                 if attempt >= max_scan_attempts - 1:
@@ -7970,11 +7906,7 @@ class ADBController:
                 continue
 
             _, coords, matched_text = max(matches, key=lambda item: item[0])
-            tap_x = coords[0]
-            if tap_x >= int(screen_width * 0.65):
-                tap_x = int(screen_width * 0.40)
-            elif tap_x < int(screen_width * 0.20):
-                tap_x = int(screen_width * 0.35)
+            tap_x = int(screen_width * 0.38)
             tap_y = coords[1]
             print(
                 f"[Device {device_id[:6]}] Click card Kênh TikTok "
@@ -7997,7 +7929,7 @@ class ADBController:
             else:
                 print(
                     f"[Device {device_id[:6]}] Chưa xác nhận đúng profile '{channel_name}' • "
-                    f"quay lại tìm kiếm..."
+                    f"lập tức quay lại tìm kiếm..."
                 )
                 self.keyevent(device_id, 4)
                 time.sleep(1.5)
@@ -8932,6 +8864,10 @@ class ADBController:
 
                 # Quét tìm card Kênh mục tiêu thông minh qua UI Automator DOM (Top & Người dùng)
                 update_status(f"[TikTok B3] Tìm Kênh mục tiêu '{target_channel}' qua UI Automator DOM...")
+                try:
+                    self.ensure_tiktok_search_top_tab(device_id)
+                except Exception:
+                    pass
                 time.sleep(1.0)
                 check_cancelled()
 
@@ -9038,6 +8974,8 @@ class ADBController:
                             update_status(f"[TikTok B3] Phát hiện video không thuộc Kênh '{target_channel}' • Quay lại mở đúng video của Kênh...")
                             self.keyevent(device_id, 4)
                             time.sleep(1.2)
+                            if not self.is_on_tiktok_target_profile(device_id, target_channel):
+                                self.find_and_click_tiktok_channel(device_id, target_channel)
                             self.click_random_tiktok_profile_video(device_id, target_channel)
                 except Exception:
                     pass
