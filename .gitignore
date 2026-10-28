@@ -21,9 +21,8 @@ parse_results.txt
 window_dump.xml
 window_dump_new.xml
 
-# Local project metadata & internal handoff
+# Local project metadata
 .codegraph/
-handoff.md
 
 # Local diagnostic scripts containing machine-specific paths/serials
 extract_serial_names.py
